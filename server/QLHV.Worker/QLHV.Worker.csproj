@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-QLHV.Worker-2e57ace4-a302-402b-a881-996d95fb2fca</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Hangfire.Core" Version="1.8.17" />
+    <PackageReference Include="Hangfire.SqlServer" Version="1.8.17" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+    <PackageReference Include="Polly" Version="8.5.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\QLHV.Application\QLHV.Application.csproj" />
+    <ProjectReference Include="..\QLHV.Infrastructure\QLHV.Infrastructure.csproj" />
+    <ProjectReference Include="..\QLHV.Shared\QLHV.Shared.csproj" />
+  </ItemGroup>
+</Project>

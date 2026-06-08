@@ -1,0 +1,52 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QLHV.Domain", "QLHV.Domain\QLHV.Domain.csproj", "{371BF81D-8AA0-47C7-94BB-E066A73C8CBC}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QLHV.Shared", "QLHV.Shared\QLHV.Shared.csproj", "{3485F8C0-C7C1-4752-8C74-A07414A04E42}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QLHV.Application", "QLHV.Application\QLHV.Application.csproj", "{1B7043EC-3A3A-403D-9DF0-CA7C40AE45E7}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QLHV.Infrastructure", "QLHV.Infrastructure\QLHV.Infrastructure.csproj", "{CE5CD553-37A3-414B-B995-51DE61EFDDDB}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QLHV.Api", "QLHV.Api\QLHV.Api.csproj", "{B99A4D33-23EA-451E-9FFD-E6FBC8FC04A6}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QLHV.Worker", "QLHV.Worker\QLHV.Worker.csproj", "{AFB78C87-C28B-4DB8-9C56-D2F3B9083453}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{371BF81D-8AA0-47C7-94BB-E066A73C8CBC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{371BF81D-8AA0-47C7-94BB-E066A73C8CBC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{371BF81D-8AA0-47C7-94BB-E066A73C8CBC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{371BF81D-8AA0-47C7-94BB-E066A73C8CBC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3485F8C0-C7C1-4752-8C74-A07414A04E42}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3485F8C0-C7C1-4752-8C74-A07414A04E42}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3485F8C0-C7C1-4752-8C74-A07414A04E42}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3485F8C0-C7C1-4752-8C74-A07414A04E42}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1B7043EC-3A3A-403D-9DF0-CA7C40AE45E7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1B7043EC-3A3A-403D-9DF0-CA7C40AE45E7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1B7043EC-3A3A-403D-9DF0-CA7C40AE45E7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1B7043EC-3A3A-403D-9DF0-CA7C40AE45E7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CE5CD553-37A3-414B-B995-51DE61EFDDDB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CE5CD553-37A3-414B-B995-51DE61EFDDDB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CE5CD553-37A3-414B-B995-51DE61EFDDDB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CE5CD553-37A3-414B-B995-51DE61EFDDDB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B99A4D33-23EA-451E-9FFD-E6FBC8FC04A6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B99A4D33-23EA-451E-9FFD-E6FBC8FC04A6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B99A4D33-23EA-451E-9FFD-E6FBC8FC04A6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B99A4D33-23EA-451E-9FFD-E6FBC8FC04A6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AFB78C87-C28B-4DB8-9C56-D2F3B9083453}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AFB78C87-C28B-4DB8-9C56-D2F3B9083453}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AFB78C87-C28B-4DB8-9C56-D2F3B9083453}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AFB78C87-C28B-4DB8-9C56-D2F3B9083453}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
