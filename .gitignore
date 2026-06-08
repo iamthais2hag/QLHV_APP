@@ -1,0 +1,23 @@
+# Build outputs
+bin/
+obj/
+dist/
+node_modules/
+
+# Secrets
+.env
+*.user
+appsettings.Production.json
+appsettings.Local.json
+
+# Database backups / real data
+*.bak
+*.trn
+*.mdf
+*.ldf
+
+# Temporary files
+*.tmp
+*.log
+.DS_Store
+Thumbs.db
