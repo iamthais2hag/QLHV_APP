@@ -91,6 +91,12 @@ Dry-run does not:
 
 ## Planned Mapping: HocVien
 
+> **Cập nhật Phase B1:** Ánh xạ đã được xác nhận chi tiết từ cột nguồn V2 thật
+> (trích từ script chuyển dữ liệu) trong [`hoc-vien-v2-mapping.md`](./hoc-vien-v2-mapping.md).
+> Bảng dưới đây là phiên bản Phase A ban đầu (độ tin cậy thấp hơn); hãy dùng tài liệu
+> mapping chuyên biệt làm nguồn chính. Việc chốt cuối vẫn cần `V2_schema_full.sql`
+> (hiện chưa có trong repo).
+
 Target table: `QLHV_APP.dbo.App_HocVien`.
 
 Target columns confirmed from `database/QLHV_APP_DATABASE_SCHEMA_v2_PERFORMANCE.sql`:
