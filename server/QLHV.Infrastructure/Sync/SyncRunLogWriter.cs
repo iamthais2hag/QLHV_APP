@@ -1,21 +1,22 @@
+using Dapper;
+using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Options;
 using QLHV.Application.Sync;
+using QLHV.Application.Sync.Connections;
 using QLHV.Application.Sync.Dtos;
 
 namespace QLHV.Infrastructure.Sync;
 
 /// <summary>
-/// Ghi nhật ký đồng bộ vào dbo.App_DongBoLog.
+/// Ghi nhật ký một lần chạy đồng bộ vào dbo.App_DongBoLog.
 ///
-/// PHASE B3A: CHƯA hiện thực ghi. <see cref="WriteAsync"/> ném <see cref="NotSupportedException"/>
-/// để bảo đảm dry-run/Phase B3A không ghi vào SQL Server. Câu lệnh INSERT chuẩn bị sẵn (không thực thi)
-/// nằm tại <see cref="InsertSql"/> để dùng ở Phase B3B.
+/// Chỉ ghi các trường tóm tắt an toàn (số đếm, trạng thái, thời gian, thông điệp đã làm sạch).
+/// KHÔNG ghi CCCD/GPLX thô, KHÔNG ghi mật khẩu/chuỗi kết nối/token.
+/// Chỉ được gọi ở luồng execute (không gọi trong dry-run).
 /// </summary>
 public sealed class SyncRunLogWriter : ISyncRunLogWriter
 {
-    /// <summary>
-    /// Câu lệnh INSERT chuẩn bị cho App_DongBoLog. CHƯA THỰC THI ở Phase B3A.
-    /// Tham số hóa đầy đủ; không nhúng giá trị trực tiếp.
-    /// </summary>
+    /// <summary>Câu lệnh INSERT tham số hóa cho App_DongBoLog.</summary>
     internal const string InsertSql = @"
 INSERT INTO dbo.App_DongBoLog
     (JobName, EntityType, SourceSystem, StartedAt, EndedAt, DurationMs, Status,
@@ -28,9 +29,49 @@ VALUES
      @ErrorMessage, @DetailJson, @CreatedBy);
 ";
 
-    private const string PhaseBMessage =
-        "Ghi App_DongBoLog se duoc hien thuc o Phase B3B. Phase B3A khong ghi SQL Server.";
+    private readonly IConnectionSettingsProvider _connections;
+    private readonly SyncOptions _options;
 
-    public Task<long> WriteAsync(SyncRunLogEntry entry, CancellationToken cancellationToken = default)
-        => throw new NotSupportedException(PhaseBMessage);
+    public SyncRunLogWriter(IConnectionSettingsProvider connections, IOptions<SyncOptions> options)
+    {
+        _connections = connections;
+        _options = options.Value;
+    }
+
+    public async Task<long> WriteAsync(SyncRunLogEntry entry, CancellationToken cancellationToken = default)
+    {
+        var target = await _connections.GetQlhvAppConnectionAsync(cancellationToken);
+        if (!target.IsUsable || string.IsNullOrWhiteSpace(target.ConnectionString))
+        {
+            throw new InvalidOperationException(
+                "QLHV_APP chua co cau hinh ket noi dung duoc de ghi nhat ky dong bo.");
+        }
+
+        await using var connection = new SqlConnection(target.ConnectionString);
+        var command = new CommandDefinition(
+            InsertSql,
+            new
+            {
+                entry.JobName,
+                entry.EntityType,
+                entry.SourceSystem,
+                entry.StartedAt,
+                entry.EndedAt,
+                entry.DurationMs,
+                entry.Status,
+                entry.TotalRead,
+                entry.TotalInserted,
+                entry.TotalUpdated,
+                entry.TotalSkipped,
+                entry.TotalError,
+                entry.RetryCount,
+                entry.ErrorMessage,
+                entry.DetailJson,
+                entry.CreatedBy,
+            },
+            commandTimeout: _options.TimeoutSeconds,
+            cancellationToken: cancellationToken);
+
+        return await connection.ExecuteScalarAsync<long>(command);
+    }
 }

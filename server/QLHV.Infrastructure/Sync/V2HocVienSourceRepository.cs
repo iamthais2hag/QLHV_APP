@@ -35,14 +35,17 @@ public sealed class V2HocVienSourceRepository : IV2HocVienSourceRepository
         var connectionString = await ResolveUsableV2ConnectionAsync(cancellationToken);
         var (sql, parameters) = HocVienV2SqlBuilder.BuildCount(filter.Normalized());
 
-        await using var connection = new SqlConnection(connectionString);
-        var command = new CommandDefinition(
-            sql,
-            parameters,
-            commandTimeout: _options.TimeoutSeconds,
-            cancellationToken: cancellationToken);
+        return await SyncRetryPolicyFactory.CreateDefault(_options.MaxRetryAttempts).ExecuteAsync(async ct =>
+        {
+            await using var connection = new SqlConnection(connectionString);
+            var command = new CommandDefinition(
+                sql,
+                parameters,
+                commandTimeout: _options.TimeoutSeconds,
+                cancellationToken: ct);
 
-        return await connection.ExecuteScalarAsync<int>(command);
+            return await connection.ExecuteScalarAsync<int>(command);
+        }, cancellationToken);
     }
 
     public async Task<IReadOnlyList<V2HocVienSourceRow>> ReadPageAsync(
@@ -64,15 +67,18 @@ public sealed class V2HocVienSourceRepository : IV2HocVienSourceRepository
         var connectionString = await ResolveUsableV2ConnectionAsync(cancellationToken);
         var (sql, parameters) = HocVienV2SqlBuilder.BuildPage(filter.Normalized(), offset, pageSize);
 
-        await using var connection = new SqlConnection(connectionString);
-        var command = new CommandDefinition(
-            sql,
-            parameters,
-            commandTimeout: _options.TimeoutSeconds,
-            cancellationToken: cancellationToken);
+        return await SyncRetryPolicyFactory.CreateDefault(_options.MaxRetryAttempts).ExecuteAsync(async ct =>
+        {
+            await using var connection = new SqlConnection(connectionString);
+            var command = new CommandDefinition(
+                sql,
+                parameters,
+                commandTimeout: _options.TimeoutSeconds,
+                cancellationToken: ct);
 
-        var rows = await connection.QueryAsync<V2HocVienSourceRow>(command);
-        return rows.ToList();
+            var rows = await connection.QueryAsync<V2HocVienSourceRow>(command);
+            return (IReadOnlyList<V2HocVienSourceRow>)rows.ToList();
+        }, cancellationToken);
     }
 
     /// <summary>

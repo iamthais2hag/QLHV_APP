@@ -1,32 +1,31 @@
 using QLHV.Application.Sync.Dtos;
+using QLHV.Application.Sync.Mapping;
 
 namespace QLHV.Application.Sync;
 
 /// <summary>
 /// Ghi/đối chiếu dữ liệu học viên tại đích QLHV_APP (dbo.App_HocVien).
 ///
-/// PHASE B3A: cho phép thao tác CHỈ ĐỌC (đếm, lấy tập khóa MaDK đã có) để dựng kế hoạch dry-run.
-/// Thao tác GHI (<see cref="UpsertBatchAsync"/>) CHƯA hiện thực; gọi sẽ ném lỗi để chặn ghi ngoài ý muốn.
+/// Thao tác CHỈ ĐỌC (CountAsync, GetExistingKeysAsync) dùng cho dry-run/kế hoạch.
+/// Thao tác GHI (UpsertBatchAsync) chỉ chạy ở luồng execute có kiểm soát: staging + MERGE keyed on MaDK,
+/// trong transaction, rollback khi lỗi, KHÔNG xóa vật lý. Có gác công tắc EnableTargetWrites (defense-in-depth).
 /// </summary>
 public interface IQlhvHocVienTargetRepository
 {
     /// <summary>Đếm số học viên hiện có tại đích (CHỈ ĐỌC).</summary>
     Task<int> CountAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Lấy tập khóa MaDK đã tồn tại ở đích trong số các khóa cho trước (CHỈ ĐỌC).
-    /// Dùng để phân loại Insert/Update khi dựng kế hoạch dry-run.
-    /// </summary>
+    /// <summary>Lấy tập khóa MaDK đã tồn tại ở đích trong số các khóa cho trước (CHỈ ĐỌC).</summary>
     Task<IReadOnlyCollection<string>> GetExistingKeysAsync(
         IReadOnlyCollection<string> maDks,
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Cập nhật/chèn theo lô (upsert) vào App_HocVien bằng staging + MERGE keyed on MaDK.
-    /// CHƯA hiện thực ở Phase B3A; gọi sẽ ném <see cref="NotSupportedException"/>.
+    /// Upsert một lô vào App_HocVien bằng SqlBulkCopy vào bảng tạm rồi MERGE keyed on MaDK
+    /// trong một transaction (rollback khi lỗi). Chỉ UPDATE khi V2RowHash khác; INSERT khi chưa có;
+    /// KHÔNG xóa vật lý. Ném lỗi nếu EnableTargetWrites=false.
     /// </summary>
-    Task<int> UpsertBatchAsync(
-        IReadOnlyList<V2HocVienSourceRow> rows,
-        bool dryRun,
+    Task<UpsertCounts> UpsertBatchAsync(
+        IReadOnlyList<HocVienTargetWriteModel> rows,
         CancellationToken cancellationToken = default);
 }
