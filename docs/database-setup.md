@@ -124,3 +124,17 @@ Xem mô tả từng file tại [`sql-scripts-index.md`](./sql-scripts-index.md).
 - Tổng quan kiến trúc: [`../README.md`](../README.md)
 - Backend & cấu hình secret: [`../server/README.md`](../server/README.md)
 - Quy trình không dùng GitHub: [`./NO_GITHUB_WORKFLOW.md`](./NO_GITHUB_WORKFLOW.md)
+
+## Cau hinh ket noi cho dong bo V2
+
+Phase A chi thiet ke nen tang, khong chay dong bo va khong ghi SQL Server.
+
+- Ket noi bootstrap `QLHV_APP` phai duoc cap tu bien moi truong, user-secrets, hoac cau hinh server duoc bao ve.
+- `CSDT_V1` va `CSDT_V2` ve sau se duoc cau hinh trong man hinh Admin **Cau hinh ket noi du lieu**.
+- Chi vai tro `Admin` va `Giam doc trung tam` duoc phep tao/sua/test/bat/tat cau hinh ket noi nguon.
+- Mat khau/connection string nguon phai duoc ma hoa khi luu tru.
+- Frontend chi hien thi mat khau dang mask, vi du `********`.
+- Test Connection phai tra ve ket qua da lam sach, khong lo server/user/password/full connection string.
+- Moi thao tac create/update/test/enable/disable phai ghi audit log noi bo voi du lieu da lam sach.
+
+Xem thiet ke chi tiet tai [`sync-v2-design.md`](./sync-v2-design.md).

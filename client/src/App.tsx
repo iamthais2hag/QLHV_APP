@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import AppLayout from './layout/AppLayout';
 import Dashboard from './pages/Dashboard';
 import ModulePage from './pages/ModulePage';
+import HocVienPage from './features/hoc-vien/HocVienPage';
 import { MENU_ITEMS } from './navigation/menu';
 
 export default function App() {
@@ -9,7 +10,8 @@ export default function App() {
     <Routes>
       <Route element={<AppLayout />}>
         <Route index element={<Dashboard />} />
-        {MENU_ITEMS.filter((item) => item.path !== '/').map((item) => (
+        <Route path="/hoc-vien" element={<HocVienPage />} />
+        {MENU_ITEMS.filter((item) => item.path !== '/' && item.path !== '/hoc-vien').map((item) => (
           <Route
             key={item.path}
             path={item.path}

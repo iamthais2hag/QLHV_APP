@@ -52,3 +52,7 @@ dotnet user-secrets init
 dotnet user-secrets set "ConnectionStrings:QLHV_APP" "Server=...;Database=...;User Id=...;Password=...;TrustServerCertificate=True;"
 dotnet user-secrets set "ConnectionStrings:Hangfire" "Server=...;Database=...;User Id=...;Password=...;TrustServerCertificate=True;"
 ```
+
+For Task 5 Phase A, `CSDT_V1` and `CSDT_V2` remain placeholder keys only. Real source connections will later be configured from the Admin screen **Cau hinh ket noi du lieu**, restricted to `Admin` and `Giam doc trung tam`, encrypted at rest, masked in the UI, testable through a sanitized Test Connection action, and audited for create/update/test/enable/disable.
+
+Do not commit real `CSDT_V1`, `CSDT_V2`, `QLHV_APP`, or Hangfire connection strings.
