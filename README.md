@@ -34,3 +34,15 @@ TTTC_WebSite
 - Retry: Polly
 - Cache: IMemoryCache
 - Font UI: Be Vietnam Pro
+
+## Database
+
+QLHV_APP dùng SQL Server. Các database khuyến nghị: `QLHV_APP` (trung tâm),
+`CSDT_V1` và `CSDT_V2` (nguồn, chỉ đọc / đồng bộ một chiều, dùng bản backup test).
+
+- Hướng dẫn cài đặt & khôi phục database: [`docs/database-setup.md`](docs/database-setup.md)
+- Mô tả từng script SQL: [`docs/sql-scripts-index.md`](docs/sql-scripts-index.md)
+- Phân nhóm script trong thư mục database: [`database/README.md`](database/README.md)
+
+> An toàn: không lưu mật khẩu/connection string trong repo; luôn DryRun trước khi commit;
+> chỉ chạy script chuyển dữ liệu trên database backup test, không chạy trên production.
