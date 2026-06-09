@@ -23,6 +23,7 @@ public static class DependencyInjection
         services.AddSingleton<ISyncConnectionProvider, SyncConnectionProvider>();
         services.AddScoped<IV2HocVienSourceRepository, V2HocVienSourceRepository>();
         services.AddScoped<IQlhvHocVienTargetRepository, QlhvHocVienTargetRepository>();
+        services.AddScoped<ISyncRunLogWriter, SyncRunLogWriter>();
         services.AddScoped<IHocVienSyncJob, HocVienSyncJob>();
 
         return services;

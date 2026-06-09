@@ -138,3 +138,35 @@ Before enabling real sync:
 - Implement read-only Dapper queries against V2.
 - Implement transactional target upsert/merge with rollback on error.
 - Add explicit enable switch before scheduling any Hangfire recurring job.
+
+## Phase B3A: Target upsert foundation (CHƯA thực thi ghi)
+
+Phase B3A chuẩn bị nền tảng upsert vào `QLHV_APP.dbo.App_HocVien` nhưng **không ghi SQL Server**.
+
+Thành phần (Application):
+- `HocVienTargetWriteModel`: mô hình giá trị ghi vào App_HocVien (đã áp quy tắc dữ liệu).
+- `HocVienSyncMapper`: hàm thuần ánh xạ + kiểm tra (trim, bảo toàn gốc, cảnh báo CCCD ≠ 12 số).
+- `HocVienSyncPlanner`: dựng kế hoạch dry-run (Insert/Update/Skip) từ dòng nguồn + tập khóa đích — hàm thuần, không ghi.
+- DTO kế hoạch/cảnh báo: `HocVienSyncPlanDto`, `HocVienSyncPlanItemDto`, `HocVienDataWarningDto`.
+- `SyncRunLogEntry` + `ISyncRunLogWriter`: cấu trúc ghi `App_DongBoLog` — CHƯA thực thi ghi.
+
+Thành phần (Infrastructure):
+- `QlhvHocVienTargetRepository`: CHỈ ĐỌC (`CountAsync`, `GetExistingKeysAsync`) dùng để phân loại
+  Insert/Update; `UpsertBatchAsync` ném lỗi (chưa hiện thực ghi).
+- `HocVienTargetMergeSql`: cấu trúc SqlBulkCopy (staging `#Sync_HocVien_Staging`) + `MERGE` keyed on
+  `MaDK`, UPDATE khi `V2RowHash` khác, INSERT khi chưa có, **không DELETE** (không xóa vật lý).
+  Đây là SQL chuẩn bị, **không được thực thi** ở Phase B3A.
+- `SyncRunLogWriter`: chứa `INSERT App_DongBoLog` tham số hóa (CHƯA thực thi).
+
+Quy tắc dữ liệu áp dụng: xem [`hoc-vien-data-rules.md`](./hoc-vien-data-rules.md).
+
+### Hành vi dry-run (giữ an toàn)
+- Dry-run chỉ tính kế hoạch (đọc nguồn + đối chiếu khóa đích bằng SELECT). Không INSERT/UPDATE/DELETE,
+  không SqlBulkCopy, không ghi `App_DongBoLog`.
+- Khi kết nối còn placeholder: trả về trạng thái thiếu cấu hình an toàn, không lộ chuỗi kết nối.
+
+### Cần xác nhận trước khi ghi thật (Phase B3B)
+- Quy ước `GioiTinh char(1)` và thực trạng `SoCMT` (CCCD 12 số) — ảnh hưởng cảnh báo, không chặn.
+- Công thức `V2RowHash` để phát hiện thay đổi (chọn cột tham gia hash).
+- Có áp `IsDeleted`/đánh dấu bản ghi nguồn biến mất hay không (mặc định không xóa vật lý).
+- Bật công tắc cho phép ghi (enable switch) trước khi thực thi và trước khi lập lịch Hangfire.
