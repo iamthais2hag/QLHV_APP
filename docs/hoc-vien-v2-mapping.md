@@ -96,5 +96,6 @@ Không phát hiện cột hiển thị nào thiếu chỗ lưu ở đích. `dbo.
 kết quả mỗi lần đồng bộ (`TotalRead/Inserted/Updated/Skipped/Error`, `Status`, thời gian, `DetailJson`).
 
 ## Liên quan
+- **Quy tắc chuẩn hóa/lọc dữ liệu (Phase B2.5):** [`hoc-vien-data-rules.md`](./hoc-vien-data-rules.md)
 - Thiết kế đồng bộ: [`sync-v2-design.md`](./sync-v2-design.md)
 - Cài đặt database: [`database-setup.md`](./database-setup.md)

@@ -11,6 +11,10 @@ namespace QLHV.Infrastructure.Sync;
 ///   - dbo.KhoaHoc        (MaKH, TenKH)
 /// Mọi giá trị lọc đều truyền qua tham số Dapper (parameterized) để chống SQL injection.
 /// KHÔNG có lệnh ghi (INSERT/UPDATE/DELETE/MERGE) trong lớp này.
+///
+/// Quy tắc dữ liệu (xem docs/hoc-vien-data-rules.md):
+///   - Trả về giá trị gốc; không tự chuyển CMND 9 số sang CCCD 12 số; không hardcode quy đổi GioiTinh.
+///   - Mặc định KHÔNG lọc theo TrangThai cho tới khi ý nghĩa được xác nhận chính thức.
 /// </summary>
 internal static class HocVienV2SqlBuilder
 {
