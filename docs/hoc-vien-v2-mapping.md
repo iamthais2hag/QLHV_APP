@@ -12,10 +12,9 @@ không chạy script, không ghi dữ liệu, không chứa chuỗi kết nối/
 | `database/TEST_V1_TO_V2_CHUYEN_ALL_KHOA_HOCVIEN.sql` | Cột nguồn CSDT_V2 (suy ra từ danh sách cột `INSERT INTO CSDT_V2.dbo.*`). |
 | `database/CHECK_CCCD_CONFLICT_V1_V2.sql` | Xác nhận `SoCMT` được dùng như CCCD trong nghiệp vụ. |
 
-> **`V2_schema_full.sql` KHÔNG có trong repo.** Các cột nguồn V2 dưới đây được lấy từ
-> danh sách cột thật mà script chuyển dữ liệu ghi vào `CSDT_V2.dbo.*`, nên độ tin cậy cao.
-> Tuy nhiên việc **chốt cuối cùng** vẫn cần một bản xuất schema V2 chỉ đọc
-> (`V2_schema_full.sql`) hoặc xác nhận của người quản trị CSDT.
+> **`V2_schema_full.sql` ĐÃ CÓ** tại `database/reference/V2_schema_full.sql`. Mapping dưới đây
+> đã được đối chiếu trực tiếp với DDL thật của CSDT_V2 (độ tin cậy cao). Các điểm cần lưu ý về
+> kiểu dữ liệu đã được ghi chú bên dưới.
 
 ## Bảng đích QLHV_APP
 
@@ -65,26 +64,30 @@ Trường liên quan (không nằm trong 11 cột hiển thị nhưng nên đồ
 | `V2RowHash` | hash các cột nguồn | Phát hiện thay đổi để upsert ở Phase B2. |
 | `LastSyncFromV2At` / `LastSyncStatus` / `LastSyncMessage` | sinh khi đồng bộ | Vết đồng bộ. |
 
-## Ghi chú quan trọng
+## Ghi chú quan trọng (đã đối chiếu schema thật)
 
-- **CCCD vs CMT:** `NguoiLX.SoCMT` là cột chứa số định danh hiện hành; `NguoiLX.SO_CMND_CU`
-  là số CMND cũ. Script kiểm tra trùng (`CHECK_CCCD_CONFLICT_V1_V2.sql`) dùng `SoCMT` như CCCD.
-  → Ánh xạ `SoCCCD ← SoCMT`, nhưng cần xác nhận dữ liệu thực tế đã là CCCD 12 số.
-- **Địa chỉ thường trú:** dùng cột văn bản `NguoiLX.NoiTT`. Các cột mã (`NoiTT_MaDVHC`,
-  `NoiTT_MaDVQL`) là mã đơn vị hành chính, không dùng để hiển thị địa chỉ.
+- **Kiểu dữ liệu `NgaySinh`:** `NguoiLX.NgaySinh` là `varchar(8)` dạng `yyyyMMdd`, KHÔNG phải kiểu date.
+  Truy vấn đọc dùng `TRY_CONVERT(date, nlx.NgaySinh, 112)` để chuyển sang ngày an toàn.
+- **Kiểu dữ liệu `GioiTinh`:** `NguoiLX.GioiTinh` là `char(1)`. Cần quy đổi sang "Nam"/"Nữ" ở tầng
+  hiển thị; quy ước giá trị ('1'/'0' hay 'M'/'F') còn cần xác nhận dữ liệu thực tế.
+- **`NguoiLX_HoSo` là 1 dòng / `MaDK`** (PK clustered trên `MaDK`) → giải tỏa lo ngại nhiều hồ sơ
+  trùng `MaDK`. Liên kết `NguoiLX 1—1 NguoiLX_HoSo` theo `MaDK` là an toàn.
+- **CCCD vs CMT:** `NguoiLX.SoCMT` `varchar(20)` là số định danh hiện hành; `SO_CMND_CU` là CMND cũ.
+  → Ánh xạ `SoCCCD ← SoCMT`, vẫn cần xác nhận dữ liệu đã chuẩn hóa CCCD 12 số.
+- **Địa chỉ thường trú:** dùng `NguoiLX.NoiTT` `nvarchar(50)`. Các cột `NoiTT_MaDVHC`, `NoiTT_MaDVQL`
+  là mã đơn vị hành chính, không dùng hiển thị.
 - **GPLX đã có vs GPLX được cấp:** "đã có" lấy từ `NguoiLX_HoSo.SoGPLXDaCo`/`HangGPLXDaCo`
-  (giấy phép học viên đã sở hữu trước). `NguoiLX_GPLX` là GPLX do khóa này cấp (đầu ra),
-  KHÔNG dùng cho cột "đã có".
-- **Nhiều dòng theo `MaDK`:** một `MaDK` có thể có nhiều dòng ở `NguoiLX_GPLX`/`NguoiLX_HoSo`.
-  Khi đồng bộ cần chọn 1 dòng hồ sơ hiện hành (theo khóa đang xét / dòng mới nhất).
+  (đã xác nhận tồn tại). `NguoiLX_GPLX` là GPLX do khóa này cấp (đầu ra), KHÔNG dùng cho cột "đã có".
 
-## Câu hỏi chưa giải quyết (cần chốt trước Phase B2)
+## Câu hỏi chưa giải quyết (cần chốt trước Phase B3)
 
-1. `V2_schema_full.sql` chưa có — cần bản xuất schema V2 chỉ đọc để chốt kiểu dữ liệu/độ dài cột.
-2. Dữ liệu `SoCMT` hiện đã chuẩn hóa sang CCCD 12 số chưa, hay còn lẫn CMND 9 số?
-3. Quy tắc chọn 1 hồ sơ/khóa hiện hành khi 1 `MaDK` thuộc nhiều khóa.
-4. `NguoiNhanHSo` lưu tên người hay mã người dùng? Ảnh hưởng cách hiển thị "Người nhận hồ sơ".
-5. Có cần lọc `TrangThai`/bản ghi đã hủy ở nguồn V2 trước khi đồng bộ không?
+1. ~~`V2_schema_full.sql` chưa có~~ → **Đã có**, mapping đã đối chiếu DDL thật.
+2. Dữ liệu `SoCMT` hiện đã chuẩn hóa sang CCCD 12 số chưa, hay còn lẫn CMND 9 số? (cần kiểm tra dữ liệu)
+3. ~~Quy tắc chọn 1 hồ sơ/khóa~~ → **Giải tỏa**: `NguoiLX_HoSo` PK là `MaDK` (1 dòng/MaDK).
+4. Quy ước giá trị `GioiTinh char(1)` → "Nam"/"Nữ" ('1'/'0' hay 'M'/'F'?) cần xác nhận từ dữ liệu thực.
+5. Có cần lọc theo `TrangThai` (bit) ở `NguoiLX`/`NguoiLX_HoSo`/`KhoaHoc` để bỏ bản ghi đã hủy không?
+6. Bộ lọc "Hạng GPLX" trên UI nên áp vào hạng đào tạo (`NguoiLX_HoSo.HangGPLX`) hay hạng đã có
+   (`HangGPLXDaCo`)? Hiện truy vấn lọc theo hạng đào tạo `hs.HangGPLX`.
 
 ## So khớp với QLHV_APP (đích)
 

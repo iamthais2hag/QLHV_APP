@@ -37,4 +37,10 @@ public sealed class DryRunResultDto
 
     /// <summary>Thời gian chờ (giây).</summary>
     public int TimeoutSeconds { get; init; }
+
+    /// <summary>
+    /// Số học viên đếm được ở nguồn CSDT_V2 (chỉ đọc).
+    /// Chỉ có giá trị khi kết nối V2 dùng được; ngược lại là null (chưa cấu hình/placeholder).
+    /// </summary>
+    public int? SourceRecordCount { get; init; }
 }

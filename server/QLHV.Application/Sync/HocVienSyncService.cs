@@ -13,11 +13,16 @@ public sealed class HocVienSyncService : IHocVienSyncService
 {
     private readonly SyncOptions _options;
     private readonly IConnectionSettingsProvider _connections;
+    private readonly IV2HocVienSourceRepository _v2Source;
 
-    public HocVienSyncService(IOptions<SyncOptions> options, IConnectionSettingsProvider connections)
+    public HocVienSyncService(
+        IOptions<SyncOptions> options,
+        IConnectionSettingsProvider connections,
+        IV2HocVienSourceRepository v2Source)
     {
         _options = options.Value;
         _connections = connections;
+        _v2Source = v2Source;
     }
 
     public async Task<DryRunResultDto> DryRunHocVienAsync(CancellationToken cancellationToken = default)
@@ -48,6 +53,29 @@ public sealed class HocVienSyncService : IHocVienSyncService
         var canRun = !hasBlockingError && qlhv.IsUsable && v2.IsUsable;
         var now = DateTime.UtcNow;
 
+        // Phase B2 (CHỈ ĐỌC): nếu nguồn V2 đã cấu hình dùng được, đọc số lượng học viên ở nguồn
+        // bằng SELECT COUNT (không ghi gì). Nếu chưa cấu hình/placeholder thì bỏ qua an toàn.
+        int? sourceCount = null;
+        if (v2.IsUsable)
+        {
+            try
+            {
+                sourceCount = await _v2Source.CountAsync(HocVienSourceFilter.Empty, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                // Không lộ chuỗi kết nối/bí mật: chỉ ghi nhận thông điệp an toàn.
+                var issue = "Khong doc duoc so luong tu nguon CSDT_V2.";
+                issues.Add(issue);
+                errors.Add(new SyncErrorDto
+                {
+                    Code = "SOURCE_READ_FAILED",
+                    Message = $"{issue} Chi tiet: {ex.GetType().Name}.",
+                });
+                canRun = false;
+            }
+        }
+
         return new DryRunResultDto
         {
             CanRun = canRun,
@@ -55,6 +83,7 @@ public sealed class HocVienSyncService : IHocVienSyncService
             Issues = issues,
             Target = ToConnectionCheck(qlhv),
             Source = ToConnectionCheck(v2),
+            SourceRecordCount = sourceCount,
             PlannedSummary = new SyncSummaryDto
             {
                 JobName = IHocVienSyncJob.JobName,
@@ -62,7 +91,7 @@ public sealed class HocVienSyncService : IHocVienSyncService
                 SourceSystem = "V2",
                 IsDryRun = true,
                 Status = canRun ? "DuKien" : "ThieuCauHinh",
-                TotalRead = 0,
+                TotalRead = sourceCount ?? 0,
                 TotalInserted = 0,
                 TotalUpdated = 0,
                 TotalSkipped = 0,
