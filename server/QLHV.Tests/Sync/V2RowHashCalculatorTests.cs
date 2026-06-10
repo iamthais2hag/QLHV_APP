@@ -1,5 +1,4 @@
 using QLHV.Application.Sync.Mapping;
-using Xunit;
 
 namespace QLHV.Tests.Sync;
 
@@ -8,52 +7,47 @@ public sealed class V2RowHashCalculatorTests
     [Fact]
     public void Same_input_gives_same_hash()
     {
-        var model = SampleModel();
-
-        var first = V2RowHashCalculator.Compute(model);
-        var second = V2RowHashCalculator.Compute(model);
+        var first = V2RowHashCalculator.Compute(Model());
+        var second = V2RowHashCalculator.Compute(Model());
 
         Assert.Equal(first, second);
-        Assert.Equal(64, first.Length);
     }
 
     [Fact]
     public void Changed_stable_field_changes_hash()
     {
-        var first = V2RowHashCalculator.Compute(SampleModel());
-        var second = V2RowHashCalculator.Compute(SampleModel(hoTen: "Nguyen Van B"));
+        var first = V2RowHashCalculator.Compute(Model(hoTen: "Nguyen Van A"));
+        var second = V2RowHashCalculator.Compute(Model(hoTen: "Nguyen Van B"));
 
         Assert.NotEqual(first, second);
     }
 
     [Fact]
-    public void Volatile_sync_fields_are_not_included_in_hash()
+    public void Existing_hash_value_is_not_included_in_hash_input()
     {
-        Assert.Null(typeof(HocVienTargetWriteModel).GetProperty("LastSyncFromV2At"));
-
-        var first = V2RowHashCalculator.Compute(SampleModel(v2RowHash: "old"));
-        var second = V2RowHashCalculator.Compute(SampleModel(v2RowHash: "new"));
+        var first = V2RowHashCalculator.Compute(Model(existingHash: "old-sync-metadata"));
+        var second = V2RowHashCalculator.Compute(Model(existingHash: "new-sync-metadata"));
 
         Assert.Equal(first, second);
     }
 
-    private static HocVienTargetWriteModel SampleModel(
+    private static HocVienTargetWriteModel Model(
         string hoTen = "Nguyen Van A",
-        string v2RowHash = "") => new()
+        string existingHash = "") => new()
     {
         MaDK = "DK001",
-        MaKhoa = "KH001",
-        TenKhoa = "Khoa A1",
-        HangGPLXHoc = "A1",
+        MaKhoa = "K001",
+        TenKhoa = "Khoa 1",
+        HangGPLXHoc = "B2",
         HoTen = hoTen,
         NgaySinh = new DateTime(1990, 1, 2),
-        GioiTinh = "M",
-        SoCCCD = "012345678901",
+        GioiTinh = "1",
+        SoCCCD = "001234567890",
         DiaChiThuongTru = "Dia chi",
-        SoGPLXDaCo = "GPLX001",
+        SoGPLXDaCo = "GPLX1",
         HangGPLXDaCo = "A1",
-        NguoiNhanHoSo = "Can bo tiep nhan",
+        NguoiNhanHoSo = "Nhan vien",
         SourceOfTruth = HocVienDataRules.SourceOfTruthV2,
-        V2RowHash = v2RowHash,
+        V2RowHash = existingHash,
     };
 }

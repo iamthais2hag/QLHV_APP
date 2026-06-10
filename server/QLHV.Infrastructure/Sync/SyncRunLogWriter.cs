@@ -4,14 +4,12 @@ using Microsoft.Extensions.Options;
 using QLHV.Application.Sync;
 using QLHV.Application.Sync.Connections;
 using QLHV.Application.Sync.Dtos;
-using AppSyncOptions = QLHV.Application.Sync.SyncOptions;
-using SyncExecutionOptions = QLHV.Application.Sync.Configuration.SyncExecutionOptions;
 
 namespace QLHV.Infrastructure.Sync;
 
 /// <summary>
-/// Writes one sanitized sync run summary row into dbo.App_DongBoLog.
-/// Dry-run must not call this writer.
+/// Writes one sanitized sync run summary row to dbo.App_DongBoLog.
+/// Never log raw CCCD/GPLX values, passwords, tokens, or full connection strings.
 /// </summary>
 public sealed class SyncRunLogWriter : ISyncRunLogWriter
 {
@@ -28,28 +26,26 @@ VALUES
 ";
 
     private readonly IConnectionSettingsProvider _connections;
-    private readonly AppSyncOptions _options;
-    private readonly SyncExecutionOptions _execution;
+    private readonly SyncOptions _options;
 
     public SyncRunLogWriter(
         IConnectionSettingsProvider connections,
-        IOptions<AppSyncOptions> options,
-        IOptions<SyncExecutionOptions> execution)
+        IOptions<SyncOptions> options)
     {
         _connections = connections;
         _options = options.Value;
-        _execution = execution.Value;
     }
 
     public async Task<long> WriteAsync(SyncRunLogEntry entry, CancellationToken cancellationToken = default)
     {
-        if (!_execution.EnableTargetWrites)
+        var target = await _connections.GetQlhvAppConnectionAsync(cancellationToken);
+        if (!target.IsUsable || string.IsNullOrWhiteSpace(target.ConnectionString))
         {
-            throw new InvalidOperationException("EnableTargetWrites=false. Sync run logging is locked.");
+            throw new InvalidOperationException(
+                "QLHV_APP chua co cau hinh ket noi dung duoc de ghi nhat ky dong bo.");
         }
 
-        var connectionString = await ResolveUsableTargetAsync(cancellationToken);
-        await using var connection = new SqlConnection(connectionString);
+        await using var connection = new SqlConnection(target.ConnectionString);
         var command = new CommandDefinition(
             InsertSql,
             new
@@ -75,18 +71,6 @@ VALUES
             cancellationToken: cancellationToken);
 
         return await connection.ExecuteScalarAsync<long>(command);
-    }
-
-    private async Task<string> ResolveUsableTargetAsync(CancellationToken cancellationToken)
-    {
-        var target = await _connections.GetQlhvAppConnectionAsync(cancellationToken);
-        if (!target.IsUsable || string.IsNullOrWhiteSpace(target.ConnectionString))
-        {
-            throw new InvalidOperationException(
-                "QLHV_APP chua co cau hinh ket noi dung duoc (thieu hoac dang la placeholder).");
-        }
-
-        return target.ConnectionString;
     }
 
     private static string? Sanitize(string? value)

@@ -31,5 +31,4 @@ public sealed class SyncOptions
 
     /// <summary>Base delay for exponential backoff, in seconds.</summary>
     public int RetryBaseDelaySeconds { get; set; } = 2;
-
 }

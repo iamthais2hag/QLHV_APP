@@ -3,17 +3,17 @@ using Dapper;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
 using QLHV.Application.Sync;
+using QLHV.Application.Sync.Configuration;
 using QLHV.Application.Sync.Connections;
 using QLHV.Application.Sync.Dtos;
 using QLHV.Application.Sync.Mapping;
 using AppSyncOptions = QLHV.Application.Sync.SyncOptions;
-using SyncExecutionOptions = QLHV.Application.Sync.Configuration.SyncExecutionOptions;
 
 namespace QLHV.Infrastructure.Sync;
 
 /// <summary>
 /// Read and guarded write access to QLHV_APP.dbo.App_HocVien.
-/// Upsert uses a transaction, temp staging table, SqlBulkCopy, and MERGE keyed by MaDK.
+/// Writes use SqlBulkCopy into a temp staging table and MERGE in a transaction; no physical delete.
 /// </summary>
 public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
 {
@@ -70,7 +70,8 @@ public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
     {
         if (!_execution.EnableTargetWrites)
         {
-            throw new InvalidOperationException("EnableTargetWrites=false. Target write path is locked.");
+            throw new InvalidOperationException(
+                "Ghi vao QLHV_APP bi chan: SyncExecution.EnableTargetWrites = false.");
         }
 
         if (rows.Count == 0)
@@ -79,7 +80,6 @@ public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
         }
 
         var connectionString = await ResolveUsableTargetAsync(cancellationToken);
-
         return await SyncRetryPolicyFactory.CreateDefault(_options.MaxRetryAttempts).ExecuteAsync(
             ct => UpsertBatchCoreAsync(connectionString, rows, ct),
             cancellationToken);
@@ -102,12 +102,13 @@ public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
                 commandTimeout: _options.TimeoutSeconds,
                 cancellationToken: cancellationToken));
 
-            using (var bulkCopy = new SqlBulkCopy(connection, SqlBulkCopyOptions.CheckConstraints, transaction))
+            using (var bulkCopy = new SqlBulkCopy(connection, SqlBulkCopyOptions.CheckConstraints, transaction)
             {
-                bulkCopy.DestinationTableName = HocVienTargetMergeSql.StagingTableName;
-                bulkCopy.BatchSize = Math.Max(1, _options.BatchSize);
-                bulkCopy.BulkCopyTimeout = _options.TimeoutSeconds;
-
+                DestinationTableName = HocVienTargetMergeSql.StagingTableName,
+                BatchSize = Math.Max(1, _options.BatchSize),
+                BulkCopyTimeout = _options.TimeoutSeconds,
+            })
+            {
                 using var table = BuildStagingTable(rows);
                 foreach (DataColumn column in table.Columns)
                 {
@@ -135,7 +136,6 @@ public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
             var inserted = actionList.Count(a => string.Equals(a, "INSERT", StringComparison.OrdinalIgnoreCase));
             var updated = actionList.Count(a => string.Equals(a, "UPDATE", StringComparison.OrdinalIgnoreCase));
             var skipped = Math.Max(0, rows.Count - inserted - updated);
-
             return new UpsertCounts(inserted, updated, skipped);
         }
         catch
@@ -165,6 +165,10 @@ public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
 
         foreach (var row in rows)
         {
+            var hash = string.IsNullOrWhiteSpace(row.V2RowHash)
+                ? V2RowHashCalculator.Compute(row)
+                : row.V2RowHash;
+
             table.Rows.Add(
                 row.MaDK,
                 Db(row.MaKhoa),
@@ -179,9 +183,7 @@ public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
                 Db(row.HangGPLXDaCo),
                 Db(row.NguoiNhanHoSo),
                 row.SourceOfTruth,
-                string.IsNullOrWhiteSpace(row.V2RowHash)
-                    ? V2RowHashCalculator.Compute(row)
-                    : row.V2RowHash);
+                hash);
         }
 
         return table;

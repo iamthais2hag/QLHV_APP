@@ -3,8 +3,6 @@ using QLHV.Application.Sync;
 using QLHV.Application.Sync.Configuration;
 using QLHV.Application.Sync.Connections;
 using QLHV.Application.Sync.Dtos;
-using QLHV.Application.Sync.Mapping;
-using Xunit;
 using AppSyncOptions = QLHV.Application.Sync.SyncOptions;
 
 namespace QLHV.Tests.Sync;
@@ -12,135 +10,164 @@ namespace QLHV.Tests.Sync;
 public sealed class HocVienSyncGuardTests
 {
     [Fact]
-    public async Task Execute_rejects_when_EnableTargetWrites_false()
+    public async Task Execute_rejects_when_target_writes_disabled()
     {
-        var fixture = CreateFixture(new SyncExecutionOptions { EnableTargetWrites = false });
+        var fakes = TestFakes.Create(enableWrites: false);
 
-        var result = await fixture.Service.ExecuteHocVienAsync(ConfirmedRequest());
-
-        Assert.False(result.Accepted);
-        Assert.Equal("Rejected", result.Status);
-        Assert.Contains(result.Issues, issue => issue.Contains("EnableTargetWrites=false", StringComparison.Ordinal));
-        Assert.Equal(0, fixture.Source.CountCalls);
-        Assert.Equal(0, fixture.Target.UpsertCalls);
-        Assert.Equal(0, fixture.Log.WriteCalls);
-    }
-
-    [Fact]
-    public async Task Execute_rejects_when_ConfirmTargetWrites_false()
-    {
-        var fixture = CreateFixture(new SyncExecutionOptions { EnableTargetWrites = true });
-
-        var result = await fixture.Service.ExecuteHocVienAsync(new HocVienSyncExecuteRequest
+        var result = await fakes.Service.ExecuteHocVienAsync(new SyncExecuteRequest
         {
-            ConfirmTargetWrites = false,
-            ConfirmationText = HocVienSyncExecuteRequest.RequiredConfirmationText,
+            Confirm = true,
+            ConfirmationText = fakes.Execution.ConfirmationPhrase,
         });
 
-        Assert.False(result.Accepted);
-        Assert.Contains(result.Issues, issue => issue.Contains("ConfirmTargetWrites=true", StringComparison.Ordinal));
-        Assert.Equal(0, fixture.Source.CountCalls);
-        Assert.Equal(0, fixture.Target.UpsertCalls);
-        Assert.Equal(0, fixture.Log.WriteCalls);
+        Assert.False(result.Executed);
+        Assert.Equal("BiChan", result.Status);
+        Assert.Contains("EnableTargetWrites", result.Message);
+        Assert.Equal(0, fakes.Source.ReadPageCalls);
+        Assert.Equal(0, fakes.Target.UpsertCalls);
+        Assert.Equal(0, fakes.Log.WriteCalls);
     }
 
     [Fact]
-    public async Task Execute_rejects_when_ConfirmationText_is_not_exact()
+    public async Task Execute_rejects_when_manual_confirm_is_false()
     {
-        var fixture = CreateFixture(new SyncExecutionOptions { EnableTargetWrites = true });
+        var fakes = TestFakes.Create(enableWrites: true);
 
-        var result = await fixture.Service.ExecuteHocVienAsync(new HocVienSyncExecuteRequest
+        var result = await fakes.Service.ExecuteHocVienAsync(new SyncExecuteRequest
         {
-            ConfirmTargetWrites = true,
+            Confirm = false,
+            ConfirmationText = fakes.Execution.ConfirmationPhrase,
+        });
+
+        Assert.False(result.Executed);
+        Assert.Equal("BiChan", result.Status);
+        Assert.Contains("Confirm", result.Message);
+        Assert.Equal(0, fakes.Source.ReadPageCalls);
+        Assert.Equal(0, fakes.Target.UpsertCalls);
+        Assert.Equal(0, fakes.Log.WriteCalls);
+    }
+
+    [Fact]
+    public async Task Execute_rejects_when_confirmation_phrase_is_not_exact()
+    {
+        var fakes = TestFakes.Create(enableWrites: true);
+
+        var result = await fakes.Service.ExecuteHocVienAsync(new SyncExecuteRequest
+        {
+            Confirm = true,
             ConfirmationText = "execute_dong_bo_v2_hoc_vien",
         });
 
-        Assert.False(result.Accepted);
-        Assert.Contains(result.Issues, issue => issue.Contains(HocVienSyncExecuteRequest.RequiredConfirmationText, StringComparison.Ordinal));
-        Assert.Equal(0, fixture.Source.CountCalls);
-        Assert.Equal(0, fixture.Target.UpsertCalls);
-        Assert.Equal(0, fixture.Log.WriteCalls);
+        Assert.False(result.Executed);
+        Assert.Equal("BiChan", result.Status);
+        Assert.Contains("xac nhan", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, fakes.Source.ReadPageCalls);
+        Assert.Equal(0, fakes.Target.UpsertCalls);
+        Assert.Equal(0, fakes.Log.WriteCalls);
     }
 
     [Fact]
     public async Task Dry_run_remains_no_write()
     {
-        var fixture = CreateFixture(
-            new SyncExecutionOptions { EnableTargetWrites = true },
-            sourceRows: new[]
+        var fakes = TestFakes.Create(enableWrites: true, sourceCount: 7);
+
+        var result = await fakes.Service.DryRunHocVienAsync();
+
+        Assert.Equal(7, result.SourceRecordCount);
+        Assert.Equal(1, fakes.Source.CountCalls);
+        Assert.Equal(0, fakes.Source.ReadPageCalls);
+        Assert.Equal(0, fakes.Target.UpsertCalls);
+        Assert.Equal(0, fakes.Log.WriteCalls);
+    }
+
+    private sealed class TestFakes
+    {
+        private TestFakes(
+            HocVienSyncService service,
+            SyncExecutionOptions execution,
+            FakeV2Source source,
+            FakeTarget target,
+            FakeRunLog log)
+        {
+            Service = service;
+            Execution = execution;
+            Source = source;
+            Target = target;
+            Log = log;
+        }
+
+        public HocVienSyncService Service { get; }
+        public SyncExecutionOptions Execution { get; }
+        public FakeV2Source Source { get; }
+        public FakeTarget Target { get; }
+        public FakeRunLog Log { get; }
+
+        public static TestFakes Create(bool enableWrites, int sourceCount = 0)
+        {
+            var sync = new AppSyncOptions
             {
-                new V2HocVienSourceRow { MaDK = "DK001", HoVaTen = "Nguyen Van A", SoCMT = "012345678901" },
-                new V2HocVienSourceRow { MaDK = "DK002", HoVaTen = "Tran Thi B", SoCMT = "123456789" },
-            });
+                BatchSize = 100,
+                TimeoutSeconds = 30,
+            };
+            var execution = new SyncExecutionOptions
+            {
+                EnableTargetWrites = enableWrites,
+                RequireManualConfirmation = true,
+                ConfirmationPhrase = "EXECUTE_DONG_BO_V2_HOC_VIEN",
+            };
+            var connections = new FakeConnectionSettingsProvider();
+            var source = new FakeV2Source(sourceCount);
+            var target = new FakeTarget();
+            var log = new FakeRunLog();
+            var service = new HocVienSyncService(
+                Options.Create(sync),
+                Options.Create(execution),
+                connections,
+                source,
+                target,
+                log);
 
-        var result = await fixture.Service.DryRunHocVienAsync();
-
-        Assert.True(result.IsDryRun);
-        Assert.Equal(2, result.SourceRecordCount);
-        Assert.Equal(1, fixture.Source.CountCalls);
-        Assert.Equal(0, fixture.Source.ReadPageCalls);
-        Assert.Equal(0, fixture.Target.UpsertCalls);
-        Assert.Equal(0, fixture.Log.WriteCalls);
+            return new TestFakes(service, execution, source, target, log);
+        }
     }
-
-    private static HocVienSyncExecuteRequest ConfirmedRequest() => new()
-    {
-        ConfirmTargetWrites = true,
-        ConfirmationText = HocVienSyncExecuteRequest.RequiredConfirmationText,
-    };
-
-    private static Fixture CreateFixture(
-        SyncExecutionOptions execution,
-        IReadOnlyList<V2HocVienSourceRow>? sourceRows = null)
-    {
-        execution.RequireManualConfirmation = true;
-        execution.ConfirmationPhrase = HocVienSyncExecuteRequest.RequiredConfirmationText;
-
-        var source = new FakeV2HocVienSourceRepository(sourceRows ?? Array.Empty<V2HocVienSourceRow>());
-        var target = new FakeQlhvHocVienTargetRepository();
-        var log = new FakeSyncRunLogWriter();
-        var service = new HocVienSyncService(
-            Options.Create(new AppSyncOptions { BatchSize = 100, TimeoutSeconds = 30 }),
-            Options.Create(execution),
-            new FakeConnectionSettingsProvider(),
-            source,
-            target,
-            log);
-
-        return new Fixture(service, source, target, log);
-    }
-
-    private sealed record Fixture(
-        HocVienSyncService Service,
-        FakeV2HocVienSourceRepository Source,
-        FakeQlhvHocVienTargetRepository Target,
-        FakeSyncRunLogWriter Log);
 
     private sealed class FakeConnectionSettingsProvider : IConnectionSettingsProvider
     {
-        private const string FakeUsableConnection = "UnitTestConnection";
-
         public Task<ResolvedConnection> GetQlhvAppConnectionAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(ResolvedConnection.FromConfiguration("QLHV_APP", FakeUsableConnection));
+            => Task.FromResult(Usable("QLHV_APP"));
 
         public Task<ResolvedConnection> GetSourceConnectionAsync(
             SourceSystem source,
             CancellationToken cancellationToken = default)
-            => Task.FromResult(ResolvedConnection.FromConfiguration(source.ToString(), FakeUsableConnection));
+            => Task.FromResult(Usable(source.ToString()));
 
         public Task<ConnectionSettingsView> GetViewAsync(
             SourceSystem source,
             CancellationToken cancellationToken = default)
-            => Task.FromResult(new ConnectionSettingsView());
+            => Task.FromResult(new ConnectionSettingsView
+            {
+                Key = source.ToString(),
+                DisplayName = source.ToString(),
+                IsConfigured = true,
+                IsEnabled = true,
+            });
+
+        private static ResolvedConnection Usable(string name) => new()
+        {
+            Name = name,
+            IsConfigured = true,
+            IsPlaceholder = false,
+            ConnectionString = "Server=(local);Database=TEST_ONLY;",
+        };
     }
 
-    private sealed class FakeV2HocVienSourceRepository : IV2HocVienSourceRepository
+    private sealed class FakeV2Source : IV2HocVienSourceRepository
     {
-        private readonly IReadOnlyList<V2HocVienSourceRow> _rows;
+        private readonly int _sourceCount;
 
-        public FakeV2HocVienSourceRepository(IReadOnlyList<V2HocVienSourceRow> rows)
+        public FakeV2Source(int sourceCount)
         {
-            _rows = rows;
+            _sourceCount = sourceCount;
         }
 
         public int CountCalls { get; private set; }
@@ -149,7 +176,7 @@ public sealed class HocVienSyncGuardTests
         public Task<int> CountAsync(HocVienSourceFilter filter, CancellationToken cancellationToken = default)
         {
             CountCalls++;
-            return Task.FromResult(_rows.Count);
+            return Task.FromResult(_sourceCount);
         }
 
         public Task<IReadOnlyList<V2HocVienSourceRow>> ReadPageAsync(
@@ -159,11 +186,11 @@ public sealed class HocVienSyncGuardTests
             CancellationToken cancellationToken = default)
         {
             ReadPageCalls++;
-            return Task.FromResult((IReadOnlyList<V2HocVienSourceRow>)_rows.Skip(offset).Take(pageSize).ToList());
+            return Task.FromResult<IReadOnlyList<V2HocVienSourceRow>>(Array.Empty<V2HocVienSourceRow>());
         }
     }
 
-    private sealed class FakeQlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
+    private sealed class FakeTarget : IQlhvHocVienTargetRepository
     {
         public int UpsertCalls { get; private set; }
 
@@ -172,18 +199,18 @@ public sealed class HocVienSyncGuardTests
         public Task<IReadOnlyCollection<string>> GetExistingKeysAsync(
             IReadOnlyCollection<string> maDks,
             CancellationToken cancellationToken = default)
-            => Task.FromResult((IReadOnlyCollection<string>)Array.Empty<string>());
+            => Task.FromResult<IReadOnlyCollection<string>>(Array.Empty<string>());
 
         public Task<UpsertCounts> UpsertBatchAsync(
-            IReadOnlyList<HocVienTargetWriteModel> rows,
+            IReadOnlyList<QLHV.Application.Sync.Mapping.HocVienTargetWriteModel> rows,
             CancellationToken cancellationToken = default)
         {
             UpsertCalls++;
-            return Task.FromResult(new UpsertCounts(rows.Count, 0, 0));
+            return Task.FromResult(UpsertCounts.Empty);
         }
     }
 
-    private sealed class FakeSyncRunLogWriter : ISyncRunLogWriter
+    private sealed class FakeRunLog : ISyncRunLogWriter
     {
         public int WriteCalls { get; private set; }
 

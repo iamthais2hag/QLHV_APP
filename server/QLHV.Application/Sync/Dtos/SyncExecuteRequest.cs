@@ -1,17 +1,16 @@
 namespace QLHV.Application.Sync.Dtos;
 
 /// <summary>
-/// Yêu cầu thực thi đồng bộ ghi (manual). Bắt buộc xác nhận rõ ràng để tránh chạy nhầm.
+/// Manual guarded sync execution request. Defaults prevent accidental Swagger execution.
 /// </summary>
 public sealed class SyncExecuteRequest
 {
-    /// <summary>
-    /// Phải đặt true một cách rõ ràng. Mặc định false để Swagger "Try it out" không vô tình chạy ghi.
-    /// </summary>
+    /// <summary>Must be explicitly true.</summary>
     public bool Confirm { get; set; } = false;
 
-    /// <summary>
-    /// Chuỗi xác nhận phải khớp với cấu hình SyncExecution.ConfirmationPhrase.
-    /// </summary>
+    /// <summary>Must exactly match EXECUTE_DONG_BO_V2_HOC_VIEN by default.</summary>
+    public string? ConfirmationText { get; set; }
+
+    /// <summary>Backward-compatible alias for older local clients.</summary>
     public string? ConfirmationPhrase { get; set; }
 }

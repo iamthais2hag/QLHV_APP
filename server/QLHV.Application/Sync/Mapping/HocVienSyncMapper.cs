@@ -67,18 +67,11 @@ public static class HocVienSyncMapper
             HangGPLXDaCo = modelWithoutHash.HangGPLXDaCo,
             NguoiNhanHoSo = modelWithoutHash.NguoiNhanHoSo,
             SourceOfTruth = modelWithoutHash.SourceOfTruth,
-            V2RowHash = CalculateV2RowHash(modelWithoutHash),
+            V2RowHash = V2RowHashCalculator.Compute(modelWithoutHash),
         };
 
         return new MapResult(model, warnings, ShouldSkip: false);
     }
-
-    /// <summary>
-    /// Stable SHA-256 over normalized source fields only.
-    /// Excludes volatile metadata such as LastSyncFromV2At, LastSyncStatus, UpdatedAt, and RowVersion.
-    /// </summary>
-    public static string CalculateV2RowHash(HocVienTargetWriteModel model)
-        => V2RowHashCalculator.Compute(model);
 
     public static bool IsCccdLengthValid(string value)
     {
@@ -100,5 +93,4 @@ public static class HocVienSyncMapper
 
     private static string? Trim(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-
 }
