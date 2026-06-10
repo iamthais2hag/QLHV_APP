@@ -78,7 +78,7 @@ public sealed class HocVienRepository : IHocVienRepository
         MaDangKy = row.MaDangKy,
         HoVaTen = row.HoVaTen ?? string.Empty,
         NgaySinh = row.NgaySinh.HasValue ? DateOnly.FromDateTime(row.NgaySinh.Value) : null,
-        GioiTinh = row.GioiTinh,
+        GioiTinh = HocVienGender.ToDisplayValue(row.GioiTinh),
         SoCccd = row.SoCccd,
         DiaChiThuongTru = row.DiaChiThuongTru,
         AnhRelativePath = ToSafeRelativePath(row.AnhRelativePath),

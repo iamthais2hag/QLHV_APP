@@ -9,6 +9,24 @@ export function formatNgaySinh(value: string | null): string {
   return `${d}/${m}/${y}`;
 }
 
+export function formatGioiTinh(value: string | null): string {
+  const normalized = value?.trim();
+  if (!normalized) return '';
+  if (normalized.toUpperCase() === 'M' || normalized.toLocaleLowerCase('vi-VN') === 'nam') {
+    return 'Nam';
+  }
+
+  if (
+    normalized.toUpperCase() === 'F' ||
+    normalized.toLocaleLowerCase('vi-VN') === 'nữ' ||
+    normalized.toLocaleLowerCase('vi-VN') === 'nu'
+  ) {
+    return 'Nữ';
+  }
+
+  return normalized;
+}
+
 export function buildHocVienPhotoUrl(value: string | null): string | null {
   const path = normalizeRelativePhotoPath(value);
   const baseUrl = import.meta.env.VITE_HOC_VIEN_PHOTO_BASE_URL;
@@ -51,6 +69,12 @@ export const HOC_VIEN_COLUMNS: { key: keyof HocVienListItem; header: string }[] 
   { key: 'maKhoa', header: 'Khóa' },
 ];
 
+const EXCEL_TEXT_COLUMNS = new Set<keyof HocVienListItem>([
+  'maDangKy',
+  'soCccd',
+  'soGplxDaCo',
+]);
+
 /**
  * Xuất các dòng hiện có ra file Excel (xử lý cục bộ phía trình duyệt, không gọi backend).
  * Dùng định dạng bảng HTML mà Excel mở được.
@@ -67,14 +91,21 @@ export function exportCurrentRowsToExcel(rows: HocVienListItem[], fileName: stri
   const bodyHtml = rows
     .map((row, index) => {
       const cells = HOC_VIEN_COLUMNS.map((c) => {
-        const value = c.key === 'ngaySinh' ? formatNgaySinh(row.ngaySinh) : row[c.key];
-        return `<td>${escape(value)}</td>`;
+        const value =
+          c.key === 'ngaySinh'
+            ? formatNgaySinh(row.ngaySinh)
+            : c.key === 'gioiTinh'
+              ? formatGioiTinh(row.gioiTinh)
+              : row[c.key];
+        const textClass = EXCEL_TEXT_COLUMNS.has(c.key) ? ' class="excel-text"' : '';
+        return `<td${textClass}>${escape(value)}</td>`;
       }).join('');
       return `<tr><td>${index + 1}</td>${cells}</tr>`;
     })
     .join('');
 
-  const html = `<html><head><meta charset="utf-8" /></head><body>` +
+  const html = `<html><head><meta charset="utf-8" />` +
+    `<style>.excel-text{mso-number-format:"\\@";}</style></head><body>` +
     `<table border="1"><thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table>` +
     `</body></html>`;
 

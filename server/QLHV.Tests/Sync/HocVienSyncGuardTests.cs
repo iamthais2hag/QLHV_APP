@@ -92,7 +92,13 @@ public sealed class HocVienSyncGuardTests
             m.SourceFieldPlanned.Contains("NguoiLX_HoSo.SoGPLXDaCo", StringComparison.Ordinal));
         Assert.Contains(result.Mapping, m =>
             m.TargetColumn == "DiaChiThuongTru" &&
-            m.SourceFieldPlanned.Contains("NguoiLX.NoiTT", StringComparison.Ordinal));
+            m.SourceFieldPlanned.Contains("DM_DVHC.TenDayDu", StringComparison.Ordinal) &&
+            m.SourceFieldPlanned.Contains("NoiTT_MaDVQL", StringComparison.Ordinal) &&
+            m.SourceFieldPlanned.Contains("NoiTT_MaDVHC", StringComparison.Ordinal));
+        Assert.Contains(result.Mapping, m =>
+            m.TargetColumn == "HangGPLXHoc" &&
+            m.SourceFieldPlanned.Contains("NguoiLX_HoSo.HangDaoTao", StringComparison.Ordinal) &&
+            m.SourceFieldPlanned.Contains("DM_HangDT.TenHangDT", StringComparison.Ordinal));
         Assert.Contains(result.Mapping, m =>
             m.TargetColumn == "NguoiNhanHoSo" &&
             m.SourceFieldPlanned.Contains("NguoiLX_HoSo.NguoiNhanHSo", StringComparison.Ordinal));
@@ -111,6 +117,9 @@ public sealed class HocVienSyncGuardTests
         Assert.DoesNotContain("NguoiLX_GPLX", reportText, StringComparison.Ordinal);
         Assert.DoesNotContain("NguoiLX.DiaChiThuongTru", reportText, StringComparison.Ordinal);
         Assert.DoesNotContain("NguoiLX_HoSo.NguoiNhanHoSo", reportText, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Mapping, m =>
+            m.TargetColumn == "HangGPLXHoc" &&
+            m.SourceFieldPlanned.Contains("HangGPLX", StringComparison.Ordinal));
     }
 
     [Fact]

@@ -6,9 +6,11 @@ namespace QLHV.Infrastructure.Sync;
 /// <summary>
 /// Dựng câu lệnh SQL CHỈ ĐỌC để truy vấn học viên từ CSDT_V2.
 /// Cột/nguồn đã xác nhận theo database/reference/V2_schema_full.sql:
-///   - dbo.NguoiLX        (MaDK, HoVaTen, NgaySinh varchar(8) yyyyMMdd, GioiTinh char(1), SoCMT, NoiTT)
-///   - dbo.NguoiLX_HoSo   (MaDK [PK 1-1], MaKhoaHoc, HangGPLX, SoGPLXDaCo, HangGPLXDaCo, NguoiNhanHSo)
+///   - dbo.NguoiLX        (MaDK, HoVaTen, NgaySinh varchar(8) yyyyMMdd, GioiTinh char(1), SoCMT, NoiTT, NoiTT_MaDVQL, NoiTT_MaDVHC)
+///   - dbo.NguoiLX_HoSo   (MaDK [PK 1-1], MaKhoaHoc, HangDaoTao, SoGPLXDaCo, HangGPLXDaCo, NguoiNhanHSo)
 ///   - dbo.KhoaHoc        (MaKH, TenKH)
+///   - dbo.DM_HangDT      (MaHangDT, TenHangDT)
+///   - dbo.DM_DVHC        (MaDV, TenDayDu)
 /// Mọi giá trị lọc đều truyền qua tham số Dapper (parameterized) để chống SQL injection.
 /// KHÔNG có lệnh ghi (INSERT/UPDATE/DELETE/MERGE) trong lớp này.
 ///
@@ -21,19 +23,25 @@ internal static class HocVienV2SqlBuilder
     private const string FromJoin = @"
 FROM dbo.NguoiLX AS nlx
 INNER JOIN dbo.NguoiLX_HoSo AS hs ON hs.MaDK = nlx.MaDK
-LEFT JOIN dbo.KhoaHoc AS kh ON kh.MaKH = hs.MaKhoaHoc";
+LEFT JOIN dbo.KhoaHoc AS kh ON kh.MaKH = hs.MaKhoaHoc
+LEFT JOIN dbo.DM_HangDT AS hdt ON hdt.MaHangDT = hs.HangDaoTao
+LEFT JOIN dbo.DM_DVHC AS dvhc ON dvhc.MaDV = (
+    LTRIM(RTRIM(nlx.NoiTT_MaDVQL)) + LTRIM(RTRIM(nlx.NoiTT_MaDVHC))
+)";
 
     private const string SelectColumns = @"
 SELECT
     nlx.MaDK                              AS MaDK,
     hs.MaKhoaHoc                          AS MaKhoaHoc,
     kh.TenKH                              AS TenKH,
-    hs.HangGPLX                           AS HangGPLX,
+    hs.HangDaoTao                         AS HangDaoTao,
+    hdt.TenHangDT                         AS TenHangDT,
     nlx.HoVaTen                           AS HoVaTen,
     TRY_CONVERT(date, nlx.NgaySinh, 112)  AS NgaySinh,   -- NgaySinh luu varchar(8) yyyyMMdd
     nlx.SoCMT                             AS SoCMT,
     nlx.GioiTinh                          AS GioiTinh,    -- char(1), quy doi hien thi o tang tren
-    nlx.NoiTT                             AS DiaChiThuongTru,
+    nlx.NoiTT                             AS NoiTT,
+    dvhc.TenDayDu                         AS NoiTTTenDayDu,
     hs.SoGPLXDaCo                         AS SoGPLXDaCo,
     hs.HangGPLXDaCo                       AS HangGPLXDaCo,
     hs.NguoiNhanHSo                       AS NguoiNhanHoSo";
@@ -59,7 +67,7 @@ SELECT
 
         if (!string.IsNullOrWhiteSpace(filter.HangGPLX))
         {
-            conditions.Add("hs.HangGPLX = @HangGPLX");
+            conditions.Add("(hs.HangDaoTao = @HangGPLX OR hdt.TenHangDT = @HangGPLX)");
             parameters.Add("@HangGPLX", filter.HangGPLX);
         }
 

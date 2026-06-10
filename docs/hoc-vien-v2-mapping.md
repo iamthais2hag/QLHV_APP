@@ -48,7 +48,7 @@ NguoiLX (MaDK)
 | 4 | Ngày sinh | `NgaySinh` | `NguoiLX.NgaySinh` | Cao |
 | 5 | Giới tính | `GioiTinh` | `NguoiLX.GioiTinh` | Cao |
 | 6 | Số CCCD | `SoCCCD` | `NguoiLX.SoCMT` | Cao (xem ghi chú CCCD/CMT) |
-| 7 | Địa chỉ thường trú | `DiaChiThuongTru` | `NguoiLX.NoiTT` | Cao (xem ghi chú địa chỉ) |
+| 7 | Địa chỉ thường trú | `DiaChiThuongTru` | `DM_DVHC.TenDayDu` qua `NguoiLX.NoiTT_MaDVQL + NguoiLX.NoiTT_MaDVHC = DM_DVHC.MaDV`; fallback `NguoiLX.NoiTT` | Cao (xem ghi chú địa chỉ) |
 | 8 | Số GPLX đã có | `SoGPLXDaCo` | `NguoiLX_HoSo.SoGPLXDaCo` | Cao |
 | 9 | Hạng GPLX đã có | `HangGPLXDaCo` | `NguoiLX_HoSo.HangGPLXDaCo` | Cao |
 | 10 | Người nhận hồ sơ | `NguoiNhanHoSo` | `NguoiLX_HoSo.NguoiNhanHSo` | Cao |
@@ -59,7 +59,7 @@ Trường liên quan (không nằm trong 11 cột hiển thị nhưng nên đồ
 
 | Đích `App_HocVien` | Nguồn CSDT_V2 | Ghi chú |
 | --- | --- | --- |
-| `HangGPLXHoc` | `NguoiLX_HoSo.HangGPLX` | Hạng đào tạo của khóa hiện tại. |
+| `HangGPLXHoc` | `NguoiLX_HoSo.HangDaoTao` → `DM_HangDT.MaHangDT` → `DM_HangDT.TenHangDT` | Hạng đào tạo/hạng học của khóa hiện tại. Không lấy từ `NguoiLX_HoSo.HangGPLX`. |
 | `SourceOfTruth` | hằng `'V2'` | Đánh dấu nguồn gốc. |
 | `V2RowHash` | hash các cột nguồn | Phát hiện thay đổi để upsert ở Phase B2. |
 | `LastSyncFromV2At` / `LastSyncStatus` / `LastSyncMessage` | sinh khi đồng bộ | Vết đồng bộ. |
@@ -74,8 +74,8 @@ Trường liên quan (không nằm trong 11 cột hiển thị nhưng nên đồ
   trùng `MaDK`. Liên kết `NguoiLX 1—1 NguoiLX_HoSo` theo `MaDK` là an toàn.
 - **CCCD vs CMT:** `NguoiLX.SoCMT` `varchar(20)` là số định danh hiện hành; `SO_CMND_CU` là CMND cũ.
   → Ánh xạ `SoCCCD ← SoCMT`, vẫn cần xác nhận dữ liệu đã chuẩn hóa CCCD 12 số.
-- **Địa chỉ thường trú:** dùng `NguoiLX.NoiTT` `nvarchar(50)`. Các cột `NoiTT_MaDVHC`, `NoiTT_MaDVQL`
-  là mã đơn vị hành chính, không dùng hiển thị.
+- **Địa chỉ thường trú:** ưu tiên `DM_DVHC.TenDayDu` bằng cách ghép `NguoiLX.NoiTT_MaDVQL + NguoiLX.NoiTT_MaDVHC`
+  để khớp `DM_DVHC.MaDV`. Nếu không join được danh mục hành chính thì fallback `NguoiLX.NoiTT`.
 - **GPLX đã có vs GPLX được cấp:** "đã có" lấy từ `NguoiLX_HoSo.SoGPLXDaCo`/`HangGPLXDaCo`
   (đã xác nhận tồn tại). `NguoiLX_GPLX` là GPLX do khóa này cấp (đầu ra), KHÔNG dùng cho cột "đã có".
 
@@ -86,8 +86,8 @@ Trường liên quan (không nằm trong 11 cột hiển thị nhưng nên đồ
 3. ~~Quy tắc chọn 1 hồ sơ/khóa~~ → **Giải tỏa**: `NguoiLX_HoSo` PK là `MaDK` (1 dòng/MaDK).
 4. Quy ước giá trị `GioiTinh char(1)` → "Nam"/"Nữ" ('1'/'0' hay 'M'/'F'?) cần xác nhận từ dữ liệu thực.
 5. Có cần lọc theo `TrangThai` (bit) ở `NguoiLX`/`NguoiLX_HoSo`/`KhoaHoc` để bỏ bản ghi đã hủy không?
-6. Bộ lọc "Hạng GPLX" trên UI nên áp vào hạng đào tạo (`NguoiLX_HoSo.HangGPLX`) hay hạng đã có
-   (`HangGPLXDaCo`)? Hiện truy vấn lọc theo hạng đào tạo `hs.HangGPLX`.
+6. Bộ lọc "Hạng GPLX/Hạng học" cho nguồn V2 cần tiếp tục được rà soát với UI, nhưng dữ liệu hạng học đồng bộ đã chốt
+   theo `NguoiLX_HoSo.HangDaoTao` → `DM_HangDT.TenHangDT`, không lấy từ `NguoiLX_HoSo.HangGPLX`.
 
 ## So khớp với QLHV_APP (đích)
 

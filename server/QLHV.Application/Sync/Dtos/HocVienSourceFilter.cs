@@ -12,7 +12,7 @@ public sealed class HocVienSourceFilter
     /// <summary>Lọc theo mã khóa (NguoiLX_HoSo.MaKhoaHoc / KhoaHoc.MaKH).</summary>
     public string? MaKhoa { get; init; }
 
-    /// <summary>Lọc theo hạng đào tạo của khóa (NguoiLX_HoSo.HangGPLX).</summary>
+    /// <summary>Lọc theo hạng đào tạo của khóa (NguoiLX_HoSo.HangDaoTao hoặc DM_HangDT.TenHangDT).</summary>
     public string? HangGPLX { get; init; }
 
     /// <summary>Lọc theo giới tính (NguoiLX.GioiTinh, char(1)).</summary>

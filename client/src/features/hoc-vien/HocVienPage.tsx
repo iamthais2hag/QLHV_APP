@@ -4,6 +4,7 @@ import type { HocVienListItem, HocVienSearchParams } from './types';
 import {
   buildHocVienPhotoUrl,
   exportCurrentRowsToExcel,
+  formatGioiTinh,
   formatNgaySinh,
   getHocVienPhotoTitle,
 } from './utils';
@@ -270,7 +271,7 @@ export default function HocVienPage() {
                     {row.hoVaTen}
                   </td>
                   <td>{formatNgaySinh(row.ngaySinh)}</td>
-                  <td>{row.gioiTinh ?? ''}</td>
+                  <td>{formatGioiTinh(row.gioiTinh)}</td>
                   <td>{row.soCccd ?? ''}</td>
                   <td className="cell-ellipsis cell-address" title={row.diaChiThuongTru ?? ''}>
                     {row.diaChiThuongTru ?? ''}

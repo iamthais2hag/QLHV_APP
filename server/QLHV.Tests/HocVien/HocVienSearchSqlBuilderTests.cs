@@ -1,4 +1,5 @@
 using QLHV.Application.HocVien.Dtos;
+using QLHV.Application.HocVien;
 using QLHV.Infrastructure.HocVien;
 
 namespace QLHV.Tests.HocVien;
@@ -47,6 +48,31 @@ public sealed class HocVienSearchSqlBuilderTests
 
         Assert.DoesNotContain("GioiTinh = @GioiTinh", query.Sql, StringComparison.Ordinal);
         Assert.DoesNotContain("GioiTinh", query.Parameters.ParameterNames);
+    }
+
+    [Theory]
+    [InlineData("M", "Nam")]
+    [InlineData("F", "Nữ")]
+    public void Gioi_tinh_source_value_displays_as_vietnamese_label(string sourceValue, string expected)
+    {
+        Assert.Equal(expected, HocVienGender.ToDisplayValue(sourceValue));
+    }
+
+    [Theory]
+    [InlineData("Nam", "M")]
+    [InlineData("Nữ", "F")]
+    [InlineData("Nu", "F")]
+    public void Gioi_tinh_filter_maps_display_label_to_source_value(string displayValue, string expectedSourceValue)
+    {
+        var query = HocVienSearchSqlBuilder.BuildCount(new HocVienSearchRequest
+        {
+            GioiTinh = displayValue,
+            Page = 1,
+            PageSize = 20,
+        });
+
+        Assert.Contains("GioiTinh = @GioiTinh", query.Sql, StringComparison.Ordinal);
+        Assert.Equal(expectedSourceValue, query.Parameters.Get<string>("GioiTinh"));
     }
 
     [Theory]

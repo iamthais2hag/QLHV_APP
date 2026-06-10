@@ -106,13 +106,13 @@ Target columns confirmed from `database/QLHV_APP_DATABASE_SCHEMA_v2_PERFORMANCE.
 | `NgaySinh` | `NguoiLX.NgaySinh` | Confirmed |
 | `GioiTinh` | `NguoiLX.GioiTinh` | Confirmed source; raw value preserved |
 | `SoCCCD` | `NguoiLX.SoCMT` | Confirmed source; trim/preserve only |
-| `DiaChiThuongTru` | `NguoiLX.NoiTT` | Confirmed |
+| `DiaChiThuongTru` | `DM_DVHC.TenDayDu` from `NguoiLX.NoiTT_MaDVQL + NguoiLX.NoiTT_MaDVHC = DM_DVHC.MaDV`; fallback `NguoiLX.NoiTT` | Confirmed |
 | `SoGPLXDaCo` | `NguoiLX_HoSo.SoGPLXDaCo` | Confirmed |
 | `HangGPLXDaCo` | `NguoiLX_HoSo.HangGPLXDaCo` | Confirmed |
 | `NguoiNhanHoSo` | `NguoiLX_HoSo.NguoiNhanHSo` | Confirmed |
 | `TenKhoa` | `KhoaHoc.TenKH` | Confirmed |
 | `MaKhoa` | `NguoiLX_HoSo.MaKhoaHoc` / `KhoaHoc.MaKH` | Confirmed |
-| `HangGPLXHoc` | `NguoiLX_HoSo.HangGPLX` | Confirmed related field |
+| `HangGPLXHoc` | `NguoiLX_HoSo.HangDaoTao` -> `DM_HangDT.MaHangDT` -> `DM_HangDT.TenHangDT` | Confirmed related field |
 
 ## Remaining Data Questions
 
@@ -121,7 +121,8 @@ The source columns are now mapped, but Phase B still needs human confirmation fr
 - `NguoiLX.GioiTinh` raw value semantics for display conversion.
 - `NguoiLX.SoCMT` data quality: CCCD 12-digit vs legacy CMND 9-digit ratio.
 - Whether `TrangThai` should filter cancelled/inactive rows.
-- Whether the UI "Hạng GPLX" filter should apply to `NguoiLX_HoSo.HangGPLX` or `HangGPLXDaCo`.
+- Whether the UI "Hạng GPLX/Hạng học" filter label should be renamed, now that synced `HangGPLXHoc` comes from
+  `NguoiLX_HoSo.HangDaoTao` -> `DM_HangDT.TenHangDT`.
 
 ## Phase B Preconditions
 

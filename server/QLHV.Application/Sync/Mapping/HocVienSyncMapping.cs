@@ -53,8 +53,9 @@ public static class HocVienSyncMapping
         {
             ColumnLabel = "Địa chỉ thường trú",
             TargetColumn = "DiaChiThuongTru",
-            SourceFieldPlanned = "NguoiLX.NoiTT",
+            SourceFieldPlanned = "DM_DVHC.TenDayDu từ NguoiLX.NoiTT_MaDVQL + NguoiLX.NoiTT_MaDVHC = DM_DVHC.MaDV",
             Confidence = MappingConfidence.Confirmed,
+            Note = "Fallback NguoiLX.NoiTT nếu không join được DM_DVHC.",
         },
         new()
         {
@@ -90,6 +91,14 @@ public static class HocVienSyncMapping
             TargetColumn = "MaKhoa",
             SourceFieldPlanned = "NguoiLX_HoSo.MaKhoaHoc / KhoaHoc.MaKH",
             Confidence = MappingConfidence.Confirmed,
+        },
+        new()
+        {
+            ColumnLabel = "Hạng học",
+            TargetColumn = "HangGPLXHoc",
+            SourceFieldPlanned = "NguoiLX_HoSo.HangDaoTao -> DM_HangDT.MaHangDT -> DM_HangDT.TenHangDT",
+            Confidence = MappingConfidence.Confirmed,
+            Note = "Không dùng trường hạng GPLX hồ sơ cho hạng học.",
         },
     };
 }
