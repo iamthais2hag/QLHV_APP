@@ -4,8 +4,7 @@ namespace QLHV.Application.Sync.Mapping;
 /// Kế hoạch ánh xạ đồng bộ học viên CSDT_V2 -> QLHV_APP (dbo.App_HocVien).
 ///
 /// Cột đích lấy từ schema thật: database/QLHV_APP_DATABASE_SCHEMA_v2_PERFORMANCE.sql.
-/// Trường nguồn V2 được suy ra từ các script chuyển dữ liệu hiện có
-/// (NguoiLX, NguoiLX_HoSo, NguoiLX_GPLX, KhoaHoc) và CẦN xác nhận lại với schema V2 thật ở Phase B.
+/// Trường nguồn V2 đã đối chiếu với database/reference/V2_schema_full.sql.
 /// "STT" là số thứ tự hiển thị, không phải cột lưu trữ nên không tham gia đồng bộ.
 /// </summary>
 public static class HocVienSyncMapping
@@ -16,8 +15,8 @@ public static class HocVienSyncMapping
         {
             ColumnLabel = "Mã đăng ký",
             TargetColumn = "MaDK",
-            SourceFieldPlanned = "NguoiLX_HoSo.MaDK",
-            Confidence = MappingConfidence.Inferred,
+            SourceFieldPlanned = "NguoiLX.MaDK / NguoiLX_HoSo.MaDK",
+            Confidence = MappingConfidence.Confirmed,
             Note = "Khóa nghiệp vụ; UNIQUE trong App_HocVien.",
         },
         new()
@@ -25,71 +24,72 @@ public static class HocVienSyncMapping
             ColumnLabel = "Họ và tên",
             TargetColumn = "HoTen",
             SourceFieldPlanned = "NguoiLX.HoVaTen",
-            Confidence = MappingConfidence.Inferred,
+            Confidence = MappingConfidence.Confirmed,
         },
         new()
         {
             ColumnLabel = "Ngày sinh",
             TargetColumn = "NgaySinh",
             SourceFieldPlanned = "NguoiLX.NgaySinh",
-            Confidence = MappingConfidence.Inferred,
+            Confidence = MappingConfidence.Confirmed,
         },
         new()
         {
             ColumnLabel = "Giới tính",
             TargetColumn = "GioiTinh",
-            SourceFieldPlanned = "NguoiLX.GioiTinh (cần xác nhận)",
-            Confidence = MappingConfidence.Unknown,
+            SourceFieldPlanned = "NguoiLX.GioiTinh",
+            Confidence = MappingConfidence.Confirmed,
+            Note = "Giữ nguyên raw value từ V2; quy đổi hiển thị sẽ chốt sau khi xác nhận dữ liệu thực.",
         },
         new()
         {
             ColumnLabel = "Số CCCD",
             TargetColumn = "SoCCCD",
-            SourceFieldPlanned = "NguoiLX.SoCMT (cần xác nhận CCCD vs CMT)",
-            Confidence = MappingConfidence.Unknown,
-            Note = "Script kiểm tra dùng SoCMT làm CCCD; cần xác nhận cột CCCD chuẩn ở V2.",
+            SourceFieldPlanned = "NguoiLX.SoCMT",
+            Confidence = MappingConfidence.Confirmed,
+            Note = "Trim/preserve only; không tự đổi CMND 9 số thành CCCD 12 số.",
         },
         new()
         {
             ColumnLabel = "Địa chỉ thường trú",
             TargetColumn = "DiaChiThuongTru",
-            SourceFieldPlanned = "NguoiLX.DiaChiThuongTru (cần xác nhận)",
-            Confidence = MappingConfidence.Unknown,
+            SourceFieldPlanned = "NguoiLX.NoiTT",
+            Confidence = MappingConfidence.Confirmed,
         },
         new()
         {
             ColumnLabel = "Số GPLX đã có",
             TargetColumn = "SoGPLXDaCo",
-            SourceFieldPlanned = "NguoiLX_GPLX.SoGPLX (cần xác nhận)",
-            Confidence = MappingConfidence.Unknown,
+            SourceFieldPlanned = "NguoiLX_HoSo.SoGPLXDaCo",
+            Confidence = MappingConfidence.Confirmed,
         },
         new()
         {
             ColumnLabel = "Hạng GPLX đã có",
             TargetColumn = "HangGPLXDaCo",
-            SourceFieldPlanned = "NguoiLX_GPLX.HangGPLX (cần xác nhận)",
-            Confidence = MappingConfidence.Unknown,
+            SourceFieldPlanned = "NguoiLX_HoSo.HangGPLXDaCo",
+            Confidence = MappingConfidence.Confirmed,
         },
         new()
         {
             ColumnLabel = "Người nhận hồ sơ",
             TargetColumn = "NguoiNhanHoSo",
-            SourceFieldPlanned = "NguoiLX_HoSo.NguoiNhanHoSo (cần xác nhận)",
-            Confidence = MappingConfidence.Unknown,
+            SourceFieldPlanned = "NguoiLX_HoSo.NguoiNhanHSo",
+            Confidence = MappingConfidence.Confirmed,
         },
         new()
         {
             ColumnLabel = "Tên khóa",
             TargetColumn = "TenKhoa",
             SourceFieldPlanned = "KhoaHoc.TenKH",
-            Confidence = MappingConfidence.Inferred,
+            Confidence = MappingConfidence.Confirmed,
         },
         new()
         {
             ColumnLabel = "Mã khóa",
             TargetColumn = "MaKhoa",
-            SourceFieldPlanned = "KhoaHoc.MaKH",
-            Confidence = MappingConfidence.Inferred,
+            SourceFieldPlanned = "NguoiLX_HoSo.MaKhoaHoc / KhoaHoc.MaKH",
+            Confidence = MappingConfidence.Confirmed,
         },
     };
 }

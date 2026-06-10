@@ -81,6 +81,39 @@ public sealed class HocVienSyncGuardTests
     }
 
     [Fact]
+    public async Task Dry_run_mapping_uses_confirmed_v2_sources()
+    {
+        var fakes = TestFakes.Create(enableWrites: false);
+
+        var result = await fakes.Service.DryRunHocVienAsync();
+
+        Assert.Contains(result.Mapping, m =>
+            m.TargetColumn == "SoGPLXDaCo" &&
+            m.SourceFieldPlanned.Contains("NguoiLX_HoSo.SoGPLXDaCo", StringComparison.Ordinal));
+        Assert.Contains(result.Mapping, m =>
+            m.TargetColumn == "DiaChiThuongTru" &&
+            m.SourceFieldPlanned.Contains("NguoiLX.NoiTT", StringComparison.Ordinal));
+        Assert.Contains(result.Mapping, m =>
+            m.TargetColumn == "NguoiNhanHoSo" &&
+            m.SourceFieldPlanned.Contains("NguoiLX_HoSo.NguoiNhanHSo", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Dry_run_mapping_does_not_include_retired_v2_sources()
+    {
+        var fakes = TestFakes.Create(enableWrites: false);
+
+        var result = await fakes.Service.DryRunHocVienAsync();
+        var reportText = string.Join(
+            "\n",
+            result.Mapping.Select(m => $"{m.TargetColumn}|{m.SourceFieldPlanned}|{m.Note}"));
+
+        Assert.DoesNotContain("NguoiLX_GPLX", reportText, StringComparison.Ordinal);
+        Assert.DoesNotContain("NguoiLX.DiaChiThuongTru", reportText, StringComparison.Ordinal);
+        Assert.DoesNotContain("NguoiLX_HoSo.NguoiNhanHoSo", reportText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Config_check_returns_safe_flags_without_read_or_write()
     {
         var fakes = TestFakes.Create(enableWrites: false, sourceCount: 7);

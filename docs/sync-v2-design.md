@@ -89,42 +89,39 @@ Dry-run does not:
 - Write `QLHV_APP`.
 - Write Hangfire or sync logs.
 
-## Planned Mapping: HocVien
+## Confirmed Mapping: HocVien
 
-> **Cập nhật Phase B1:** Ánh xạ đã được xác nhận chi tiết từ cột nguồn V2 thật
-> (trích từ script chuyển dữ liệu) trong [`hoc-vien-v2-mapping.md`](./hoc-vien-v2-mapping.md).
-> Bảng dưới đây là phiên bản Phase A ban đầu (độ tin cậy thấp hơn); hãy dùng tài liệu
-> mapping chuyên biệt làm nguồn chính. Việc chốt cuối vẫn cần `V2_schema_full.sql`
-> (hiện chưa có trong repo).
+> **Cập nhật Phase B3H:** Ánh xạ hiển thị bởi dry-run Học viên dùng cùng nguồn đã chốt trong
+> [`hoc-vien-v2-mapping.md`](./hoc-vien-v2-mapping.md) và đã đối chiếu với
+> `database/reference/V2_schema_full.sql`.
 
 Target table: `QLHV_APP.dbo.App_HocVien`.
 
 Target columns confirmed from `database/QLHV_APP_DATABASE_SCHEMA_v2_PERFORMANCE.sql`:
 
-| Target | Planned source | Confidence |
+| Target | Source | Confidence |
 | --- | --- | --- |
-| `MaDK` | `CSDT_V2.dbo.NguoiLX_HoSo.MaDK` / `NguoiLX.MaDK` | Inferred |
-| `HoTen` | `NguoiLX.HoVaTen` | Inferred |
-| `NgaySinh` | `NguoiLX.NgaySinh` | Inferred |
-| `GioiTinh` | `NguoiLX.GioiTinh` | Inferred from scripts, confirm in real V2 |
-| `SoCCCD` | `NguoiLX.SoCMT` | Uncertain: CCCD vs CMT naming must be confirmed |
-| `DiaChiThuongTru` | likely `NguoiLX.NoiTT` or related address columns | Uncertain |
-| `SoGPLXDaCo` | `NguoiLX_HoSo.SoGPLXDaCo` or `NguoiLX_GPLX.SoGPLX` | Uncertain |
-| `HangGPLXDaCo` | `NguoiLX_HoSo.HangGPLXDaCo` or `NguoiLX_GPLX.HangGPLX` | Uncertain |
-| `NguoiNhanHoSo` | likely `NguoiLX_HoSo.NguoiNhanHSo` | Uncertain |
-| `TenKhoa` | `KhoaHoc.TenKH` | Inferred |
-| `MaKhoa` | `KhoaHoc.MaKH` or `NguoiLX_HoSo.MaKhoaHoc` | Inferred |
-| `HangGPLXHoc` | `KhoaHoc.HangGPLX` or `NguoiLX_HoSo.HangGPLX` | Uncertain |
+| `MaDK` | `NguoiLX.MaDK` / `NguoiLX_HoSo.MaDK` | Confirmed |
+| `HoTen` | `NguoiLX.HoVaTen` | Confirmed |
+| `NgaySinh` | `NguoiLX.NgaySinh` | Confirmed |
+| `GioiTinh` | `NguoiLX.GioiTinh` | Confirmed source; raw value preserved |
+| `SoCCCD` | `NguoiLX.SoCMT` | Confirmed source; trim/preserve only |
+| `DiaChiThuongTru` | `NguoiLX.NoiTT` | Confirmed |
+| `SoGPLXDaCo` | `NguoiLX_HoSo.SoGPLXDaCo` | Confirmed |
+| `HangGPLXDaCo` | `NguoiLX_HoSo.HangGPLXDaCo` | Confirmed |
+| `NguoiNhanHoSo` | `NguoiLX_HoSo.NguoiNhanHSo` | Confirmed |
+| `TenKhoa` | `KhoaHoc.TenKH` | Confirmed |
+| `MaKhoa` | `NguoiLX_HoSo.MaKhoaHoc` / `KhoaHoc.MaKH` | Confirmed |
+| `HangGPLXHoc` | `NguoiLX_HoSo.HangGPLX` | Confirmed related field |
 
-## Schema Mapping Uncertainty
+## Remaining Data Questions
 
-The repo contains QLHV_APP schema and V1/V2 transfer scripts, but not a complete authoritative CSDT_V2 schema. Phase B needs human confirmation or a read-only schema export for:
+The source columns are now mapped, but Phase B still needs human confirmation from real test data for:
 
-- Whether `SoCMT` is the canonical CCCD field for current V2 data.
-- Whether permanent address maps to `NoiTT`, `NoiTT_MaDVHC`, `NoiTT_MaDVQL`, or another field.
-- Whether existing license fields should prefer `NguoiLX_HoSo` or latest row from `NguoiLX_GPLX`.
-- Whether `NguoiNhanHoSo` in QLHV_APP maps to V2 `NguoiNhanHSo` exactly.
-- How to choose a single active course/license row if V2 has multiple related records per `MaDK`.
+- `NguoiLX.GioiTinh` raw value semantics for display conversion.
+- `NguoiLX.SoCMT` data quality: CCCD 12-digit vs legacy CMND 9-digit ratio.
+- Whether `TrangThai` should filter cancelled/inactive rows.
+- Whether the UI "Hạng GPLX" filter should apply to `NguoiLX_HoSo.HangGPLX` or `HangGPLXDaCo`.
 
 ## Phase B Preconditions
 
