@@ -35,7 +35,8 @@ builder.Services.AddCors(options =>
     options.AddPolicy(FrontendCors, policy =>
         policy.WithOrigins(frontendOrigins)
             .AllowAnyHeader()
-            .AllowAnyMethod());
+            .AllowAnyMethod()
+            .WithExposedHeaders("Content-Disposition"));
 });
 
 // Swagger / OpenAPI

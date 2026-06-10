@@ -94,6 +94,13 @@ public static class HocVienSyncMapping
         },
         new()
         {
+            ColumnLabel = "Mã hạng học",
+            TargetColumn = "MaHangDT",
+            SourceFieldPlanned = "NguoiLX_HoSo.HangDaoTao",
+            Confidence = MappingConfidence.Confirmed,
+        },
+        new()
+        {
             ColumnLabel = "Hạng học",
             TargetColumn = "HangGPLXHoc",
             SourceFieldPlanned = "NguoiLX_HoSo.HangDaoTao -> DM_HangDT.MaHangDT -> DM_HangDT.TenHangDT",

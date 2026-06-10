@@ -12,4 +12,8 @@ public interface IHocVienService
     Task<PagedResult<HocVienListItemDto>> SearchAsync(
         HocVienSearchRequest request,
         CancellationToken cancellationToken = default);
+
+    Task<HocVienExportFileDto> ExportExcelAsync(
+        HocVienSearchRequest request,
+        CancellationToken cancellationToken = default);
 }

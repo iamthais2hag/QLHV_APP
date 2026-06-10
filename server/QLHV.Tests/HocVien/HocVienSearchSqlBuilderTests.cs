@@ -19,6 +19,7 @@ public sealed class HocVienSearchSqlBuilderTests
         Assert.Contains("WHERE IsDeleted = 0", query.Sql, StringComparison.Ordinal);
         Assert.Contains("AnhRelativePath", query.Sql, StringComparison.Ordinal);
         Assert.Contains("LastSyncStatus", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("MaHangDT", query.Sql, StringComparison.Ordinal);
         Assert.Contains("HangGPLXHoc", query.Sql, StringComparison.Ordinal);
         Assert.Contains("HangGPLXDaCo", query.Sql, StringComparison.Ordinal);
         Assert.Contains("ORDER BY HocVienId ASC", query.Sql, StringComparison.Ordinal);
@@ -113,6 +114,23 @@ public sealed class HocVienSearchSqlBuilderTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
+    public void Ma_hang_dt_empty_does_not_filter(string? value)
+    {
+        var query = HocVienSearchSqlBuilder.BuildCount(new HocVienSearchRequest
+        {
+            MaHangDT = value,
+            Page = 1,
+            PageSize = 20,
+        });
+
+        Assert.DoesNotContain("MaHangDT = @MaHangDT", query.Sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("MaHangDT", query.Parameters.ParameterNames);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
     public void Keyword_empty_does_not_filter(string? value)
     {
         var query = HocVienSearchSqlBuilder.BuildCount(new HocVienSearchRequest
@@ -148,6 +166,7 @@ public sealed class HocVienSearchSqlBuilderTests
         var query = HocVienSearchSqlBuilder.BuildPage(new HocVienSearchRequest
         {
             MaKhoa = "K001",
+            MaHangDT = "A1m",
             HangGplx = "B2",
             GioiTinh = "1",
             Page = 1,
@@ -155,10 +174,48 @@ public sealed class HocVienSearchSqlBuilderTests
         });
 
         Assert.Contains("MaKhoa = @MaKhoa", query.Sql, StringComparison.Ordinal);
-        Assert.Contains("HangGPLXHoc = @HangGplx", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("MaHangDT = @MaHangDT", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("(MaHangDT = @HangGplx OR HangGPLXHoc = @HangGplx)", query.Sql, StringComparison.Ordinal);
         Assert.Contains("GioiTinh = @GioiTinh", query.Sql, StringComparison.Ordinal);
         Assert.Contains("MaKhoa", query.Parameters.ParameterNames);
+        Assert.Contains("MaHangDT", query.Parameters.ParameterNames);
         Assert.Contains("HangGplx", query.Parameters.ParameterNames);
         Assert.Contains("GioiTinh", query.Parameters.ParameterNames);
+        Assert.Equal("A1m", query.Parameters.Get<string>("MaHangDT"));
+    }
+
+    [Fact]
+    public void Export_query_uses_filters_without_paging()
+    {
+        var query = HocVienSearchSqlBuilder.BuildExport(new HocVienSearchRequest
+        {
+            Keyword = "HV001",
+            MaKhoa = "K001",
+            MaHangDT = "A1m",
+            HangGplx = "B2",
+            GioiTinh = "Nam",
+            Page = 30,
+            PageSize = 20,
+        }, maxRows: 10_000);
+
+        Assert.Contains("SELECT TOP (@MaxRows)", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("FROM dbo.App_HocVien", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("WHERE IsDeleted = 0", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("MaDK LIKE @Keyword", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("HoTen LIKE @Keyword", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("SoCCCD LIKE @Keyword", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("MaHangDT", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("MaKhoa = @MaKhoa", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("MaHangDT = @MaHangDT", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("(MaHangDT = @HangGplx OR HangGPLXHoc = @HangGplx)", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("GioiTinh = @GioiTinh", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("ORDER BY HocVienId ASC", query.Sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("OFFSET", query.Sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("FETCH NEXT", query.Sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Offset", query.Parameters.ParameterNames);
+        Assert.DoesNotContain("PageSize", query.Parameters.ParameterNames);
+        Assert.Equal(10_000, query.Parameters.Get<int>("MaxRows"));
+        Assert.Equal("A1m", query.Parameters.Get<string>("MaHangDT"));
+        Assert.Equal("M", query.Parameters.Get<string>("GioiTinh"));
     }
 }

@@ -16,6 +16,7 @@ public static class V2RowHashCalculator
             N(model.MaDK),
             N(model.MaKhoa),
             N(model.TenKhoa),
+            N(model.MaHangDT),
             N(model.HangGPLXHoc),
             N(model.HoTen),
             model.NgaySinh?.ToString("yyyy-MM-dd") ?? string.Empty,

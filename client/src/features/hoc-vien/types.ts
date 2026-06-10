@@ -8,6 +8,7 @@ export interface HocVienListItem {
   diaChiThuongTru: string | null;
   anhRelativePath: string | null;
   hangGplxHoc: string | null;
+  maHangDT: string | null;
   soGplxDaCo: string | null;
   hangGplxDaCo: string | null;
   nguoiNhanHoSo: string | null;
@@ -19,11 +20,14 @@ export interface HocVienListItem {
 export interface HocVienSearchParams {
   keyword?: string;
   maKhoa?: string;
+  maHangDT?: string;
   hangGplx?: string;
   gioiTinh?: string;
   page: number;
   pageSize: number;
 }
+
+export type HocVienExportParams = Omit<HocVienSearchParams, 'page' | 'pageSize'>;
 
 /** Kết quả phân trang chung. */
 export interface PagedResult<T> {

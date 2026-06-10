@@ -390,6 +390,12 @@
   align-items: flex-end;
 }
 
+.toolbar__error {
+  margin-top: 10px;
+  color: #b3261e;
+  font-size: 13px;
+}
+
 .btn {
   height: 38px;
   padding: 0 16px;

@@ -34,4 +34,27 @@ public sealed class HocVienController : ControllerBase
         var result = await _service.SearchAsync(request, cancellationToken);
         return Ok(result);
     }
+
+    /// <summary>Xuáº¥t Excel toÃ n bá»™ há»c viÃªn phÃ¹ há»£p vá»›i bá»™ lá»c hiá»‡n táº¡i.</summary>
+    /// <param name="request">Tham sá»‘ tÃ¬m kiáº¿m; phÃ¢n trang khÃ´ng Ä‘Æ°á»£c Ã¡p dá»¥ng cho export.</param>
+    /// <param name="cancellationToken">Token há»§y.</param>
+    /// <returns>File Excel .xlsx chá»‰ Ä‘á»c.</returns>
+    [HttpGet("export-excel")]
+    [Produces("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")]
+    [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ExportExcel(
+        [FromQuery] HocVienSearchRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _service.ExportExcelAsync(request, cancellationToken);
+            return File(result.Content, result.ContentType, result.FileName);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
 }

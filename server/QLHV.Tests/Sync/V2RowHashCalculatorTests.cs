@@ -23,6 +23,15 @@ public sealed class V2RowHashCalculatorTests
     }
 
     [Fact]
+    public void Changed_ma_hang_dt_changes_hash()
+    {
+        var first = V2RowHashCalculator.Compute(Model(maHangDT: "A1m"));
+        var second = V2RowHashCalculator.Compute(Model(maHangDT: "B2"));
+
+        Assert.NotEqual(first, second);
+    }
+
+    [Fact]
     public void Existing_hash_value_is_not_included_in_hash_input()
     {
         var first = V2RowHashCalculator.Compute(Model(existingHash: "old-sync-metadata"));
@@ -33,11 +42,13 @@ public sealed class V2RowHashCalculatorTests
 
     private static HocVienTargetWriteModel Model(
         string hoTen = "Nguyen Van A",
+        string maHangDT = "B2",
         string existingHash = "") => new()
     {
         MaDK = "DK001",
         MaKhoa = "K001",
         TenKhoa = "Khoa 1",
+        MaHangDT = maHangDT,
         HangGPLXHoc = "B2",
         HoTen = hoTen,
         NgaySinh = new DateTime(1990, 1, 2),

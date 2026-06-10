@@ -14,6 +14,8 @@ public sealed class HocVienSearchRequest
     /// <summary>Lọc theo mã khóa học.</summary>
     public string? MaKhoa { get; set; }
 
+    public string? MaHangDT { get; set; }
+
     /// <summary>Lọc theo hạng GPLX.</summary>
     public string? HangGplx { get; set; }
 
@@ -31,6 +33,7 @@ public sealed class HocVienSearchRequest
     {
         Keyword = string.IsNullOrWhiteSpace(Keyword) ? null : Keyword.Trim(),
         MaKhoa = string.IsNullOrWhiteSpace(MaKhoa) ? null : MaKhoa.Trim(),
+        MaHangDT = string.IsNullOrWhiteSpace(MaHangDT) ? null : MaHangDT.Trim(),
         HangGplx = string.IsNullOrWhiteSpace(HangGplx) ? null : HangGplx.Trim(),
         GioiTinh = HocVienGender.NormalizeFilterValue(GioiTinh),
         Page = PagingDefaults.NormalizePage(Page),

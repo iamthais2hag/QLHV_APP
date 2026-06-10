@@ -50,6 +50,7 @@ public sealed class HocVienMappingRulesTests
         var result = HocVienSyncMapper.MapAndValidate(Source(tenHangDT: " Hạng B2 ", hangGplx: "A1"));
 
         Assert.NotNull(result.Model);
+        Assert.Equal("B2", result.Model!.MaHangDT);
         Assert.Equal("Hạng B2", result.Model!.HangGPLXHoc);
     }
 

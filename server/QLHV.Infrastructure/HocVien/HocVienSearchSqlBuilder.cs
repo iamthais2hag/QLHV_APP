@@ -18,6 +18,7 @@ SELECT
     DiaChiThuongTru,
     AnhRelativePath,
     SoGPLXDaCo     AS SoGplxDaCo,
+    MaHangDT,
     HangGPLXHoc    AS HangGplxHoc,
     HangGPLXDaCo   AS HangGplxDaCo,
     NguoiNhanHoSo,
@@ -48,6 +49,22 @@ SELECT
         return (sql, parameters);
     }
 
+    public static (string Sql, DynamicParameters Parameters) BuildExport(
+        HocVienSearchRequest request,
+        int maxRows)
+    {
+        var normalized = request.Normalized();
+        var parameters = new DynamicParameters();
+        var where = BuildWhere(normalized, parameters);
+        parameters.Add("@MaxRows", Math.Max(1, maxRows));
+
+        var sql = SelectColumns.Replace("SELECT", "SELECT TOP (@MaxRows)", StringComparison.Ordinal) +
+            FromClause + where +
+            "\nORDER BY HocVienId ASC;";
+
+        return (sql, parameters);
+    }
+
     private static string BuildWhere(HocVienSearchRequest request, DynamicParameters parameters)
     {
         var conditions = new List<string> { "IsDeleted = 0" };
@@ -65,9 +82,15 @@ SELECT
             parameters.Add("@MaKhoa", request.MaKhoa);
         }
 
+        if (!string.IsNullOrWhiteSpace(request.MaHangDT))
+        {
+            conditions.Add("MaHangDT = @MaHangDT");
+            parameters.Add("@MaHangDT", request.MaHangDT);
+        }
+
         if (!string.IsNullOrWhiteSpace(request.HangGplx))
         {
-            conditions.Add("HangGPLXHoc = @HangGplx");
+            conditions.Add("(MaHangDT = @HangGplx OR HangGPLXHoc = @HangGplx)");
             parameters.Add("@HangGplx", request.HangGplx);
         }
 

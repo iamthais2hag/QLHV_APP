@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { searchHocVien } from './api';
-import type { HocVienListItem, HocVienSearchParams } from './types';
+import { exportHocVienExcel, searchHocVien } from './api';
+import type { HocVienExportParams, HocVienListItem, HocVienSearchParams } from './types';
 import {
   buildHocVienPhotoUrl,
-  exportCurrentRowsToExcel,
   formatGioiTinh,
   formatNgaySinh,
   getHocVienPhotoTitle,
@@ -46,8 +45,15 @@ export default function HocVienPage() {
   const [totalItems, setTotalItems] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [errorMessage, setErrorMessage] = useState('');
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportErrorMessage, setExportErrorMessage] = useState('');
 
   const abortRef = useRef<AbortController | null>(null);
+
+  const currentFilters = useCallback(
+    (): HocVienExportParams => ({ keyword, maKhoa, hangGplx, gioiTinh }),
+    [keyword, maKhoa, hangGplx, gioiTinh],
+  );
 
   const load = useCallback(
     async (params: HocVienSearchParams) => {
@@ -84,6 +90,7 @@ export default function HocVienPage() {
   }, [page]);
 
   function handleSearch() {
+    setExportErrorMessage('');
     if (page === 1) {
       load({ keyword, maKhoa, hangGplx, gioiTinh, page: 1, pageSize: PAGE_SIZE });
     } else {
@@ -96,6 +103,7 @@ export default function HocVienPage() {
     setMaKhoa('');
     setHangGplx('');
     setGioiTinh('');
+    setExportErrorMessage('');
     if (page === 1) {
       load({ page: 1, pageSize: PAGE_SIZE });
     } else {
@@ -103,8 +111,26 @@ export default function HocVienPage() {
     }
   }
 
-  function handleExport() {
-    exportCurrentRowsToExcel(rows, 'danh-sach-hoc-vien.xls');
+  async function handleExport() {
+    setExportErrorMessage('');
+    setIsExporting(true);
+    try {
+      const result = await exportHocVienExcel(currentFilters());
+      const url = URL.createObjectURL(result.blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = result.fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setExportErrorMessage(
+        err instanceof Error ? err.message : 'Không thể xuất Excel. Vui lòng thử lại.',
+      );
+    } finally {
+      setIsExporting(false);
+    }
   }
 
   const startIndex = (page - 1) * PAGE_SIZE;
@@ -148,7 +174,7 @@ export default function HocVienPage() {
           </div>
           <div className="field">
             <label className="field__label" htmlFor="hv-hang">
-              Hạng GPLX
+              Hạng học
             </label>
             <input
               id="hv-hang"
@@ -157,6 +183,7 @@ export default function HocVienPage() {
               value={hangGplx}
               onChange={(e) => setHangGplx(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+              placeholder="Am, A1m..."
             />
           </div>
           <div className="field">
@@ -186,12 +213,13 @@ export default function HocVienPage() {
               type="button"
               className="btn btn--ghost"
               onClick={handleExport}
-              disabled={rows.length === 0}
+              disabled={totalItems === 0 || isExporting}
             >
-              Xuất Excel
+              {isExporting ? 'Đang xuất...' : 'Xuất Excel'}
             </button>
           </div>
         </div>
+        {exportErrorMessage && <div className="toolbar__error">{exportErrorMessage}</div>}
       </div>
 
       {/* Bảng dữ liệu + các trạng thái */}
@@ -276,7 +304,7 @@ export default function HocVienPage() {
                   <td className="cell-ellipsis cell-address" title={row.diaChiThuongTru ?? ''}>
                     {row.diaChiThuongTru ?? ''}
                   </td>
-                  <td>{row.hangGplxHoc ?? ''}</td>
+                  <td title={row.hangGplxHoc ?? ''}>{row.maHangDT ?? ''}</td>
                   <td>{row.soGplxDaCo ?? ''}</td>
                   <td>{row.hangGplxDaCo ?? ''}</td>
                   <td className="cell-ellipsis" title={row.nguoiNhanHoSo ?? ''}>

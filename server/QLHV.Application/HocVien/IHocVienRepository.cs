@@ -12,4 +12,9 @@ public interface IHocVienRepository
     Task<PagedResult<HocVienListItemDto>> SearchAsync(
         HocVienSearchRequest request,
         CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<HocVienListItemDto>> ExportRowsAsync(
+        HocVienSearchRequest request,
+        int maxRows,
+        CancellationToken cancellationToken = default);
 }

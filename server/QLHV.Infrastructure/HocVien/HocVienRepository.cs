@@ -61,6 +61,25 @@ public sealed class HocVienRepository : IHocVienRepository
         };
     }
 
+    public async Task<IReadOnlyList<HocVienListItemDto>> ExportRowsAsync(
+        HocVienSearchRequest request,
+        int maxRows,
+        CancellationToken cancellationToken = default)
+    {
+        var normalized = request.Normalized();
+        var connectionString = await ResolveUsableTargetAsync(cancellationToken);
+        await using var connection = new SqlConnection(connectionString);
+
+        var exportQuery = HocVienSearchSqlBuilder.BuildExport(normalized, maxRows);
+        var rows = await connection.QueryAsync<HocVienReadRow>(new CommandDefinition(
+            exportQuery.Sql,
+            exportQuery.Parameters,
+            commandTimeout: _options.TimeoutSeconds,
+            cancellationToken: cancellationToken));
+
+        return rows.Select(ToDto).ToList();
+    }
+
     private async Task<string> ResolveUsableTargetAsync(CancellationToken cancellationToken)
     {
         var target = await _connections.GetQlhvAppConnectionAsync(cancellationToken);
@@ -83,6 +102,7 @@ public sealed class HocVienRepository : IHocVienRepository
         DiaChiThuongTru = row.DiaChiThuongTru,
         AnhRelativePath = ToSafeRelativePath(row.AnhRelativePath),
         SoGplxDaCo = row.SoGplxDaCo,
+        MaHangDT = row.MaHangDT,
         HangGplxHoc = row.HangGplxHoc,
         HangGplxDaCo = row.HangGplxDaCo,
         NguoiNhanHoSo = row.NguoiNhanHoSo,
@@ -120,6 +140,7 @@ public sealed class HocVienRepository : IHocVienRepository
         public string? DiaChiThuongTru { get; init; }
         public string? AnhRelativePath { get; init; }
         public string? SoGplxDaCo { get; init; }
+        public string? MaHangDT { get; init; }
         public string? HangGplxHoc { get; init; }
         public string? HangGplxDaCo { get; init; }
         public string? NguoiNhanHoSo { get; init; }
