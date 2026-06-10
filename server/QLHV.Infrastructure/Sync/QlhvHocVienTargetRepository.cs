@@ -3,27 +3,32 @@ using Dapper;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
 using QLHV.Application.Sync;
+using QLHV.Application.Sync.Configuration;
 using QLHV.Application.Sync.Connections;
 using QLHV.Application.Sync.Dtos;
 using QLHV.Application.Sync.Mapping;
+using AppSyncOptions = QLHV.Application.Sync.SyncOptions;
 
 namespace QLHV.Infrastructure.Sync;
 
 /// <summary>
 /// Read and guarded write access to QLHV_APP.dbo.App_HocVien.
-/// B3B implements the write path, but callers must pass execution guards first.
+/// Writes use SqlBulkCopy into a temp staging table and MERGE in a transaction; no physical delete.
 /// </summary>
 public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
 {
     private readonly IConnectionSettingsProvider _connections;
-    private readonly SyncOptions _options;
+    private readonly AppSyncOptions _options;
+    private readonly SyncExecutionOptions _execution;
 
     public QlhvHocVienTargetRepository(
         IConnectionSettingsProvider connections,
-        IOptions<SyncOptions> options)
+        IOptions<AppSyncOptions> options,
+        IOptions<SyncExecutionOptions> execution)
     {
         _connections = connections;
         _options = options.Value;
+        _execution = execution.Value;
     }
 
     public async Task<int> CountAsync(CancellationToken cancellationToken = default)
@@ -59,40 +64,35 @@ public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
         return keys.ToList();
     }
 
-    public async Task<HocVienUpsertResultDto> UpsertBatchAsync(
-        IReadOnlyList<V2HocVienSourceRow> rows,
-        bool dryRun,
+    public async Task<UpsertCounts> UpsertBatchAsync(
+        IReadOnlyList<HocVienTargetWriteModel> rows,
         CancellationToken cancellationToken = default)
     {
-        if (dryRun)
+        if (!_execution.EnableTargetWrites)
         {
-            throw new InvalidOperationException("UpsertBatchAsync khong duoc goi cho dry-run.");
-        }
-
-        if (!_options.EnableTargetWrites)
-        {
-            throw new InvalidOperationException("EnableTargetWrites=false. Target write path is locked.");
+            throw new InvalidOperationException(
+                "Ghi vao QLHV_APP bi chan: SyncExecution.EnableTargetWrites = false.");
         }
 
         if (rows.Count == 0)
         {
-            return new HocVienUpsertResultDto();
-        }
-
-        var mappedRows = MapRows(rows, out var skippedBeforeMerge);
-        if (mappedRows.Count == 0)
-        {
-            return new HocVienUpsertResultDto
-            {
-                TotalRead = rows.Count,
-                Skipped = rows.Count,
-            };
+            return UpsertCounts.Empty;
         }
 
         var connectionString = await ResolveUsableTargetAsync(cancellationToken);
+        return await SyncRetryPolicyFactory.CreateDefault(_options.MaxRetryAttempts).ExecuteAsync(
+            ct => UpsertBatchCoreAsync(connectionString, rows, ct),
+            cancellationToken);
+    }
+
+    private async Task<UpsertCounts> UpsertBatchCoreAsync(
+        string connectionString,
+        IReadOnlyList<HocVienTargetWriteModel> rows,
+        CancellationToken cancellationToken)
+    {
         await using var connection = new SqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(cancellationToken);
 
         try
         {
@@ -102,17 +102,20 @@ public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
                 commandTimeout: _options.TimeoutSeconds,
                 cancellationToken: cancellationToken));
 
-            using (var bulkCopy = new SqlBulkCopy(
-                connection,
-                SqlBulkCopyOptions.CheckConstraints,
-                (SqlTransaction)transaction))
+            using (var bulkCopy = new SqlBulkCopy(connection, SqlBulkCopyOptions.CheckConstraints, transaction)
             {
-                bulkCopy.DestinationTableName = HocVienTargetMergeSql.StagingTableName;
-                bulkCopy.BatchSize = Math.Max(1, _options.BatchSize);
-                bulkCopy.BulkCopyTimeout = _options.TimeoutSeconds;
-                AddColumnMappings(bulkCopy);
+                DestinationTableName = HocVienTargetMergeSql.StagingTableName,
+                BatchSize = Math.Max(1, _options.BatchSize),
+                BulkCopyTimeout = _options.TimeoutSeconds,
+            })
+            {
+                using var table = BuildStagingTable(rows);
+                foreach (DataColumn column in table.Columns)
+                {
+                    bulkCopy.ColumnMappings.Add(column.ColumnName, column.ColumnName);
+                }
 
-                await bulkCopy.WriteToServerAsync(ToDataTable(mappedRows), cancellationToken);
+                await bulkCopy.WriteToServerAsync(table, cancellationToken);
             }
 
             var actions = await connection.QueryAsync<string>(new CommandDefinition(
@@ -132,15 +135,8 @@ public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
             var actionList = actions.ToList();
             var inserted = actionList.Count(a => string.Equals(a, "INSERT", StringComparison.OrdinalIgnoreCase));
             var updated = actionList.Count(a => string.Equals(a, "UPDATE", StringComparison.OrdinalIgnoreCase));
-            var unchanged = mappedRows.Count - inserted - updated;
-
-            return new HocVienUpsertResultDto
-            {
-                TotalRead = rows.Count,
-                Inserted = inserted,
-                Updated = updated,
-                Skipped = skippedBeforeMerge + Math.Max(0, unchanged),
-            };
+            var skipped = Math.Max(0, rows.Count - inserted - updated);
+            return new UpsertCounts(inserted, updated, skipped);
         }
         catch
         {
@@ -149,35 +145,7 @@ public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
         }
     }
 
-    private static IReadOnlyList<HocVienTargetWriteModel> MapRows(
-        IReadOnlyList<V2HocVienSourceRow> rows,
-        out int skipped)
-    {
-        skipped = 0;
-        var mapped = new List<HocVienTargetWriteModel>();
-
-        foreach (var row in rows)
-        {
-            var result = HocVienSyncMapper.MapAndValidate(row);
-            if (result.ShouldSkip || result.Model is null)
-            {
-                skipped++;
-                continue;
-            }
-
-            mapped.Add(result.Model);
-        }
-
-        var deduped = mapped
-            .GroupBy(row => row.MaDK, StringComparer.Ordinal)
-            .Select(group => group.Last())
-            .ToList();
-
-        skipped += mapped.Count - deduped.Count;
-        return deduped;
-    }
-
-    private static DataTable ToDataTable(IReadOnlyList<HocVienTargetWriteModel> rows)
+    private static DataTable BuildStagingTable(IReadOnlyList<HocVienTargetWriteModel> rows)
     {
         var table = new DataTable();
         table.Columns.Add("MaDK", typeof(string));
@@ -197,6 +165,10 @@ public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
 
         foreach (var row in rows)
         {
+            var hash = string.IsNullOrWhiteSpace(row.V2RowHash)
+                ? V2RowHashCalculator.Compute(row)
+                : row.V2RowHash;
+
             table.Rows.Add(
                 row.MaDK,
                 Db(row.MaKhoa),
@@ -211,34 +183,10 @@ public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
                 Db(row.HangGPLXDaCo),
                 Db(row.NguoiNhanHoSo),
                 row.SourceOfTruth,
-                row.V2RowHash);
+                hash);
         }
 
         return table;
-    }
-
-    private static void AddColumnMappings(SqlBulkCopy bulkCopy)
-    {
-        foreach (var column in new[]
-        {
-            "MaDK",
-            "MaKhoa",
-            "TenKhoa",
-            "HangGPLXHoc",
-            "HoTen",
-            "NgaySinh",
-            "GioiTinh",
-            "SoCCCD",
-            "DiaChiThuongTru",
-            "SoGPLXDaCo",
-            "HangGPLXDaCo",
-            "NguoiNhanHoSo",
-            "SourceOfTruth",
-            "V2RowHash",
-        })
-        {
-            bulkCopy.ColumnMappings.Add(column, column);
-        }
     }
 
     private async Task<string> ResolveUsableTargetAsync(CancellationToken cancellationToken)

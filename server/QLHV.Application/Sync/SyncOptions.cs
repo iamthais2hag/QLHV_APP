@@ -31,19 +31,4 @@ public sealed class SyncOptions
 
     /// <summary>Base delay for exponential backoff, in seconds.</summary>
     public int RetryBaseDelaySeconds { get; set; } = 2;
-
-    /// <summary>
-    /// Master switch for writing into QLHV_APP target tables. Defaults to false so execute endpoints fail closed.
-    /// </summary>
-    public bool EnableTargetWrites { get; set; } = false;
-
-    /// <summary>
-    /// Require an explicit request-level confirmation before any manual write execution. Defaults to true.
-    /// </summary>
-    public bool RequireManualConfirmation { get; set; } = true;
-
-    /// <summary>
-    /// Allows Hangfire recurring schedule registration in a later phase. Phase B3B keeps this false.
-    /// </summary>
-    public bool AllowHangfireSchedule { get; set; } = false;
 }

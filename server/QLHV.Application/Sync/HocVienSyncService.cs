@@ -1,6 +1,5 @@
-using System.Diagnostics;
-using System.Text.Json;
 using Microsoft.Extensions.Options;
+using QLHV.Application.Sync.Configuration;
 using QLHV.Application.Sync.Connections;
 using QLHV.Application.Sync.Dtos;
 using QLHV.Application.Sync.Mapping;
@@ -9,28 +8,31 @@ namespace QLHV.Application.Sync;
 
 /// <summary>
 /// Application service for one-way HocVien sync from CSDT_V2 to QLHV_APP.
-/// Dry-run remains no-write. Manual execution is guarded by explicit server and request switches.
+/// Dry-run remains no-write. Execute is guarded by SyncExecutionOptions and explicit confirmation.
 /// </summary>
 public sealed class HocVienSyncService : IHocVienSyncService
 {
     private readonly SyncOptions _options;
+    private readonly SyncExecutionOptions _execution;
     private readonly IConnectionSettingsProvider _connections;
     private readonly IV2HocVienSourceRepository _v2Source;
     private readonly IQlhvHocVienTargetRepository _target;
-    private readonly ISyncRunLogWriter _logWriter;
+    private readonly ISyncRunLogWriter _runLog;
 
     public HocVienSyncService(
         IOptions<SyncOptions> options,
+        IOptions<SyncExecutionOptions> execution,
         IConnectionSettingsProvider connections,
         IV2HocVienSourceRepository v2Source,
         IQlhvHocVienTargetRepository target,
-        ISyncRunLogWriter logWriter)
+        ISyncRunLogWriter runLog)
     {
         _options = options.Value;
+        _execution = execution.Value;
         _connections = connections;
         _v2Source = v2Source;
         _target = target;
-        _logWriter = logWriter;
+        _runLog = runLog;
     }
 
     public async Task<DryRunResultDto> DryRunHocVienAsync(CancellationToken cancellationToken = default)
@@ -113,274 +115,195 @@ public sealed class HocVienSyncService : IHocVienSyncService
         };
     }
 
-    public async Task<HocVienSyncExecuteResultDto> ExecuteHocVienAsync(
-        HocVienSyncExecuteRequest request,
+    public async Task<SyncExecuteResultDto> ExecuteHocVienAsync(
+        SyncExecuteRequest request,
         CancellationToken cancellationToken = default)
     {
-        request ??= new HocVienSyncExecuteRequest();
-        var startedAt = DateTime.UtcNow;
-        var stopwatch = Stopwatch.StartNew();
-        var issues = ValidateExecutionGuards(request);
-
-        if (issues.Count > 0)
+        request ??= new SyncExecuteRequest();
+        var blocked = ValidateExecutionGuard(request);
+        if (blocked is not null)
         {
-            return Rejected(startedAt, stopwatch.ElapsedMilliseconds, issues);
+            return blocked;
         }
 
         var qlhv = await _connections.GetQlhvAppConnectionAsync(cancellationToken);
         var v2 = await _connections.GetSourceConnectionAsync(SourceSystem.V2, cancellationToken);
-
-        if (!qlhv.IsUsable)
+        if (!qlhv.IsUsable || !v2.IsUsable)
         {
-            issues.Add("QLHV_APP chua co cau hinh ket noi dung duoc.");
+            return Blocked("Ket noi QLHV_APP hoac CSDT_V2 chua cau hinh dung duoc.");
         }
 
-        if (!v2.IsUsable)
-        {
-            issues.Add("CSDT_V2 chua co cau hinh ket noi dung duoc.");
-        }
-
-        if (issues.Count > 0)
-        {
-            return Rejected(startedAt, stopwatch.ElapsedMilliseconds, issues);
-        }
-
-        var filter = (request.Filter ?? HocVienSourceFilter.Empty).Normalized();
-        var batchSize = Math.Max(1, _options.BatchSize);
-        var maxRows = request.MaxRows is > 0 ? request.MaxRows.Value : (int?)null;
-        var totalAvailable = await _v2Source.CountAsync(filter, cancellationToken);
-        var remaining = maxRows.HasValue ? Math.Min(maxRows.Value, totalAvailable) : totalAvailable;
-
-        var totalRead = 0;
-        var totalInserted = 0;
-        var totalUpdated = 0;
-        var totalSkipped = 0;
-        var totalError = 0;
-        var errors = new List<SyncErrorDto>();
+        var startedAt = DateTime.UtcNow;
+        int totalRead = 0, inserted = 0, updated = 0, skipped = 0, warningCount = 0;
 
         try
         {
-            for (var offset = 0; remaining > 0; offset += batchSize)
+            var offset = 0;
+            while (true)
             {
-                var pageSize = Math.Min(batchSize, remaining);
-                var rows = await _v2Source.ReadPageAsync(filter, offset, pageSize, cancellationToken);
-                if (rows.Count == 0)
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var batch = await _v2Source.ReadPageAsync(
+                    HocVienSourceFilter.Empty,
+                    offset,
+                    Math.Max(1, _options.BatchSize),
+                    cancellationToken);
+
+                if (batch.Count == 0)
                 {
                     break;
                 }
 
-                var upsert = await _target.UpsertBatchAsync(rows, dryRun: false, cancellationToken);
-                totalRead += upsert.TotalRead;
-                totalInserted += upsert.Inserted;
-                totalUpdated += upsert.Updated;
-                totalSkipped += upsert.Skipped;
-                remaining -= rows.Count;
+                totalRead += batch.Count;
+                var models = new List<HocVienTargetWriteModel>(batch.Count);
+                foreach (var sourceRow in batch)
+                {
+                    var mapped = HocVienSyncMapper.MapAndValidate(sourceRow);
+                    warningCount += mapped.Warnings.Count;
+                    if (mapped.ShouldSkip || mapped.Model is null)
+                    {
+                        skipped++;
+                        continue;
+                    }
+
+                    models.Add(mapped.Model);
+                }
+
+                if (models.Count > 0)
+                {
+                    var counts = await _target.UpsertBatchAsync(models, cancellationToken);
+                    inserted += counts.Inserted;
+                    updated += counts.Updated;
+                    skipped += counts.Skipped;
+                }
+
+                if (batch.Count < Math.Max(1, _options.BatchSize))
+                {
+                    break;
+                }
+
+                offset += Math.Max(1, _options.BatchSize);
             }
 
-            stopwatch.Stop();
-            var summary = BuildSummary(
-                startedAt,
-                stopwatch.ElapsedMilliseconds,
-                "ThanhCong",
-                totalRead,
-                totalInserted,
-                totalUpdated,
-                totalSkipped,
-                totalError,
-                errors);
+            var endedAt = DateTime.UtcNow;
+            var summary = BuildSummary("ThanhCong", totalRead, inserted, updated, skipped, 0, startedAt, endedAt);
+            await WriteRunLogSafe(summary, warningCount, errorMessage: null, cancellationToken);
 
-            await _logWriter.WriteAsync(ToLogEntry(summary, errorMessage: null), cancellationToken);
-
-            return new HocVienSyncExecuteResultDto
+            return new SyncExecuteResultDto
             {
-                Accepted = true,
+                Executed = true,
                 Status = "ThanhCong",
-                Message = "Dong bo HocVien tu CSDT_V2 sang QLHV_APP da hoan tat.",
+                Message = "Dong bo hoan tat.",
                 Summary = summary,
             };
         }
         catch (Exception ex)
         {
-            stopwatch.Stop();
-            totalError++;
-            errors.Add(new SyncErrorDto
+            var endedAt = DateTime.UtcNow;
+            var summary = BuildSummary("Loi", totalRead, inserted, updated, skipped, 1, startedAt, endedAt);
+            await WriteRunLogSafe(summary, warningCount, errorMessage: ex.GetType().Name, cancellationToken);
+
+            return new SyncExecuteResultDto
             {
-                Code = "SYNC_EXECUTION_FAILED",
-                Message = $"Dong bo that bai. Chi tiet an toan: {ex.GetType().Name}.",
-            });
-
-            var summary = BuildSummary(
-                startedAt,
-                stopwatch.ElapsedMilliseconds,
-                "Loi",
-                totalRead,
-                totalInserted,
-                totalUpdated,
-                totalSkipped,
-                totalError,
-                errors);
-
-            await TryWriteFailureLogAsync(summary, errors[0].Message, cancellationToken);
-
-            return new HocVienSyncExecuteResultDto
-            {
-                Accepted = true,
+                Executed = true,
                 Status = "Loi",
-                Message = errors[0].Message,
+                Message = $"Dong bo that bai: {ex.GetType().Name}. Da rollback cac lo gap loi.",
                 Summary = summary,
-                Issues = new[] { errors[0].Message },
             };
         }
     }
 
-    private List<string> ValidateExecutionGuards(HocVienSyncExecuteRequest request)
+    private SyncExecuteResultDto? ValidateExecutionGuard(SyncExecuteRequest request)
     {
-        var issues = new List<string>();
-
-        if (!_options.EnableTargetWrites)
+        if (!_execution.EnableTargetWrites)
         {
-            issues.Add("EnableTargetWrites=false. Endpoint execute bi khoa va khong ghi du lieu.");
+            return Blocked("Ghi bi chan: SyncExecution.EnableTargetWrites = false.");
         }
 
-        if (_options.RequireManualConfirmation)
+        if (_execution.RequireManualConfirmation)
         {
-            if (!request.ConfirmTargetWrites)
+            if (!request.Confirm)
             {
-                issues.Add("Thieu ConfirmTargetWrites=true.");
+                return Blocked("Thieu xac nhan: Confirm phai = true.");
             }
 
-            if (!string.Equals(
-                    request.ConfirmationText,
-                    HocVienSyncExecuteRequest.RequiredConfirmationText,
-                    StringComparison.Ordinal))
+            var confirmationText = request.ConfirmationText ?? request.ConfirmationPhrase;
+            if (!string.Equals(confirmationText, _execution.ConfirmationPhrase, StringComparison.Ordinal))
             {
-                issues.Add($"ConfirmationText phai bang '{HocVienSyncExecuteRequest.RequiredConfirmationText}'.");
+                return Blocked("Chuoi xac nhan khong khop.");
             }
         }
 
-        if (_options.BatchSize <= 0)
-        {
-            issues.Add("BatchSize phai lon hon 0.");
-        }
-
-        if (_options.TimeoutSeconds <= 0)
-        {
-            issues.Add("TimeoutSeconds phai lon hon 0.");
-        }
-
-        return issues;
-    }
-
-    private static HocVienSyncExecuteResultDto Rejected(
-        DateTime startedAt,
-        long durationMs,
-        IReadOnlyList<string> issues)
-    {
-        return new HocVienSyncExecuteResultDto
-        {
-            Accepted = false,
-            Status = "Rejected",
-            Message = "Manual execution rejected by safety guards.",
-            Issues = issues,
-            Summary = BuildSummary(
-                startedAt,
-                durationMs,
-                "Rejected",
-                totalRead: 0,
-                totalInserted: 0,
-                totalUpdated: 0,
-                totalSkipped: 0,
-                totalError: issues.Count,
-                errors: issues.Select(issue => new SyncErrorDto
-                {
-                    Code = "EXECUTION_GUARD_REJECTED",
-                    Message = issue,
-                }).ToList()),
-        };
+        return null;
     }
 
     private static SyncSummaryDto BuildSummary(
-        DateTime startedAt,
-        long durationMs,
         string status,
-        int totalRead,
-        int totalInserted,
-        int totalUpdated,
-        int totalSkipped,
-        int totalError,
-        IReadOnlyList<SyncErrorDto> errors)
+        int read,
+        int inserted,
+        int updated,
+        int skipped,
+        int error,
+        DateTime startedAt,
+        DateTime endedAt) => new()
     {
-        return new SyncSummaryDto
-        {
-            JobName = IHocVienSyncJob.JobName,
-            EntityType = "HocVien",
-            SourceSystem = "V2",
-            IsDryRun = false,
-            Status = status,
-            TotalRead = totalRead,
-            TotalInserted = totalInserted,
-            TotalUpdated = totalUpdated,
-            TotalSkipped = totalSkipped,
-            TotalError = totalError,
-            RetryCount = 0,
-            StartedAt = startedAt,
-            EndedAt = startedAt.AddMilliseconds(durationMs),
-            DurationMs = durationMs,
-            Errors = errors,
-        };
-    }
+        JobName = IHocVienSyncJob.JobName,
+        EntityType = "HocVien",
+        SourceSystem = "V2",
+        IsDryRun = false,
+        Status = status,
+        TotalRead = read,
+        TotalInserted = inserted,
+        TotalUpdated = updated,
+        TotalSkipped = skipped,
+        TotalError = error,
+        RetryCount = 0,
+        StartedAt = startedAt,
+        EndedAt = endedAt,
+        DurationMs = (long)(endedAt - startedAt).TotalMilliseconds,
+    };
 
-    private static SyncRunLogEntry ToLogEntry(SyncSummaryDto summary, string? errorMessage)
-    {
-        var detail = new
-        {
-            summary.JobName,
-            summary.EntityType,
-            summary.SourceSystem,
-            summary.Status,
-            summary.TotalRead,
-            summary.TotalInserted,
-            summary.TotalUpdated,
-            summary.TotalSkipped,
-            summary.TotalError,
-            ErrorCodes = summary.Errors.Select(e => e.Code).ToArray(),
-        };
-
-        return new SyncRunLogEntry
-        {
-            JobName = summary.JobName,
-            EntityType = summary.EntityType,
-            SourceSystem = summary.SourceSystem,
-            StartedAt = summary.StartedAt,
-            EndedAt = summary.EndedAt,
-            DurationMs = summary.DurationMs,
-            Status = summary.Status,
-            TotalRead = summary.TotalRead,
-            TotalInserted = summary.TotalInserted,
-            TotalUpdated = summary.TotalUpdated,
-            TotalSkipped = summary.TotalSkipped,
-            TotalError = summary.TotalError,
-            RetryCount = summary.RetryCount,
-            ErrorMessage = errorMessage,
-            DetailJson = JsonSerializer.Serialize(detail),
-            CreatedBy = "SyncV2",
-        };
-    }
-
-    private async Task TryWriteFailureLogAsync(
+    private async Task WriteRunLogSafe(
         SyncSummaryDto summary,
-        string errorMessage,
+        int warningCount,
+        string? errorMessage,
         CancellationToken cancellationToken)
     {
         try
         {
-            await _logWriter.WriteAsync(ToLogEntry(summary, errorMessage), cancellationToken);
+            await _runLog.WriteAsync(new SyncRunLogEntry
+            {
+                JobName = summary.JobName,
+                EntityType = summary.EntityType,
+                SourceSystem = summary.SourceSystem,
+                StartedAt = summary.StartedAt,
+                EndedAt = summary.EndedAt,
+                DurationMs = summary.DurationMs,
+                Status = summary.Status,
+                TotalRead = summary.TotalRead,
+                TotalInserted = summary.TotalInserted,
+                TotalUpdated = summary.TotalUpdated,
+                TotalSkipped = summary.TotalSkipped,
+                TotalError = summary.TotalError,
+                RetryCount = summary.RetryCount,
+                ErrorMessage = errorMessage,
+                DetailJson = $"{{\"warningCount\":{warningCount}}}",
+                CreatedBy = "SyncV2",
+            }, cancellationToken);
         }
         catch
         {
-            // Preserve the original safe failure summary. Do not leak infrastructure details.
+            // Preserve the safe execution result. Do not leak infrastructure details.
         }
     }
+
+    private static SyncExecuteResultDto Blocked(string message) => new()
+    {
+        Executed = false,
+        Status = "BiChan",
+        Message = message,
+        Summary = null,
+    };
 
     private static void AddConfigIssueIf(
         bool condition,

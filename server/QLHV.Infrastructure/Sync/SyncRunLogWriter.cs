@@ -7,7 +7,10 @@ using QLHV.Application.Sync.Dtos;
 
 namespace QLHV.Infrastructure.Sync;
 
-/// <summary>Writes one sanitized sync run summary row into dbo.App_DongBoLog.</summary>
+/// <summary>
+/// Writes one sanitized sync run summary row to dbo.App_DongBoLog.
+/// Never log raw CCCD/GPLX values, passwords, tokens, or full connection strings.
+/// </summary>
 public sealed class SyncRunLogWriter : ISyncRunLogWriter
 {
     internal const string InsertSql = @"
@@ -35,13 +38,14 @@ VALUES
 
     public async Task<long> WriteAsync(SyncRunLogEntry entry, CancellationToken cancellationToken = default)
     {
-        if (!_options.EnableTargetWrites)
+        var target = await _connections.GetQlhvAppConnectionAsync(cancellationToken);
+        if (!target.IsUsable || string.IsNullOrWhiteSpace(target.ConnectionString))
         {
-            throw new InvalidOperationException("EnableTargetWrites=false. Sync run logging is locked with target writes.");
+            throw new InvalidOperationException(
+                "QLHV_APP chua co cau hinh ket noi dung duoc de ghi nhat ky dong bo.");
         }
 
-        var connectionString = await ResolveUsableTargetAsync(cancellationToken);
-        await using var connection = new SqlConnection(connectionString);
+        await using var connection = new SqlConnection(target.ConnectionString);
         var command = new CommandDefinition(
             InsertSql,
             new
@@ -69,18 +73,6 @@ VALUES
         return await connection.ExecuteScalarAsync<long>(command);
     }
 
-    private async Task<string> ResolveUsableTargetAsync(CancellationToken cancellationToken)
-    {
-        var target = await _connections.GetQlhvAppConnectionAsync(cancellationToken);
-        if (!target.IsUsable || string.IsNullOrWhiteSpace(target.ConnectionString))
-        {
-            throw new InvalidOperationException(
-                "QLHV_APP chua co cau hinh ket noi dung duoc (thieu hoac dang la placeholder).");
-        }
-
-        return target.ConnectionString;
-    }
-
     private static string? Sanitize(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -88,7 +80,6 @@ VALUES
             return value;
         }
 
-        // Keep this conservative: log summaries should contain counts/codes only, never raw credentials.
         return value
             .Replace("Password=", "Password=<masked>;", StringComparison.OrdinalIgnoreCase)
             .Replace("Pwd=", "Pwd=<masked>;", StringComparison.OrdinalIgnoreCase);
