@@ -80,6 +80,42 @@ public sealed class HocVienRepository : IHocVienRepository
         return rows.Select(ToDto).ToList();
     }
 
+    public async Task<IReadOnlyList<HocVienKhoaLookupDto>> SearchKhoaLookupsAsync(
+        string? keyword,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        var connectionString = await ResolveUsableTargetAsync(cancellationToken);
+        await using var connection = new SqlConnection(connectionString);
+
+        var query = HocVienSearchSqlBuilder.BuildKhoaLookup(keyword, limit);
+        var rows = await connection.QueryAsync<HocVienKhoaLookupDto>(new CommandDefinition(
+            query.Sql,
+            query.Parameters,
+            commandTimeout: _options.TimeoutSeconds,
+            cancellationToken: cancellationToken));
+
+        return rows.ToList();
+    }
+
+    public async Task<IReadOnlyList<HocVienHangHocLookupDto>> SearchHangHocLookupsAsync(
+        string? keyword,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        var connectionString = await ResolveUsableTargetAsync(cancellationToken);
+        await using var connection = new SqlConnection(connectionString);
+
+        var query = HocVienSearchSqlBuilder.BuildHangHocLookup(keyword, limit);
+        var rows = await connection.QueryAsync<HocVienHangHocLookupDto>(new CommandDefinition(
+            query.Sql,
+            query.Parameters,
+            commandTimeout: _options.TimeoutSeconds,
+            cancellationToken: cancellationToken));
+
+        return rows.ToList();
+    }
+
     private async Task<string> ResolveUsableTargetAsync(CancellationToken cancellationToken)
     {
         var target = await _connections.GetQlhvAppConnectionAsync(cancellationToken);

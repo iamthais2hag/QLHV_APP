@@ -65,6 +65,85 @@ SELECT
         return (sql, parameters);
     }
 
+    public static (string Sql, DynamicParameters Parameters) BuildKhoaLookup(
+        string? keyword,
+        int limit)
+    {
+        var parameters = BuildLookupParameters(keyword, limit);
+        var sql = @"
+WITH DistinctKhoa AS
+(
+    SELECT DISTINCT
+        LTRIM(RTRIM(MaKhoa)) AS MaKhoa,
+        NULLIF(LTRIM(RTRIM(TenKhoa)), N'') AS TenKhoa
+    FROM dbo.App_HocVien
+    WHERE IsDeleted = 0
+      AND NULLIF(LTRIM(RTRIM(MaKhoa)), N'') IS NOT NULL
+)
+SELECT TOP (@Limit)
+    MaKhoa,
+    TenKhoa,
+    CASE
+        WHEN TenKhoa IS NULL THEN MaKhoa
+        ELSE CONCAT(TenKhoa, N' - ', MaKhoa)
+    END AS Label
+FROM DistinctKhoa
+WHERE @LookupContains IS NULL
+   OR UPPER(TenKhoa) LIKE UPPER(@LookupContains) ESCAPE '\'
+   OR UPPER(MaKhoa) LIKE UPPER(@LookupContains) ESCAPE '\'
+ORDER BY
+    CASE
+        WHEN @LookupPrefix IS NULL THEN 3
+        WHEN UPPER(TenKhoa) LIKE UPPER(@LookupPrefix) ESCAPE '\' THEN 0
+        WHEN UPPER(MaKhoa) LIKE UPPER(@LookupPrefix) ESCAPE '\' THEN 1
+        ELSE 2
+    END,
+    TenKhoa,
+    MaKhoa;";
+
+        return (sql, parameters);
+    }
+
+    public static (string Sql, DynamicParameters Parameters) BuildHangHocLookup(
+        string? keyword,
+        int limit)
+    {
+        var parameters = BuildLookupParameters(keyword, limit);
+        var sql = @"
+WITH DistinctHangHoc AS
+(
+    SELECT DISTINCT
+        LTRIM(RTRIM(MaHangDT)) AS MaHangDT,
+        NULLIF(LTRIM(RTRIM(HangGPLXHoc)), N'') AS HangGplxHoc
+    FROM dbo.App_HocVien
+    WHERE IsDeleted = 0
+      AND NULLIF(LTRIM(RTRIM(MaHangDT)), N'') IS NOT NULL
+)
+SELECT TOP (@Limit)
+    MaHangDT,
+    HangGplxHoc AS TenHangDT,
+    HangGplxHoc,
+    CASE
+        WHEN HangGplxHoc IS NULL THEN MaHangDT
+        ELSE CONCAT(MaHangDT, N' - ', HangGplxHoc)
+    END AS Label
+FROM DistinctHangHoc
+WHERE @LookupContains IS NULL
+   OR UPPER(MaHangDT) LIKE UPPER(@LookupContains) ESCAPE '\'
+   OR UPPER(HangGplxHoc) LIKE UPPER(@LookupContains) ESCAPE '\'
+ORDER BY
+    CASE
+        WHEN @LookupPrefix IS NULL THEN 3
+        WHEN UPPER(MaHangDT) LIKE UPPER(@LookupPrefix) ESCAPE '\' THEN 0
+        WHEN UPPER(HangGplxHoc) LIKE UPPER(@LookupPrefix) ESCAPE '\' THEN 1
+        ELSE 2
+    END,
+    MaHangDT,
+    HangGplxHoc;";
+
+        return (sql, parameters);
+    }
+
     private static string BuildWhere(HocVienSearchRequest request, DynamicParameters parameters)
     {
         var conditions = new List<string> { "IsDeleted = 0" };
@@ -108,4 +187,14 @@ SELECT
         .Replace("%", @"\%", StringComparison.Ordinal)
         .Replace("_", @"\_", StringComparison.Ordinal)
         .Replace("[", @"\[", StringComparison.Ordinal);
+
+    private static DynamicParameters BuildLookupParameters(string? keyword, int limit)
+    {
+        var normalizedKeyword = string.IsNullOrWhiteSpace(keyword) ? null : keyword.Trim();
+        var parameters = new DynamicParameters();
+        parameters.Add("@Limit", Math.Clamp(limit <= 0 ? 20 : limit, 1, 50));
+        parameters.Add("@LookupPrefix", normalizedKeyword is null ? null : $"{EscapeLike(normalizedKeyword)}%");
+        parameters.Add("@LookupContains", normalizedKeyword is null ? null : $"%{EscapeLike(normalizedKeyword)}%");
+        return parameters;
+    }
 }

@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { exportHocVienExcel, searchHocVien } from './api';
-import type { HocVienExportParams, HocVienListItem, HocVienSearchParams } from './types';
+import {
+  exportHocVienExcel,
+  getHocVienHangHocLookups,
+  getHocVienKhoaLookups,
+  searchHocVien,
+} from './api';
+import type {
+  HocVienExportParams,
+  HocVienHangHocLookup,
+  HocVienKhoaLookup,
+  HocVienListItem,
+  HocVienSearchParams,
+} from './types';
 import {
   buildHocVienPhotoUrl,
   formatGioiTinh,
@@ -35,8 +46,22 @@ function HocVienPhoto({ path }: { path: string | null }) {
 
 export default function HocVienPage() {
   const [keyword, setKeyword] = useState('');
-  const [maKhoa, setMaKhoa] = useState('');
-  const [hangGplx, setHangGplx] = useState('');
+  const [khoaInput, setKhoaInput] = useState('');
+  const [selectedKhoa, setSelectedKhoa] = useState<HocVienKhoaLookup | null>(null);
+  const [khoaSuggestions, setKhoaSuggestions] = useState<HocVienKhoaLookup[]>([]);
+  const [showKhoaSuggestions, setShowKhoaSuggestions] = useState(false);
+  const [isKhoaLookupLoading, setIsKhoaLookupLoading] = useState(false);
+  const [khoaWarning, setKhoaWarning] = useState('');
+  const [khoaLookupError, setKhoaLookupError] = useState('');
+
+  const [hangHocInput, setHangHocInput] = useState('');
+  const [selectedHangHoc, setSelectedHangHoc] = useState<HocVienHangHocLookup | null>(null);
+  const [hangHocSuggestions, setHangHocSuggestions] = useState<HocVienHangHocLookup[]>([]);
+  const [showHangHocSuggestions, setShowHangHocSuggestions] = useState(false);
+  const [isHangHocLookupLoading, setIsHangHocLookupLoading] = useState(false);
+  const [hangHocWarning, setHangHocWarning] = useState('');
+  const [hangHocLookupError, setHangHocLookupError] = useState('');
+
   const [gioiTinh, setGioiTinh] = useState('');
   const [page, setPage] = useState(1);
 
@@ -51,8 +76,13 @@ export default function HocVienPage() {
   const abortRef = useRef<AbortController | null>(null);
 
   const currentFilters = useCallback(
-    (): HocVienExportParams => ({ keyword, maKhoa, hangGplx, gioiTinh }),
-    [keyword, maKhoa, hangGplx, gioiTinh],
+    (): HocVienExportParams => ({
+      keyword,
+      maKhoa: selectedKhoa?.maKhoa,
+      maHangDT: selectedHangHoc?.maHangDT,
+      gioiTinh,
+    }),
+    [keyword, selectedKhoa, selectedHangHoc, gioiTinh],
   );
 
   const load = useCallback(
@@ -84,15 +114,131 @@ export default function HocVienPage() {
   );
 
   useEffect(() => {
-    load({ keyword, maKhoa, hangGplx, gioiTinh, page, pageSize: PAGE_SIZE });
+    load({ ...currentFilters(), page, pageSize: PAGE_SIZE });
     return () => abortRef.current?.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
 
+  useEffect(() => {
+    const lookupKeyword = khoaInput.trim();
+    if (!lookupKeyword || selectedKhoa?.label === lookupKeyword) {
+      setKhoaSuggestions([]);
+      setShowKhoaSuggestions(false);
+      setIsKhoaLookupLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setIsKhoaLookupLoading(true);
+    setKhoaLookupError('');
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const result = await getHocVienKhoaLookups(lookupKeyword, 20, controller.signal);
+        setKhoaSuggestions(result);
+        setShowKhoaSuggestions(true);
+      } catch {
+        if (!controller.signal.aborted) {
+          setKhoaSuggestions([]);
+          setKhoaLookupError('Không tải được gợi ý Khóa.');
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsKhoaLookupLoading(false);
+        }
+      }
+    }, 200);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [khoaInput, selectedKhoa]);
+
+  useEffect(() => {
+    const lookupKeyword = hangHocInput.trim();
+    if (!lookupKeyword || selectedHangHoc?.label === lookupKeyword) {
+      setHangHocSuggestions([]);
+      setShowHangHocSuggestions(false);
+      setIsHangHocLookupLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setIsHangHocLookupLoading(true);
+    setHangHocLookupError('');
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const result = await getHocVienHangHocLookups(lookupKeyword, 20, controller.signal);
+        setHangHocSuggestions(result);
+        setShowHangHocSuggestions(true);
+      } catch {
+        if (!controller.signal.aborted) {
+          setHangHocSuggestions([]);
+          setHangHocLookupError('Không tải được gợi ý Hạng học.');
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsHangHocLookupLoading(false);
+        }
+      }
+    }, 200);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [hangHocInput, selectedHangHoc]);
+
+  function validateSelectedLookups(): boolean {
+    const hasInvalidKhoa = khoaInput.trim().length > 0 && !selectedKhoa;
+    const hasInvalidHangHoc = hangHocInput.trim().length > 0 && !selectedHangHoc;
+
+    setKhoaWarning(hasInvalidKhoa ? 'Vui lòng chọn Khóa trong danh sách gợi ý' : '');
+    setHangHocWarning(hasInvalidHangHoc ? 'Vui lòng chọn Hạng học trong danh sách gợi ý' : '');
+
+    return !hasInvalidKhoa && !hasInvalidHangHoc;
+  }
+
+  function handleKhoaInputChange(value: string) {
+    setKhoaInput(value);
+    setSelectedKhoa(null);
+    setKhoaWarning('');
+    setKhoaLookupError('');
+  }
+
+  function handleHangHocInputChange(value: string) {
+    setHangHocInput(value);
+    setSelectedHangHoc(null);
+    setHangHocWarning('');
+    setHangHocLookupError('');
+  }
+
+  function selectKhoa(option: HocVienKhoaLookup) {
+    setSelectedKhoa(option);
+    setKhoaInput(option.label);
+    setKhoaSuggestions([]);
+    setShowKhoaSuggestions(false);
+    setKhoaWarning('');
+    setKhoaLookupError('');
+  }
+
+  function selectHangHoc(option: HocVienHangHocLookup) {
+    setSelectedHangHoc(option);
+    setHangHocInput(option.label);
+    setHangHocSuggestions([]);
+    setShowHangHocSuggestions(false);
+    setHangHocWarning('');
+    setHangHocLookupError('');
+  }
+
   function handleSearch() {
     setExportErrorMessage('');
+    if (!validateSelectedLookups()) return;
+
     if (page === 1) {
-      load({ keyword, maKhoa, hangGplx, gioiTinh, page: 1, pageSize: PAGE_SIZE });
+      load({ ...currentFilters(), page: 1, pageSize: PAGE_SIZE });
     } else {
       setPage(1);
     }
@@ -100,8 +246,18 @@ export default function HocVienPage() {
 
   function handleReset() {
     setKeyword('');
-    setMaKhoa('');
-    setHangGplx('');
+    setKhoaInput('');
+    setSelectedKhoa(null);
+    setKhoaSuggestions([]);
+    setShowKhoaSuggestions(false);
+    setKhoaWarning('');
+    setKhoaLookupError('');
+    setHangHocInput('');
+    setSelectedHangHoc(null);
+    setHangHocSuggestions([]);
+    setShowHangHocSuggestions(false);
+    setHangHocWarning('');
+    setHangHocLookupError('');
     setGioiTinh('');
     setExportErrorMessage('');
     if (page === 1) {
@@ -113,6 +269,8 @@ export default function HocVienPage() {
 
   async function handleExport() {
     setExportErrorMessage('');
+    if (!validateSelectedLookups()) return;
+
     setIsExporting(true);
     try {
       const result = await exportHocVienExcel(currentFilters());
@@ -142,7 +300,6 @@ export default function HocVienPage() {
         <p className="page__subtitle">Tra cứu danh sách và hồ sơ học viên.</p>
       </div>
 
-      {/* Tìm kiếm + bộ lọc */}
       <div className="toolbar">
         <div className="toolbar__row">
           <div className="field" style={{ flexBasis: 260 }}>
@@ -159,20 +316,50 @@ export default function HocVienPage() {
               placeholder="Họ tên, mã đăng ký, số CCCD..."
             />
           </div>
-          <div className="field">
-            <label className="field__label" htmlFor="hv-makhoa">
-              Mã khóa
+
+          <div className="field field--autocomplete">
+            <label className="field__label" htmlFor="hv-khoa">
+              Khóa
             </label>
             <input
-              id="hv-makhoa"
+              id="hv-khoa"
               className="field__input"
               type="text"
-              value={maKhoa}
-              onChange={(e) => setMaKhoa(e.target.value)}
+              value={khoaInput}
+              onChange={(e) => handleKhoaInputChange(e.target.value)}
+              onFocus={() => khoaSuggestions.length > 0 && setShowKhoaSuggestions(true)}
+              onBlur={() => window.setTimeout(() => setShowKhoaSuggestions(false), 120)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+              placeholder="AK01, 66016K26A..."
+              autoComplete="off"
             />
+            {showKhoaSuggestions && (
+              <div className="autocomplete-menu">
+                {isKhoaLookupLoading && <div className="autocomplete-empty">Đang tìm...</div>}
+                {!isKhoaLookupLoading && khoaSuggestions.length === 0 && (
+                  <div className="autocomplete-empty">Không có gợi ý</div>
+                )}
+                {!isKhoaLookupLoading &&
+                  khoaSuggestions.map((option) => (
+                    <button
+                      key={option.maKhoa}
+                      type="button"
+                      className="autocomplete-option"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => selectKhoa(option)}
+                      title={option.label}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+              </div>
+            )}
+            {(khoaWarning || khoaLookupError) && (
+              <div className="field__warning">{khoaWarning || khoaLookupError}</div>
+            )}
           </div>
-          <div className="field">
+
+          <div className="field field--autocomplete">
             <label className="field__label" htmlFor="hv-hang">
               Hạng học
             </label>
@@ -180,12 +367,40 @@ export default function HocVienPage() {
               id="hv-hang"
               className="field__input"
               type="text"
-              value={hangGplx}
-              onChange={(e) => setHangGplx(e.target.value)}
+              value={hangHocInput}
+              onChange={(e) => handleHangHocInputChange(e.target.value)}
+              onFocus={() => hangHocSuggestions.length > 0 && setShowHangHocSuggestions(true)}
+              onBlur={() => window.setTimeout(() => setShowHangHocSuggestions(false), 120)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-              placeholder="Am, A1m..."
+              placeholder="AM, A1M..."
+              autoComplete="off"
             />
+            {showHangHocSuggestions && (
+              <div className="autocomplete-menu">
+                {isHangHocLookupLoading && <div className="autocomplete-empty">Đang tìm...</div>}
+                {!isHangHocLookupLoading && hangHocSuggestions.length === 0 && (
+                  <div className="autocomplete-empty">Không có gợi ý</div>
+                )}
+                {!isHangHocLookupLoading &&
+                  hangHocSuggestions.map((option) => (
+                    <button
+                      key={option.maHangDT}
+                      type="button"
+                      className="autocomplete-option"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => selectHangHoc(option)}
+                      title={option.label}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+              </div>
+            )}
+            {(hangHocWarning || hangHocLookupError) && (
+              <div className="field__warning">{hangHocWarning || hangHocLookupError}</div>
+            )}
           </div>
+
           <div className="field">
             <label className="field__label" htmlFor="hv-gioitinh">
               Giới tính
@@ -222,7 +437,6 @@ export default function HocVienPage() {
         {exportErrorMessage && <div className="toolbar__error">{exportErrorMessage}</div>}
       </div>
 
-      {/* Bảng dữ liệu + các trạng thái */}
       <div className="table-wrap">
         {status === 'loading' && (
           <div className="state">
@@ -238,9 +452,7 @@ export default function HocVienPage() {
               type="button"
               className="btn btn--ghost btn--sm"
               style={{ marginTop: 12 }}
-              onClick={() =>
-                load({ keyword, maKhoa, hangGplx, gioiTinh, page, pageSize: PAGE_SIZE })
-              }
+              onClick={() => load({ ...currentFilters(), page, pageSize: PAGE_SIZE })}
             >
               Thử lại
             </button>
@@ -286,41 +498,47 @@ export default function HocVienPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, index) => (
-                <tr key={row.maDangKy || index}>
-                  <td>{startIndex + index + 1}</td>
-                  <td>
-                    <HocVienPhoto path={row.anhRelativePath} />
-                  </td>
-                  <td>
-                    <CopyButton value={row.maDangKy} title={row.maDangKy} />
-                  </td>
-                  <td className="cell-ellipsis cell-name" title={row.hoVaTen}>
-                    {row.hoVaTen}
-                  </td>
-                  <td>{formatNgaySinh(row.ngaySinh)}</td>
-                  <td>{formatGioiTinh(row.gioiTinh)}</td>
-                  <td>{row.soCccd ?? ''}</td>
-                  <td className="cell-ellipsis cell-address" title={row.diaChiThuongTru ?? ''}>
-                    {row.diaChiThuongTru ?? ''}
-                  </td>
-                  <td title={row.hangGplxHoc ?? ''}>{row.maHangDT ?? ''}</td>
-                  <td>{row.soGplxDaCo ?? ''}</td>
-                  <td>{row.hangGplxDaCo ?? ''}</td>
-                  <td className="cell-ellipsis" title={row.nguoiNhanHoSo ?? ''}>
-                    {row.nguoiNhanHoSo ?? ''}
-                  </td>
-                  <td title={row.tenKhoa ? `${row.maKhoa ?? ''} - ${row.tenKhoa}` : row.maKhoa ?? ''}>
-                    {row.maKhoa ?? ''}
-                  </td>
-                </tr>
-              ))}
+              {rows.map((row, index) => {
+                const khoaLabel =
+                  row.tenKhoa && row.maKhoa
+                    ? `${row.tenKhoa} - ${row.maKhoa}`
+                    : row.maKhoa ?? row.tenKhoa ?? '';
+
+                return (
+                  <tr key={row.maDangKy || index}>
+                    <td>{startIndex + index + 1}</td>
+                    <td>
+                      <HocVienPhoto path={row.anhRelativePath} />
+                    </td>
+                    <td>
+                      <CopyButton value={row.maDangKy} title={row.maDangKy} />
+                    </td>
+                    <td className="cell-ellipsis cell-name" title={row.hoVaTen}>
+                      {row.hoVaTen}
+                    </td>
+                    <td>{formatNgaySinh(row.ngaySinh)}</td>
+                    <td>{formatGioiTinh(row.gioiTinh)}</td>
+                    <td>{row.soCccd ?? ''}</td>
+                    <td className="cell-ellipsis cell-address" title={row.diaChiThuongTru ?? ''}>
+                      {row.diaChiThuongTru ?? ''}
+                    </td>
+                    <td title={row.hangGplxHoc ?? ''}>{row.maHangDT ?? ''}</td>
+                    <td>{row.soGplxDaCo ?? ''}</td>
+                    <td>{row.hangGplxDaCo ?? ''}</td>
+                    <td className="cell-ellipsis" title={row.nguoiNhanHoSo ?? ''}>
+                      {row.nguoiNhanHoSo ?? ''}
+                    </td>
+                    <td className="cell-ellipsis" title={khoaLabel}>
+                      {khoaLabel}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
       </div>
 
-      {/* Phân trang */}
       {status === 'success' && totalItems > 0 && (
         <div className="pager">
           <span>

@@ -8,6 +8,8 @@ namespace QLHV.Application.HocVien;
 /// </summary>
 public sealed class HocVienService : IHocVienService
 {
+    private const int DefaultLookupLimit = 20;
+    private const int MaxLookupLimit = 50;
     private const int MaxExportRows = 10_000;
 
     private readonly IHocVienRepository _repository;
@@ -44,4 +46,32 @@ public sealed class HocVienService : IHocVienService
             Content = content,
         };
     }
+
+    public Task<IReadOnlyList<HocVienKhoaLookupDto>> SearchKhoaLookupsAsync(
+        string? keyword,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        return _repository.SearchKhoaLookupsAsync(
+            NormalizeLookupKeyword(keyword),
+            NormalizeLookupLimit(limit),
+            cancellationToken);
+    }
+
+    public Task<IReadOnlyList<HocVienHangHocLookupDto>> SearchHangHocLookupsAsync(
+        string? keyword,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        return _repository.SearchHangHocLookupsAsync(
+            NormalizeLookupKeyword(keyword),
+            NormalizeLookupLimit(limit),
+            cancellationToken);
+    }
+
+    private static string? NormalizeLookupKeyword(string? keyword)
+        => string.IsNullOrWhiteSpace(keyword) ? null : keyword.Trim();
+
+    private static int NormalizeLookupLimit(int limit)
+        => Math.Clamp(limit <= 0 ? DefaultLookupLimit : limit, 1, MaxLookupLimit);
 }

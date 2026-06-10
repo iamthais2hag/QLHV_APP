@@ -35,6 +35,36 @@ public sealed class HocVienController : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>Lookup khoa hoc distinct tu App_HocVien.</summary>
+    /// <param name="keyword">Tu khoa tim theo TenKhoa hoac MaKhoa.</param>
+    /// <param name="limit">So goi y toi da.</param>
+    /// <param name="cancellationToken">Token huy.</param>
+    [HttpGet("lookups/khoa")]
+    [ProducesResponseType(typeof(IReadOnlyList<HocVienKhoaLookupDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<HocVienKhoaLookupDto>>> LookupKhoa(
+        [FromQuery] string? keyword,
+        [FromQuery] int limit = 20,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _service.SearchKhoaLookupsAsync(keyword, limit, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>Lookup hang hoc distinct tu App_HocVien.</summary>
+    /// <param name="keyword">Tu khoa tim theo MaHangDT hoac HangGPLXHoc.</param>
+    /// <param name="limit">So goi y toi da.</param>
+    /// <param name="cancellationToken">Token huy.</param>
+    [HttpGet("lookups/hang-hoc")]
+    [ProducesResponseType(typeof(IReadOnlyList<HocVienHangHocLookupDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<HocVienHangHocLookupDto>>> LookupHangHoc(
+        [FromQuery] string? keyword,
+        [FromQuery] int limit = 20,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _service.SearchHangHocLookupsAsync(keyword, limit, cancellationToken);
+        return Ok(result);
+    }
+
     /// <summary>Xuáº¥t Excel toÃ n bá»™ há»c viÃªn phÃ¹ há»£p vá»›i bá»™ lá»c hiá»‡n táº¡i.</summary>
     /// <param name="request">Tham sá»‘ tÃ¬m kiáº¿m; phÃ¢n trang khÃ´ng Ä‘Æ°á»£c Ã¡p dá»¥ng cho export.</param>
     /// <param name="cancellationToken">Token há»§y.</param>

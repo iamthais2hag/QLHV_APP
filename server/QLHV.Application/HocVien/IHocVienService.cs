@@ -16,4 +16,14 @@ public interface IHocVienService
     Task<HocVienExportFileDto> ExportExcelAsync(
         HocVienSearchRequest request,
         CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<HocVienKhoaLookupDto>> SearchKhoaLookupsAsync(
+        string? keyword,
+        int limit,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<HocVienHangHocLookupDto>> SearchHangHocLookupsAsync(
+        string? keyword,
+        int limit,
+        CancellationToken cancellationToken = default);
 }
