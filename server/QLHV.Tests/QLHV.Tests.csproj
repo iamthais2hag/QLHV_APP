@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\QLHV.Application\QLHV.Application.csproj" />
+    <ProjectReference Include="..\QLHV.Infrastructure\QLHV.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

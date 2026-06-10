@@ -31,8 +31,22 @@ public sealed class HocVienSearchRequest
         Keyword = string.IsNullOrWhiteSpace(Keyword) ? null : Keyword.Trim(),
         MaKhoa = string.IsNullOrWhiteSpace(MaKhoa) ? null : MaKhoa.Trim(),
         HangGplx = string.IsNullOrWhiteSpace(HangGplx) ? null : HangGplx.Trim(),
-        GioiTinh = string.IsNullOrWhiteSpace(GioiTinh) ? null : GioiTinh.Trim(),
+        GioiTinh = NormalizeGioiTinh(GioiTinh),
         Page = PagingDefaults.NormalizePage(Page),
         PageSize = PagingDefaults.NormalizePageSize(PageSize),
     };
+
+    private static string? NormalizeGioiTinh(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var trimmed = value.Trim();
+        return string.Equals(trimmed, "Tất cả", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(trimmed, "Tat ca", StringComparison.OrdinalIgnoreCase)
+                ? null
+                : trimmed;
+    }
 }
