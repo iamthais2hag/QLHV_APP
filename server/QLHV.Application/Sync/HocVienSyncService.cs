@@ -1,56 +1,41 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
-using QLHV.Application.Sync.Configuration;
 using QLHV.Application.Sync.Connections;
 using QLHV.Application.Sync.Dtos;
 using QLHV.Application.Sync.Mapping;
+using AppSyncOptions = QLHV.Application.Sync.SyncOptions;
+using SyncExecutionOptions = QLHV.Application.Sync.Configuration.SyncExecutionOptions;
 
 namespace QLHV.Application.Sync;
 
 /// <summary>
 /// Application service for one-way HocVien sync from CSDT_V2 to QLHV_APP.
-<<<<<<< HEAD
 /// Dry-run remains no-write. Manual execution is guarded by explicit server and request switches.
-=======
-/// Dry-run builds a safe plan only. Execute is guarded by EnableTargetWrites + manual confirmation.
->>>>>>> task5-phase-b3b-guarded-write-path
 /// </summary>
 public sealed class HocVienSyncService : IHocVienSyncService
 {
-    private readonly SyncOptions _options;
+    private readonly AppSyncOptions _options;
     private readonly SyncExecutionOptions _execution;
     private readonly IConnectionSettingsProvider _connections;
     private readonly IV2HocVienSourceRepository _v2Source;
     private readonly IQlhvHocVienTargetRepository _target;
-<<<<<<< HEAD
     private readonly ISyncRunLogWriter _logWriter;
-=======
-    private readonly ISyncRunLogWriter _runLog;
->>>>>>> task5-phase-b3b-guarded-write-path
 
     public HocVienSyncService(
-        IOptions<SyncOptions> options,
+        IOptions<AppSyncOptions> options,
         IOptions<SyncExecutionOptions> execution,
         IConnectionSettingsProvider connections,
         IV2HocVienSourceRepository v2Source,
         IQlhvHocVienTargetRepository target,
-<<<<<<< HEAD
         ISyncRunLogWriter logWriter)
-=======
-        ISyncRunLogWriter runLog)
->>>>>>> task5-phase-b3b-guarded-write-path
     {
         _options = options.Value;
         _execution = execution.Value;
         _connections = connections;
         _v2Source = v2Source;
         _target = target;
-<<<<<<< HEAD
         _logWriter = logWriter;
-=======
-        _runLog = runLog;
->>>>>>> task5-phase-b3b-guarded-write-path
     }
 
     public async Task<DryRunResultDto> DryRunHocVienAsync(CancellationToken cancellationToken = default)
@@ -90,7 +75,7 @@ public sealed class HocVienSyncService : IHocVienSyncService
             }
             catch (Exception ex)
             {
-                var issue = "Khong doc duoc so luong tu nguon CSDT_V2.";
+                const string issue = "Khong doc duoc so luong tu nguon CSDT_V2.";
                 issues.Add(issue);
                 errors.Add(new SyncErrorDto
                 {
@@ -133,7 +118,6 @@ public sealed class HocVienSyncService : IHocVienSyncService
         };
     }
 
-<<<<<<< HEAD
     public async Task<HocVienSyncExecuteResultDto> ExecuteHocVienAsync(
         HocVienSyncExecuteRequest request,
         CancellationToken cancellationToken = default)
@@ -177,6 +161,7 @@ public sealed class HocVienSyncService : IHocVienSyncService
         var totalUpdated = 0;
         var totalSkipped = 0;
         var totalError = 0;
+        var warningCount = 0;
         var errors = new List<SyncErrorDto>();
 
         try
@@ -186,66 +171,36 @@ public sealed class HocVienSyncService : IHocVienSyncService
                 var pageSize = Math.Min(batchSize, remaining);
                 var rows = await _v2Source.ReadPageAsync(filter, offset, pageSize, cancellationToken);
                 if (rows.Count == 0)
-=======
-    public async Task<SyncExecuteResultDto> ExecuteHocVienAsync(
-        SyncExecuteRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        // GÁC 1: công tắc ghi phải bật.
-        if (!_execution.EnableTargetWrites)
-        {
-            return Blocked("Ghi bi chan: SyncExecution.EnableTargetWrites = false.");
-        }
-
-        // GÁC 2: xác nhận thủ công (chống chạy nhầm từ Swagger).
-        if (_execution.RequireManualConfirmation)
-        {
-            if (!request.Confirm)
-            {
-                return Blocked("Thieu xac nhan: Confirm phai = true.");
-            }
-
-            if (!string.Equals(request.ConfirmationPhrase, _execution.ConfirmationPhrase, StringComparison.Ordinal))
-            {
-                return Blocked("Chuoi xac nhan khong khop.");
-            }
-        }
-
-        // GÁC 3: kết nối nguồn và đích phải dùng được.
-        var qlhv = await _connections.GetQlhvAppConnectionAsync(cancellationToken);
-        var v2 = await _connections.GetSourceConnectionAsync(SourceSystem.V2, cancellationToken);
-        if (!qlhv.IsUsable || !v2.IsUsable)
-        {
-            return Blocked("Ket noi QLHV_APP hoac CSDT_V2 chua cau hinh dung duoc.");
-        }
-
-        var startedAt = DateTime.UtcNow;
-
-        int totalRead = 0, inserted = 0, updated = 0, skipped = 0, warningCount = 0;
-        try
-        {
-            var offset = 0;
-            while (true)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                // Đọc nguồn (CHỈ ĐỌC). Repository tự bọc Polly retry ở tầng Infrastructure.
-                var batch = await _v2Source.ReadPageAsync(
-                    HocVienSourceFilter.Empty, offset, _options.BatchSize, cancellationToken);
-
-                if (batch.Count == 0)
->>>>>>> task5-phase-b3b-guarded-write-path
                 {
                     break;
                 }
 
-<<<<<<< HEAD
-                var upsert = await _target.UpsertBatchAsync(rows, dryRun: false, cancellationToken);
-                totalRead += upsert.TotalRead;
+                totalRead += rows.Count;
+                remaining -= rows.Count;
+
+                var models = new List<HocVienTargetWriteModel>(rows.Count);
+                foreach (var row in rows)
+                {
+                    var mapped = HocVienSyncMapper.MapAndValidate(row);
+                    warningCount += mapped.Warnings.Count;
+                    if (mapped.ShouldSkip || mapped.Model is null)
+                    {
+                        totalSkipped++;
+                        continue;
+                    }
+
+                    models.Add(mapped.Model);
+                }
+
+                if (models.Count == 0)
+                {
+                    continue;
+                }
+
+                var upsert = await _target.UpsertBatchAsync(models, cancellationToken);
                 totalInserted += upsert.Inserted;
                 totalUpdated += upsert.Updated;
                 totalSkipped += upsert.Skipped;
-                remaining -= rows.Count;
             }
 
             stopwatch.Stop();
@@ -260,63 +215,18 @@ public sealed class HocVienSyncService : IHocVienSyncService
                 totalError,
                 errors);
 
-            await _logWriter.WriteAsync(ToLogEntry(summary, errorMessage: null), cancellationToken);
+            await TryWriteRunLogAsync(summary, warningCount, errorMessage: null, cancellationToken);
 
             return new HocVienSyncExecuteResultDto
             {
                 Accepted = true,
                 Status = "ThanhCong",
                 Message = "Dong bo HocVien tu CSDT_V2 sang QLHV_APP da hoan tat.",
-=======
-                totalRead += batch.Count;
-
-                var models = new List<HocVienTargetWriteModel>(batch.Count);
-                foreach (var sourceRow in batch)
-                {
-                    var mapped = HocVienSyncMapper.MapAndValidate(sourceRow);
-                    warningCount += mapped.Warnings.Count;
-                    if (mapped.ShouldSkip || mapped.Model is null)
-                    {
-                        skipped++;
-                        continue;
-                    }
-
-                    models.Add(mapped.Model);
-                }
-
-                if (models.Count > 0)
-                {
-                    // Ghi theo lô (staging + MERGE + transaction). Repository tự bọc Polly retry.
-                    var counts = await _target.UpsertBatchAsync(models, cancellationToken);
-                    inserted += counts.Inserted;
-                    updated += counts.Updated;
-                    skipped += counts.Skipped;
-                }
-
-                if (batch.Count < _options.BatchSize)
-                {
-                    break;
-                }
-
-                offset += _options.BatchSize;
-            }
-
-            var endedAt = DateTime.UtcNow;
-            var summary = BuildSummary("ThanhCong", totalRead, inserted, updated, skipped, 0, startedAt, endedAt);
-            await WriteRunLogSafe(summary, warningCount, errorMessage: null, cancellationToken);
-
-            return new SyncExecuteResultDto
-            {
-                Executed = true,
-                Status = "ThanhCong",
-                Message = "Dong bo hoan tat.",
->>>>>>> task5-phase-b3b-guarded-write-path
                 Summary = summary,
             };
         }
         catch (Exception ex)
         {
-<<<<<<< HEAD
             stopwatch.Stop();
             totalError++;
             errors.Add(new SyncErrorDto
@@ -336,7 +246,7 @@ public sealed class HocVienSyncService : IHocVienSyncService
                 totalError,
                 errors);
 
-            await TryWriteFailureLogAsync(summary, errors[0].Message, cancellationToken);
+            await TryWriteRunLogAsync(summary, warningCount, errors[0].Message, cancellationToken);
 
             return new HocVienSyncExecuteResultDto
             {
@@ -345,35 +255,20 @@ public sealed class HocVienSyncService : IHocVienSyncService
                 Message = errors[0].Message,
                 Summary = summary,
                 Issues = new[] { errors[0].Message },
-=======
-            var endedAt = DateTime.UtcNow;
-            var summary = BuildSummary("Loi", totalRead, inserted, updated, skipped, 1, startedAt, endedAt);
-
-            // Thông điệp lỗi đã làm sạch: chỉ loại lỗi, không lộ chi tiết nhạy cảm/chuỗi kết nối.
-            await WriteRunLogSafe(summary, warningCount, errorMessage: ex.GetType().Name, cancellationToken);
-
-            return new SyncExecuteResultDto
-            {
-                Executed = true,
-                Status = "Loi",
-                Message = $"Dong bo that bai: {ex.GetType().Name}. Da rollback cac lo gap loi.",
-                Summary = summary,
->>>>>>> task5-phase-b3b-guarded-write-path
             };
         }
     }
 
-<<<<<<< HEAD
     private List<string> ValidateExecutionGuards(HocVienSyncExecuteRequest request)
     {
         var issues = new List<string>();
 
-        if (!_options.EnableTargetWrites)
+        if (!_execution.EnableTargetWrites)
         {
             issues.Add("EnableTargetWrites=false. Endpoint execute bi khoa va khong ghi du lieu.");
         }
 
-        if (_options.RequireManualConfirmation)
+        if (_execution.RequireManualConfirmation)
         {
             if (!request.ConfirmTargetWrites)
             {
@@ -382,10 +277,10 @@ public sealed class HocVienSyncService : IHocVienSyncService
 
             if (!string.Equals(
                     request.ConfirmationText,
-                    HocVienSyncExecuteRequest.RequiredConfirmationText,
+                    _execution.ConfirmationPhrase,
                     StringComparison.Ordinal))
             {
-                issues.Add($"ConfirmationText phai bang '{HocVienSyncExecuteRequest.RequiredConfirmationText}'.");
+                issues.Add($"ConfirmationText phai bang '{_execution.ConfirmationPhrase}'.");
             }
         }
 
@@ -461,7 +356,10 @@ public sealed class HocVienSyncService : IHocVienSyncService
         };
     }
 
-    private static SyncRunLogEntry ToLogEntry(SyncSummaryDto summary, string? errorMessage)
+    private static SyncRunLogEntry ToLogEntry(
+        SyncSummaryDto summary,
+        int warningCount,
+        string? errorMessage)
     {
         var detail = new
         {
@@ -474,6 +372,7 @@ public sealed class HocVienSyncService : IHocVienSyncService
             summary.TotalUpdated,
             summary.TotalSkipped,
             summary.TotalError,
+            WarningCount = warningCount,
             ErrorCodes = summary.Errors.Select(e => e.Code).ToArray(),
         };
 
@@ -498,84 +397,22 @@ public sealed class HocVienSyncService : IHocVienSyncService
         };
     }
 
-    private async Task TryWriteFailureLogAsync(
-        SyncSummaryDto summary,
-        string errorMessage,
-=======
-    private static SyncSummaryDto BuildSummary(
-        string status, int read, int inserted, int updated, int skipped, int error,
-        DateTime startedAt, DateTime endedAt) => new()
-    {
-        JobName = IHocVienSyncJob.JobName,
-        EntityType = "HocVien",
-        SourceSystem = "V2",
-        IsDryRun = false,
-        Status = status,
-        TotalRead = read,
-        TotalInserted = inserted,
-        TotalUpdated = updated,
-        TotalSkipped = skipped,
-        TotalError = error,
-        RetryCount = 0,
-        StartedAt = startedAt,
-        EndedAt = endedAt,
-        DurationMs = (long)(endedAt - startedAt).TotalMilliseconds,
-    };
-
-    private async Task WriteRunLogSafe(
+    private async Task TryWriteRunLogAsync(
         SyncSummaryDto summary,
         int warningCount,
         string? errorMessage,
->>>>>>> task5-phase-b3b-guarded-write-path
         CancellationToken cancellationToken)
     {
         try
         {
-<<<<<<< HEAD
-            await _logWriter.WriteAsync(ToLogEntry(summary, errorMessage), cancellationToken);
+            await _logWriter.WriteAsync(ToLogEntry(summary, warningCount, errorMessage), cancellationToken);
         }
         catch
         {
-            // Preserve the original safe failure summary. Do not leak infrastructure details.
+            // Preserve the safe execution summary. Do not leak infrastructure details.
         }
     }
 
-=======
-            await _runLog.WriteAsync(new SyncRunLogEntry
-            {
-                JobName = summary.JobName,
-                EntityType = summary.EntityType,
-                SourceSystem = summary.SourceSystem,
-                StartedAt = summary.StartedAt,
-                EndedAt = summary.EndedAt,
-                DurationMs = summary.DurationMs,
-                Status = summary.Status,
-                TotalRead = summary.TotalRead,
-                TotalInserted = summary.TotalInserted,
-                TotalUpdated = summary.TotalUpdated,
-                TotalSkipped = summary.TotalSkipped,
-                TotalError = summary.TotalError,
-                RetryCount = summary.RetryCount,
-                ErrorMessage = errorMessage,
-                DetailJson = $"{{\"warningCount\":{warningCount}}}",
-                CreatedBy = "SyncV2",
-            }, cancellationToken);
-        }
-        catch
-        {
-            // Không để lỗi ghi nhật ký làm hỏng kết quả tổng thể; nuốt lỗi an toàn (không log bí mật).
-        }
-    }
-
-    private static SyncExecuteResultDto Blocked(string message) => new()
-    {
-        Executed = false,
-        Status = "BiChan",
-        Message = message,
-        Summary = null,
-    };
-
->>>>>>> task5-phase-b3b-guarded-write-path
     private static void AddConfigIssueIf(
         bool condition,
         string issue,

@@ -22,5 +22,5 @@ public sealed class SyncExecutionOptions
     /// Chuỗi xác nhận thủ công bắt buộc phải khớp khi gọi endpoint thực thi
     /// (chống chạy nhầm từ Swagger). Không phải bí mật.
     /// </summary>
-    public string ConfirmationPhrase { get; set; } = "DONG-Y-GHI-QLHV_APP";
+    public string ConfirmationPhrase { get; set; } = "EXECUTE_DONG_BO_V2_HOC_VIEN";
 }

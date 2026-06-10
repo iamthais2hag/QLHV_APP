@@ -179,9 +179,10 @@ Phase B3B implements the write code path for `CSDT_V2` HocVien -> `QLHV_APP.dbo.
 
 Server-side options:
 
-- `Sync:EnableTargetWrites` default `false`.
-- `Sync:RequireManualConfirmation` default `true`.
-- `Sync:AllowHangfireSchedule` default `false`.
+- `SyncExecution:EnableTargetWrites` default `false`.
+- `SyncExecution:RequireManualConfirmation` default `true`.
+- `SyncExecution:AllowHangfireSchedule` default `false`.
+- `SyncExecution:ConfirmationPhrase` default `EXECUTE_DONG_BO_V2_HOC_VIEN`.
 
 Manual endpoint:
 
@@ -196,7 +197,7 @@ The endpoint rejects unless:
 - The request body includes `ConfirmationText="EXECUTE_DONG_BO_V2_HOC_VIEN"` when manual confirmation is required.
 - `QLHV_APP` and `CSDT_V2` connections are usable and not placeholders.
 
-Default repository defense also rejects writes when `dryRun=true` or `EnableTargetWrites=false`, even if a caller bypasses the API controller.
+Default repository defense also rejects writes when `EnableTargetWrites=false`, even if a caller bypasses the API controller.
 
 ### V2RowHash formula
 

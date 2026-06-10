@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <!-- Exclude local alternate build outputs so generated files are not compiled as source. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);$(MSBuildProjectDirectory)\.artifacts\**;$(MSBuildProjectDirectory)\.artifacts-test\**</DefaultItemExcludes>
+  </PropertyGroup>
+</Project>
