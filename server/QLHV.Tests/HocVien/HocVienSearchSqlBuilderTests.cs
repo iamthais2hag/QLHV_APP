@@ -218,4 +218,45 @@ public sealed class HocVienSearchSqlBuilderTests
         Assert.Equal("A1m", query.Parameters.Get<string>("MaHangDT"));
         Assert.Equal("M", query.Parameters.Get<string>("GioiTinh"));
     }
+
+    [Fact]
+    public void Khoa_lookup_searches_ten_khoa_and_ma_khoa_with_expected_ranking()
+    {
+        var query = HocVienSearchSqlBuilder.BuildKhoaLookup("66016K26A", limit: 20);
+
+        Assert.Contains("WITH DistinctKhoa", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("SELECT TOP (@Limit)", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("FROM dbo.App_HocVien", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("TenKhoa", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("MaKhoa", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("UPPER(TenKhoa) LIKE UPPER(@LookupPrefix)", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("UPPER(MaKhoa) LIKE UPPER(@LookupPrefix)", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("UPPER(TenKhoa) LIKE UPPER(@LookupContains)", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("UPPER(MaKhoa) LIKE UPPER(@LookupContains)", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("CONCAT(TenKhoa, N' - ', MaKhoa)", query.Sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("OFFSET", query.Sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(20, query.Parameters.Get<int>("Limit"));
+        Assert.Equal("66016K26A%", query.Parameters.Get<string>("LookupPrefix"));
+        Assert.Equal("%66016K26A%", query.Parameters.Get<string>("LookupContains"));
+    }
+
+    [Fact]
+    public void Hang_hoc_lookup_searches_ma_hang_dt_and_ten_hang_with_expected_ranking()
+    {
+        var query = HocVienSearchSqlBuilder.BuildHangHocLookup("AM", limit: 20);
+
+        Assert.Contains("WITH DistinctHangHoc", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("SELECT TOP (@Limit)", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("FROM dbo.App_HocVien", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("MaHangDT", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("HangGPLXHoc", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("HangGplxHoc AS TenHangDT", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("UPPER(MaHangDT) LIKE UPPER(@LookupPrefix)", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("UPPER(HangGplxHoc) LIKE UPPER(@LookupContains)", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("CONCAT(MaHangDT, N' - ', HangGplxHoc)", query.Sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("OFFSET", query.Sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(20, query.Parameters.Get<int>("Limit"));
+        Assert.Equal("AM%", query.Parameters.Get<string>("LookupPrefix"));
+        Assert.Equal("%AM%", query.Parameters.Get<string>("LookupContains"));
+    }
 }

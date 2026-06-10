@@ -17,4 +17,14 @@ public interface IHocVienRepository
         HocVienSearchRequest request,
         int maxRows,
         CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<HocVienKhoaLookupDto>> SearchKhoaLookupsAsync(
+        string? keyword,
+        int limit,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<HocVienHangHocLookupDto>> SearchHangHocLookupsAsync(
+        string? keyword,
+        int limit,
+        CancellationToken cancellationToken = default);
 }

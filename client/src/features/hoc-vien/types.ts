@@ -29,6 +29,19 @@ export interface HocVienSearchParams {
 
 export type HocVienExportParams = Omit<HocVienSearchParams, 'page' | 'pageSize'>;
 
+export interface HocVienKhoaLookup {
+  maKhoa: string;
+  tenKhoa: string | null;
+  label: string;
+}
+
+export interface HocVienHangHocLookup {
+  maHangDT: string;
+  tenHangDT: string | null;
+  hangGplxHoc: string | null;
+  label: string;
+}
+
 /** Kết quả phân trang chung. */
 export interface PagedResult<T> {
   items: T[];
