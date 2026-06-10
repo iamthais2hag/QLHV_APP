@@ -8,6 +8,8 @@ namespace QLHV.Application.Sync;
 /// </summary>
 public interface IHocVienSyncService
 {
+    Task<SyncConfigCheckDto> ConfigCheckHocVienAsync(CancellationToken cancellationToken = default);
+
     Task<DryRunResultDto> DryRunHocVienAsync(CancellationToken cancellationToken = default);
 
     Task<SyncExecuteResultDto> ExecuteHocVienAsync(

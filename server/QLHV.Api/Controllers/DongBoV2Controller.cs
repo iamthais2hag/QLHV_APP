@@ -20,6 +20,17 @@ public sealed class DongBoV2Controller : ControllerBase
         _syncService = syncService;
     }
 
+    /// <summary>
+    /// Safe local configuration check for HocVien sync. Does not return connection strings or credentials.
+    /// </summary>
+    [HttpGet("hoc-vien/config-check")]
+    [ProducesResponseType(typeof(SyncConfigCheckDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<SyncConfigCheckDto>> ConfigCheckHocVien(CancellationToken cancellationToken)
+    {
+        var result = await _syncService.ConfigCheckHocVienAsync(cancellationToken);
+        return Ok(result);
+    }
+
     /// <summary>Dry-run HocVien sync configuration and mapping plan.</summary>
     [HttpPost("hoc-vien/dry-run")]
     [ProducesResponseType(typeof(DryRunResultDto), StatusCodes.Status200OK)]

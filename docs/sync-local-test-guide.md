@@ -31,18 +31,23 @@ Keep target writes disabled by default:
 ## Configure local secrets
 
 Use user-secrets or environment variables. The examples below use placeholders only.
+Do not paste real values into this file or any committed config file.
 
 From `server/QLHV.Api`:
 
 ```powershell
 dotnet user-secrets init
-dotnet user-secrets set "ConnectionStrings:QLHV_APP" "<LOCAL_QLHV_APP_TEST_CONNECTION>"
-dotnet user-secrets set "ConnectionStrings:CSDT_V2" "<LOCAL_CSDT_V2_TEST_CONNECTION>"
+dotnet user-secrets set "ConnectionStrings:QLHV_APP" "<local/test-only connection string for QLHV_APP_TEST>"
+dotnet user-secrets set "ConnectionStrings:CSDT_V2" "<local/test-only connection string for CSDT_V2_TEST>"
 dotnet user-secrets set "SyncExecution:EnableTargetWrites" "false"
 dotnet user-secrets set "SyncExecution:RequireManualConfirmation" "true"
 dotnet user-secrets set "SyncExecution:AllowHangfireSchedule" "false"
 dotnet user-secrets set "SyncExecution:ConfirmationPhrase" "EXECUTE_DONG_BO_V2_HOC_VIEN"
 ```
+
+The `ConnectionStrings:QLHV_APP` value must point to `QLHV_APP_TEST`.
+The `ConnectionStrings:CSDT_V2` value must point to `CSDT_V2_TEST`.
+Keep both values in user-secrets or environment variables only.
 
 Equivalent environment variable names:
 
@@ -57,12 +62,60 @@ SyncExecution__ConfirmationPhrase
 
 Never paste real values into docs, source, commit messages, logs, screenshots, or API responses.
 
+## Verify safe config before dry-run
+
+Start the API locally, then call config-check:
+
+```http
+GET /api/dong-bo-v2/hoc-vien/config-check
+```
+
+PowerShell:
+
+```powershell
+Invoke-RestMethod -Method Get -Uri "https://localhost:<PORT>/api/dong-bo-v2/hoc-vien/config-check"
+```
+
+curl:
+
+```powershell
+curl.exe -k -X GET "https://localhost:<PORT>/api/dong-bo-v2/hoc-vien/config-check"
+```
+
+Expected safe response shape:
+
+```json
+{
+  "qlhvAppConfigured": true,
+  "csdtV2Configured": true,
+  "enableTargetWrites": false,
+  "requireManualConfirmation": true,
+  "allowHangfireSchedule": false
+}
+```
+
+`qlhvAppConfigured` and `csdtV2Configured` mean the backend sees non-placeholder local/test configuration.
+The response must never contain server name, database name, username, password, or a connection string.
+Do not run dry-run until both configured flags are `true` and `enableTargetWrites` is still `false`.
+
 ## Run dry-run first
 
 Start the API locally, then call:
 
 ```http
 POST /api/dong-bo-v2/hoc-vien/dry-run
+```
+
+PowerShell:
+
+```powershell
+Invoke-RestMethod -Method Post -Uri "https://localhost:<PORT>/api/dong-bo-v2/hoc-vien/dry-run"
+```
+
+curl:
+
+```powershell
+curl.exe -k -X POST "https://localhost:<PORT>/api/dong-bo-v2/hoc-vien/dry-run"
 ```
 
 Expected safe behavior:
@@ -73,8 +126,9 @@ Expected safe behavior:
 - Response contains summary/configuration information only.
 - No connection strings or passwords are returned.
 
-## Manual execute body
+## Manual execute body for later phases
 
+Do not call execute in Phase B3D. This section is kept only for later local write phases.
 Only after dry-run is reviewed on local test databases, and only after intentionally enabling writes in protected local config:
 
 ```powershell

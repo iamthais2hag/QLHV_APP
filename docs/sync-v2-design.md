@@ -265,3 +265,31 @@ The MERGE output is counted as safe summary data only: inserted, updated, skippe
 ### Hangfire
 
 The job class remains ready, but Phase B3B does not schedule recurring jobs. `AllowHangfireSchedule=false` is the default, and scheduling belongs to Phase B4 or later after a separate review.
+
+## Phase B3D: Local dry-run preparation
+
+Phase B3D prepares local dry-run against `QLHV_APP_TEST` and `CSDT_V2_TEST`. It must not call the execute endpoint, enable target writes, schedule Hangfire, or write `App_HocVien` / `App_DongBoLog`.
+
+Safe configuration endpoint:
+
+```text
+GET /api/dong-bo-v2/hoc-vien/config-check
+```
+
+Response fields only:
+
+- `qlhvAppConfigured`
+- `csdtV2Configured`
+- `enableTargetWrites`
+- `requireManualConfirmation`
+- `allowHangfireSchedule`
+
+The configured flags mean the backend sees non-placeholder local/test configuration. The endpoint does not open SQL connections, read source rows, write target rows, write sync logs, or return server/database/user/password/connection string values.
+
+Manual dry-run endpoint remains:
+
+```text
+POST /api/dong-bo-v2/hoc-vien/dry-run
+```
+
+Dry-run is still no-write. Run it only after config-check confirms both local/test connections are configured and `enableTargetWrites=false`.

@@ -35,6 +35,21 @@ public sealed class HocVienSyncService : IHocVienSyncService
         _runLog = runLog;
     }
 
+    public async Task<SyncConfigCheckDto> ConfigCheckHocVienAsync(CancellationToken cancellationToken = default)
+    {
+        var qlhv = await _connections.GetQlhvAppConnectionAsync(cancellationToken);
+        var v2 = await _connections.GetSourceConnectionAsync(SourceSystem.V2, cancellationToken);
+
+        return new SyncConfigCheckDto
+        {
+            QlhvAppConfigured = qlhv.IsUsable,
+            CsdtV2Configured = v2.IsUsable,
+            EnableTargetWrites = _execution.EnableTargetWrites,
+            RequireManualConfirmation = _execution.RequireManualConfirmation,
+            AllowHangfireSchedule = _execution.AllowHangfireSchedule,
+        };
+    }
+
     public async Task<DryRunResultDto> DryRunHocVienAsync(CancellationToken cancellationToken = default)
     {
         var errors = new List<SyncErrorDto>();

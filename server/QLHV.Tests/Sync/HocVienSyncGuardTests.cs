@@ -80,6 +80,24 @@ public sealed class HocVienSyncGuardTests
         Assert.Equal(0, fakes.Log.WriteCalls);
     }
 
+    [Fact]
+    public async Task Config_check_returns_safe_flags_without_read_or_write()
+    {
+        var fakes = TestFakes.Create(enableWrites: false, sourceCount: 7);
+
+        var result = await fakes.Service.ConfigCheckHocVienAsync();
+
+        Assert.True(result.QlhvAppConfigured);
+        Assert.True(result.CsdtV2Configured);
+        Assert.False(result.EnableTargetWrites);
+        Assert.True(result.RequireManualConfirmation);
+        Assert.False(result.AllowHangfireSchedule);
+        Assert.Equal(0, fakes.Source.CountCalls);
+        Assert.Equal(0, fakes.Source.ReadPageCalls);
+        Assert.Equal(0, fakes.Target.UpsertCalls);
+        Assert.Equal(0, fakes.Log.WriteCalls);
+    }
+
     private sealed class TestFakes
     {
         private TestFakes(
