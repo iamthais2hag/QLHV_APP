@@ -11,14 +11,14 @@ export function formatNgaySinh(value: string | null): string {
 
 /** Cột hiển thị của bảng học viên (theo thứ tự). */
 export const HOC_VIEN_COLUMNS: { key: keyof HocVienListItem; header: string }[] = [
-  { key: 'maDangKy', header: 'Mã đăng ký' },
-  { key: 'hoVaTen', header: 'Họ và tên' },
+  { key: 'maDK', header: 'Mã đăng ký' },
+  { key: 'hoTen', header: 'Họ và tên' },
   { key: 'ngaySinh', header: 'Ngày sinh' },
   { key: 'gioiTinh', header: 'Giới tính' },
-  { key: 'soCccd', header: 'Số CCCD' },
+  { key: 'soCCCD', header: 'Số CCCD' },
   { key: 'diaChiThuongTru', header: 'Địa chỉ thường trú' },
-  { key: 'soGplxDaCo', header: 'Số GPLX đã có' },
-  { key: 'hangGplxDaCo', header: 'Hạng GPLX đã có' },
+  { key: 'soGPLXDaCo', header: 'Số GPLX đã có' },
+  { key: 'hangGPLXDaCo', header: 'Hạng GPLX đã có' },
   { key: 'nguoiNhanHoSo', header: 'Người nhận hồ sơ' },
   { key: 'tenKhoa', header: 'Tên khóa' },
   { key: 'maKhoa', header: 'Mã khóa' },

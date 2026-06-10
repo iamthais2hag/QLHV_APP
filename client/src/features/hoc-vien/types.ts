@@ -1,16 +1,18 @@
 /** Một dòng học viên trong danh sách (chỉ đọc). */
 export interface HocVienListItem {
-  maDangKy: string;
-  hoVaTen: string;
+  maDK: string;
+  hoTen: string;
   ngaySinh: string | null;
   gioiTinh: string | null;
-  soCccd: string | null;
+  soCCCD: string | null;
   diaChiThuongTru: string | null;
-  soGplxDaCo: string | null;
-  hangGplxDaCo: string | null;
+  soGPLXDaCo: string | null;
+  hangGPLXDaCo: string | null;
   nguoiNhanHoSo: string | null;
   tenKhoa: string | null;
   maKhoa: string | null;
+  sourceOfTruth: string | null;
+  lastSyncStatus: string | null;
 }
 
 /** Tham số tìm kiếm học viên. */

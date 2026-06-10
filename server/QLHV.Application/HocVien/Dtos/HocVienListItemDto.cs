@@ -6,10 +6,10 @@ namespace QLHV.Application.HocVien.Dtos;
 public sealed class HocVienListItemDto
 {
     /// <summary>Mã đăng ký (MaDK) - giá trị đầy đủ, có thể rất dài.</summary>
-    public string MaDangKy { get; init; } = string.Empty;
+    public string MaDK { get; init; } = string.Empty;
 
     /// <summary>Họ và tên học viên.</summary>
-    public string HoVaTen { get; init; } = string.Empty;
+    public string HoTen { get; init; } = string.Empty;
 
     /// <summary>Ngày sinh.</summary>
     public DateOnly? NgaySinh { get; init; }
@@ -18,16 +18,16 @@ public sealed class HocVienListItemDto
     public string? GioiTinh { get; init; }
 
     /// <summary>Số CCCD.</summary>
-    public string? SoCccd { get; init; }
+    public string? SoCCCD { get; init; }
 
     /// <summary>Địa chỉ thường trú.</summary>
     public string? DiaChiThuongTru { get; init; }
 
     /// <summary>Số GPLX đã có.</summary>
-    public string? SoGplxDaCo { get; init; }
+    public string? SoGPLXDaCo { get; init; }
 
     /// <summary>Hạng GPLX đã có.</summary>
-    public string? HangGplxDaCo { get; init; }
+    public string? HangGPLXDaCo { get; init; }
 
     /// <summary>Người nhận hồ sơ.</summary>
     public string? NguoiNhanHoSo { get; init; }
@@ -37,4 +37,10 @@ public sealed class HocVienListItemDto
 
     /// <summary>Mã khóa học.</summary>
     public string? MaKhoa { get; init; }
+
+    /// <summary>Nguồn dữ liệu đang làm nguồn sự thật cho bản ghi.</summary>
+    public string? SourceOfTruth { get; init; }
+
+    /// <summary>Trạng thái đồng bộ gần nhất từ V2.</summary>
+    public string? LastSyncStatus { get; init; }
 }

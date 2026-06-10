@@ -217,23 +217,23 @@ export default function HocVienPage() {
             </thead>
             <tbody>
               {rows.map((row, index) => (
-                <tr key={row.maDangKy || index}>
+                <tr key={row.maDK || index}>
                   <td>{startIndex + index + 1}</td>
                   <td>
                     <span className="madk-cell">
-                      <span className="madk-cell__text" title={row.maDangKy}>
-                        {row.maDangKy}
+                      <span className="madk-cell__text" title={row.maDK}>
+                        {row.maDK}
                       </span>
-                      <CopyButton value={row.maDangKy} />
+                      <CopyButton value={row.maDK} />
                     </span>
                   </td>
-                  <td>{row.hoVaTen}</td>
+                  <td>{row.hoTen}</td>
                   <td>{formatNgaySinh(row.ngaySinh)}</td>
                   <td>{row.gioiTinh ?? ''}</td>
-                  <td>{row.soCccd ?? ''}</td>
+                  <td>{row.soCCCD ?? ''}</td>
                   <td>{row.diaChiThuongTru ?? ''}</td>
-                  <td>{row.soGplxDaCo ?? ''}</td>
-                  <td>{row.hangGplxDaCo ?? ''}</td>
+                  <td>{row.soGPLXDaCo ?? ''}</td>
+                  <td>{row.hangGPLXDaCo ?? ''}</td>
                   <td>{row.nguoiNhanHoSo ?? ''}</td>
                   <td>{row.tenKhoa ?? ''}</td>
                   <td>{row.maKhoa ?? ''}</td>
