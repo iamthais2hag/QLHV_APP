@@ -83,6 +83,7 @@ public sealed class HocVienRepository : IHocVienRepository
         DiaChiThuongTru = row.DiaChiThuongTru,
         AnhRelativePath = ToSafeRelativePath(row.AnhRelativePath),
         SoGplxDaCo = row.SoGplxDaCo,
+        HangGplxHoc = row.HangGplxHoc,
         HangGplxDaCo = row.HangGplxDaCo,
         NguoiNhanHoSo = row.NguoiNhanHoSo,
         TenKhoa = row.TenKhoa,
@@ -119,6 +120,7 @@ public sealed class HocVienRepository : IHocVienRepository
         public string? DiaChiThuongTru { get; init; }
         public string? AnhRelativePath { get; init; }
         public string? SoGplxDaCo { get; init; }
+        public string? HangGplxHoc { get; init; }
         public string? HangGplxDaCo { get; init; }
         public string? NguoiNhanHoSo { get; init; }
         public string? TenKhoa { get; init; }

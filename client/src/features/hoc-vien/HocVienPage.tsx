@@ -233,11 +233,11 @@ export default function HocVienPage() {
               <col className="col-gender" />
               <col className="col-cccd" />
               <col className="col-address" />
+              <col className="col-hang-hoc" />
               <col className="col-gplx-number" />
               <col className="col-gplx-class" />
               <col className="col-receiver" />
               <col className="col-course" />
-              <col className="col-status" />
             </colgroup>
             <thead>
               <tr>
@@ -249,11 +249,11 @@ export default function HocVienPage() {
                 <th>Giới tính</th>
                 <th>Số CCCD</th>
                 <th>Địa chỉ</th>
+                <th>Hạng học</th>
                 <th>Số GPLX đã có</th>
                 <th>Hạng GPLX đã có</th>
                 <th>Người nhận hồ sơ</th>
                 <th>Mã khóa</th>
-                <th>Trạng thái</th>
               </tr>
             </thead>
             <tbody>
@@ -275,6 +275,7 @@ export default function HocVienPage() {
                   <td className="cell-ellipsis cell-address" title={row.diaChiThuongTru ?? ''}>
                     {row.diaChiThuongTru ?? ''}
                   </td>
+                  <td>{row.hangGplxHoc ?? ''}</td>
                   <td>{row.soGplxDaCo ?? ''}</td>
                   <td>{row.hangGplxDaCo ?? ''}</td>
                   <td className="cell-ellipsis" title={row.nguoiNhanHoSo ?? ''}>
@@ -282,9 +283,6 @@ export default function HocVienPage() {
                   </td>
                   <td title={row.tenKhoa ? `${row.maKhoa ?? ''} - ${row.tenKhoa}` : row.maKhoa ?? ''}>
                     {row.maKhoa ?? ''}
-                  </td>
-                  <td>
-                    <span className="sync-status">{row.lastSyncStatus ?? ''}</span>
                   </td>
                 </tr>
               ))}

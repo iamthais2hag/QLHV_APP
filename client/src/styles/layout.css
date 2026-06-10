@@ -382,7 +382,7 @@
 
 .table--hoc-vien {
   table-layout: fixed;
-  min-width: 1220px;
+  min-width: 1260px;
   font-size: 13px;
 }
 
@@ -426,6 +426,10 @@
   width: 180px;
 }
 
+.table--hoc-vien .col-hang-hoc {
+  width: 72px;
+}
+
 .table--hoc-vien .col-gplx-number {
   width: 108px;
 }
@@ -440,10 +444,6 @@
 
 .table--hoc-vien .col-course {
   width: 86px;
-}
-
-.table--hoc-vien .col-status {
-  width: 80px;
 }
 
 .hocvien-photo {
@@ -478,21 +478,6 @@
 
 .cell-name {
   font-weight: 600;
-}
-
-.sync-status {
-  display: inline-flex;
-  max-width: 100%;
-  height: 24px;
-  align-items: center;
-  padding: 0 8px;
-  border-radius: 999px;
-  background: var(--tc-blue-50);
-  color: var(--tc-blue-800);
-  font-size: 12px;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* ===== State blocks ===== */

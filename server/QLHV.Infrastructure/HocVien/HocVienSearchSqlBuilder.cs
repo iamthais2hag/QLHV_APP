@@ -18,6 +18,7 @@ SELECT
     DiaChiThuongTru,
     AnhRelativePath,
     SoGPLXDaCo     AS SoGplxDaCo,
+    HangGPLXHoc    AS HangGplxHoc,
     HangGPLXDaCo   AS HangGplxDaCo,
     NguoiNhanHoSo,
     TenKhoa,
