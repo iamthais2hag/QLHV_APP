@@ -16,6 +16,8 @@ public sealed class HocVienSearchSqlBuilderTests
 
         Assert.Contains("FROM dbo.App_HocVien", query.Sql, StringComparison.Ordinal);
         Assert.Contains("WHERE IsDeleted = 0", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("AnhRelativePath", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("LastSyncStatus", query.Sql, StringComparison.Ordinal);
         Assert.Contains("ORDER BY HocVienId ASC", query.Sql, StringComparison.Ordinal);
         Assert.Contains("OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY", query.Sql, StringComparison.Ordinal);
         Assert.DoesNotContain("CSDT_V2", query.Sql, StringComparison.OrdinalIgnoreCase);

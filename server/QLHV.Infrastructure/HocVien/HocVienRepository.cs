@@ -81,12 +81,33 @@ public sealed class HocVienRepository : IHocVienRepository
         GioiTinh = row.GioiTinh,
         SoCccd = row.SoCccd,
         DiaChiThuongTru = row.DiaChiThuongTru,
+        AnhRelativePath = ToSafeRelativePath(row.AnhRelativePath),
         SoGplxDaCo = row.SoGplxDaCo,
         HangGplxDaCo = row.HangGplxDaCo,
         NguoiNhanHoSo = row.NguoiNhanHoSo,
         TenKhoa = row.TenKhoa,
         MaKhoa = row.MaKhoa,
+        LastSyncStatus = row.LastSyncStatus,
     };
+
+    private static string? ToSafeRelativePath(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var trimmed = value.Trim();
+        if (Path.IsPathRooted(trimmed) ||
+            trimmed.StartsWith("/", StringComparison.Ordinal) ||
+            trimmed.StartsWith(@"\", StringComparison.Ordinal) ||
+            trimmed.Contains(':', StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return trimmed;
+    }
 
     private sealed class HocVienReadRow
     {
@@ -96,10 +117,12 @@ public sealed class HocVienRepository : IHocVienRepository
         public string? GioiTinh { get; init; }
         public string? SoCccd { get; init; }
         public string? DiaChiThuongTru { get; init; }
+        public string? AnhRelativePath { get; init; }
         public string? SoGplxDaCo { get; init; }
         public string? HangGplxDaCo { get; init; }
         public string? NguoiNhanHoSo { get; init; }
         public string? TenKhoa { get; init; }
         public string? MaKhoa { get; init; }
+        public string? LastSyncStatus { get; init; }
     }
 }

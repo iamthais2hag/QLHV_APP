@@ -23,6 +23,9 @@ public sealed class HocVienListItemDto
     /// <summary>Địa chỉ thường trú.</summary>
     public string? DiaChiThuongTru { get; init; }
 
+    /// <summary>Đường dẫn tương đối tới ảnh thẻ học viên, nếu có.</summary>
+    public string? AnhRelativePath { get; init; }
+
     /// <summary>Số GPLX đã có.</summary>
     public string? SoGplxDaCo { get; init; }
 
@@ -37,4 +40,7 @@ public sealed class HocVienListItemDto
 
     /// <summary>Mã khóa học.</summary>
     public string? MaKhoa { get; init; }
+
+    /// <summary>Trạng thái đồng bộ gần nhất từ V2.</summary>
+    public string? LastSyncStatus { get; init; }
 }

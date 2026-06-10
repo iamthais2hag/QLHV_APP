@@ -16,11 +16,13 @@ SELECT
     GioiTinh,
     SoCCCD         AS SoCccd,
     DiaChiThuongTru,
+    AnhRelativePath,
     SoGPLXDaCo     AS SoGplxDaCo,
     HangGPLXDaCo   AS HangGplxDaCo,
     NguoiNhanHoSo,
     TenKhoa,
-    MaKhoa";
+    MaKhoa,
+    LastSyncStatus";
 
     public static (string Sql, DynamicParameters Parameters) BuildCount(HocVienSearchRequest request)
     {

@@ -9,6 +9,33 @@ export function formatNgaySinh(value: string | null): string {
   return `${d}/${m}/${y}`;
 }
 
+export function buildHocVienPhotoUrl(value: string | null): string | null {
+  const path = normalizeRelativePhotoPath(value);
+  const baseUrl = import.meta.env.VITE_HOC_VIEN_PHOTO_BASE_URL;
+  if (!path || !baseUrl) {
+    return null;
+  }
+
+  const base = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+  const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+  return `${base}${encodedPath}`;
+}
+
+export function getHocVienPhotoTitle(value: string | null): string {
+  const path = normalizeRelativePhotoPath(value);
+  return path ? `Ảnh: ${path}` : 'Chưa có ảnh thẻ';
+}
+
+function normalizeRelativePhotoPath(value: string | null): string | null {
+  if (!value) return null;
+  const trimmed = value.trim().replace(/\\/g, '/');
+  if (!trimmed || trimmed.startsWith('/') || trimmed.includes(':') || trimmed.includes('..')) {
+    return null;
+  }
+
+  return trimmed;
+}
+
 /** Cột hiển thị của bảng học viên (theo thứ tự). */
 export const HOC_VIEN_COLUMNS: { key: keyof HocVienListItem; header: string }[] = [
   { key: 'maDangKy', header: 'Mã đăng ký' },
@@ -20,8 +47,8 @@ export const HOC_VIEN_COLUMNS: { key: keyof HocVienListItem; header: string }[] 
   { key: 'soGplxDaCo', header: 'Số GPLX đã có' },
   { key: 'hangGplxDaCo', header: 'Hạng GPLX đã có' },
   { key: 'nguoiNhanHoSo', header: 'Người nhận hồ sơ' },
-  { key: 'tenKhoa', header: 'Tên khóa' },
   { key: 'maKhoa', header: 'Mã khóa' },
+  { key: 'lastSyncStatus', header: 'Trạng thái' },
 ];
 
 /**

@@ -3,9 +3,10 @@ import { useState } from 'react';
 interface CopyButtonProps {
   /** Giá trị đầy đủ sẽ được sao chép (ví dụ Mã đăng ký đầy đủ). */
   value: string;
+  title?: string;
 }
 
-export default function CopyButton({ value }: CopyButtonProps) {
+export default function CopyButton({ value, title }: CopyButtonProps) {
   const [copied, setCopied] = useState(false);
 
   async function handleCopy() {
@@ -32,10 +33,10 @@ export default function CopyButton({ value }: CopyButtonProps) {
       type="button"
       className="btn btn--ghost btn--sm"
       onClick={handleCopy}
-      title="Sao chép mã đăng ký"
+      title={title ?? 'Sao chép mã đăng ký'}
       aria-label="Sao chép mã đăng ký"
     >
-      {copied ? 'Đã chép' : 'Chép'}
+      {copied ? 'Đã copy' : 'Copy'}
     </button>
   );
 }

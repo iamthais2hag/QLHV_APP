@@ -357,6 +357,7 @@
   font-weight: 600;
   position: sticky;
   top: 0;
+  z-index: 1;
 }
 
 .table tbody tr:hover {
@@ -377,6 +378,121 @@
   white-space: nowrap;
   display: inline-block;
   vertical-align: middle;
+}
+
+.table--hoc-vien {
+  table-layout: fixed;
+  min-width: 1220px;
+  font-size: 13px;
+}
+
+.table--hoc-vien th,
+.table--hoc-vien td {
+  padding: 8px 10px;
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.table--hoc-vien .col-stt {
+  width: 44px;
+}
+
+.table--hoc-vien .col-photo {
+  width: 58px;
+}
+
+.table--hoc-vien .col-madk {
+  width: 68px;
+}
+
+.table--hoc-vien .col-name {
+  width: 150px;
+}
+
+.table--hoc-vien .col-date {
+  width: 86px;
+}
+
+.table--hoc-vien .col-gender {
+  width: 62px;
+}
+
+.table--hoc-vien .col-cccd {
+  width: 108px;
+}
+
+.table--hoc-vien .col-address {
+  width: 180px;
+}
+
+.table--hoc-vien .col-gplx-number {
+  width: 108px;
+}
+
+.table--hoc-vien .col-gplx-class {
+  width: 70px;
+}
+
+.table--hoc-vien .col-receiver {
+  width: 110px;
+}
+
+.table--hoc-vien .col-course {
+  width: 86px;
+}
+
+.table--hoc-vien .col-status {
+  width: 80px;
+}
+
+.hocvien-photo {
+  width: 42px;
+  height: 56px;
+  border-radius: 6px;
+  border: 1px solid var(--tc-border);
+  background: #fff;
+  display: inline-grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.hocvien-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.hocvien-photo--placeholder {
+  color: var(--tc-text-muted);
+  background: var(--tc-blue-50);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.cell-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cell-name {
+  font-weight: 600;
+}
+
+.sync-status {
+  display: inline-flex;
+  max-width: 100%;
+  height: 24px;
+  align-items: center;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--tc-blue-50);
+  color: var(--tc-blue-800);
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ===== State blocks ===== */

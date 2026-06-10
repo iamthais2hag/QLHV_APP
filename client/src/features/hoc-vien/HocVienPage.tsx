@@ -1,12 +1,37 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { searchHocVien } from './api';
 import type { HocVienListItem, HocVienSearchParams } from './types';
-import { formatNgaySinh, exportCurrentRowsToExcel } from './utils';
+import {
+  buildHocVienPhotoUrl,
+  exportCurrentRowsToExcel,
+  formatNgaySinh,
+  getHocVienPhotoTitle,
+} from './utils';
 import CopyButton from './CopyButton';
 
 const PAGE_SIZE = 20;
 
 type Status = 'idle' | 'loading' | 'success' | 'error';
+
+function HocVienPhoto({ path }: { path: string | null }) {
+  const [failed, setFailed] = useState(false);
+  const url = buildHocVienPhotoUrl(path);
+  const title = getHocVienPhotoTitle(path);
+
+  if (url && !failed) {
+    return (
+      <span className="hocvien-photo" title={title}>
+        <img src={url} alt="Ảnh thẻ" onError={() => setFailed(true)} />
+      </span>
+    );
+  }
+
+  return (
+    <span className="hocvien-photo hocvien-photo--placeholder" title={title}>
+      Ảnh
+    </span>
+  );
+}
 
 export default function HocVienPage() {
   const [keyword, setKeyword] = useState('');
@@ -198,21 +223,37 @@ export default function HocVienPage() {
         )}
 
         {status === 'success' && rows.length > 0 && (
-          <table className="table">
+          <table className="table table--hoc-vien">
+            <colgroup>
+              <col className="col-stt" />
+              <col className="col-photo" />
+              <col className="col-madk" />
+              <col className="col-name" />
+              <col className="col-date" />
+              <col className="col-gender" />
+              <col className="col-cccd" />
+              <col className="col-address" />
+              <col className="col-gplx-number" />
+              <col className="col-gplx-class" />
+              <col className="col-receiver" />
+              <col className="col-course" />
+              <col className="col-status" />
+            </colgroup>
             <thead>
               <tr>
                 <th>STT</th>
-                <th>Mã đăng ký</th>
+                <th>Ảnh</th>
+                <th>Mã ĐK</th>
                 <th>Họ và tên</th>
                 <th>Ngày sinh</th>
                 <th>Giới tính</th>
                 <th>Số CCCD</th>
-                <th>Địa chỉ thường trú</th>
+                <th>Địa chỉ</th>
                 <th>Số GPLX đã có</th>
                 <th>Hạng GPLX đã có</th>
                 <th>Người nhận hồ sơ</th>
-                <th>Tên khóa</th>
                 <th>Mã khóa</th>
+                <th>Trạng thái</th>
               </tr>
             </thead>
             <tbody>
@@ -220,23 +261,31 @@ export default function HocVienPage() {
                 <tr key={row.maDangKy || index}>
                   <td>{startIndex + index + 1}</td>
                   <td>
-                    <span className="madk-cell">
-                      <span className="madk-cell__text" title={row.maDangKy}>
-                        {row.maDangKy}
-                      </span>
-                      <CopyButton value={row.maDangKy} />
-                    </span>
+                    <HocVienPhoto path={row.anhRelativePath} />
                   </td>
-                  <td>{row.hoVaTen}</td>
+                  <td>
+                    <CopyButton value={row.maDangKy} title={row.maDangKy} />
+                  </td>
+                  <td className="cell-ellipsis cell-name" title={row.hoVaTen}>
+                    {row.hoVaTen}
+                  </td>
                   <td>{formatNgaySinh(row.ngaySinh)}</td>
                   <td>{row.gioiTinh ?? ''}</td>
                   <td>{row.soCccd ?? ''}</td>
-                  <td>{row.diaChiThuongTru ?? ''}</td>
+                  <td className="cell-ellipsis cell-address" title={row.diaChiThuongTru ?? ''}>
+                    {row.diaChiThuongTru ?? ''}
+                  </td>
                   <td>{row.soGplxDaCo ?? ''}</td>
                   <td>{row.hangGplxDaCo ?? ''}</td>
-                  <td>{row.nguoiNhanHoSo ?? ''}</td>
-                  <td>{row.tenKhoa ?? ''}</td>
-                  <td>{row.maKhoa ?? ''}</td>
+                  <td className="cell-ellipsis" title={row.nguoiNhanHoSo ?? ''}>
+                    {row.nguoiNhanHoSo ?? ''}
+                  </td>
+                  <td title={row.tenKhoa ? `${row.maKhoa ?? ''} - ${row.tenKhoa}` : row.maKhoa ?? ''}>
+                    {row.maKhoa ?? ''}
+                  </td>
+                  <td>
+                    <span className="sync-status">{row.lastSyncStatus ?? ''}</span>
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -6,11 +6,13 @@ export interface HocVienListItem {
   gioiTinh: string | null;
   soCccd: string | null;
   diaChiThuongTru: string | null;
+  anhRelativePath: string | null;
   soGplxDaCo: string | null;
   hangGplxDaCo: string | null;
   nguoiNhanHoSo: string | null;
   tenKhoa: string | null;
   maKhoa: string | null;
+  lastSyncStatus: string | null;
 }
 
 /** Tham số tìm kiếm học viên. */
