@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using QLHV.Application.HocVien;
 using QLHV.Application.Sync;
+using QLHV.Application.Sync.Configuration;
 using QLHV.Application.Sync.Connections;
 using QLHV.Infrastructure.HocVien;
 using QLHV.Infrastructure.Sync;
@@ -18,6 +19,7 @@ public static class DependencyInjection
         services.AddScoped<IHocVienRepository, HocVienRepository>();
 
         services.Configure<SyncOptions>(configuration.GetSection(SyncOptions.SectionName));
+        services.Configure<SyncExecutionOptions>(configuration.GetSection(SyncExecutionOptions.SectionName));
 
         services.AddSingleton<IConnectionSettingsProvider, ServerConnectionSettingsProvider>();
         services.AddSingleton<ISyncConnectionProvider, SyncConnectionProvider>();
