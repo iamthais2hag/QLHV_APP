@@ -13,6 +13,28 @@ Use disposable or restored backup test databases only:
 
 Normal build and unit tests do not require SQL Server.
 
+## Local dev domains
+
+Recommended local URLs:
+
+- Frontend: `http://qlhv.local:5173`
+- Backend API: `http://api.qlhv.local:5000`
+
+Set them up with [`local-dev-hosts-guide.md`](./local-dev-hosts-guide.md). The hosts file entries are:
+
+```text
+127.0.0.1 qlhv.local
+127.0.0.1 api.qlhv.local
+```
+
+Before any dry-run, keep:
+
+```text
+SyncExecution:EnableTargetWrites=false
+```
+
+Do not call the execute endpoint in Phase B3E.
+
 ## Safe defaults
 
 Keep target writes disabled by default:
@@ -73,13 +95,13 @@ GET /api/dong-bo-v2/hoc-vien/config-check
 PowerShell:
 
 ```powershell
-Invoke-RestMethod -Method Get -Uri "https://localhost:<PORT>/api/dong-bo-v2/hoc-vien/config-check"
+Invoke-RestMethod -Method Get -Uri "http://api.qlhv.local:5000/api/dong-bo-v2/hoc-vien/config-check"
 ```
 
 curl:
 
 ```powershell
-curl.exe -k -X GET "https://localhost:<PORT>/api/dong-bo-v2/hoc-vien/config-check"
+curl.exe -X GET "http://api.qlhv.local:5000/api/dong-bo-v2/hoc-vien/config-check"
 ```
 
 Expected safe response shape:
@@ -109,13 +131,13 @@ POST /api/dong-bo-v2/hoc-vien/dry-run
 PowerShell:
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri "https://localhost:<PORT>/api/dong-bo-v2/hoc-vien/dry-run"
+Invoke-RestMethod -Method Post -Uri "http://api.qlhv.local:5000/api/dong-bo-v2/hoc-vien/dry-run"
 ```
 
 curl:
 
 ```powershell
-curl.exe -k -X POST "https://localhost:<PORT>/api/dong-bo-v2/hoc-vien/dry-run"
+curl.exe -X POST "http://api.qlhv.local:5000/api/dong-bo-v2/hoc-vien/dry-run"
 ```
 
 Expected safe behavior:

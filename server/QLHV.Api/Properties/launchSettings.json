@@ -19,6 +19,16 @@
         "ASPNETCORE_ENVIRONMENT": "Development"
       }
     },
+    "api.qlhv.local": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": true,
+      "launchUrl": "swagger",
+      "applicationUrl": "http://api.qlhv.local:5000;http://localhost:5129",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    },
     "https": {
       "commandName": "Project",
       "dotnetRunMessages": true,

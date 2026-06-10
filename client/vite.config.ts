@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react';
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
   // Mục tiêu proxy cho API khi chạy dev. Có thể chỉnh qua biến môi trường VITE_API_PROXY_TARGET.
-  const apiTarget = env.VITE_API_PROXY_TARGET || 'http://localhost:5080';
+  const apiTarget = env.VITE_API_PROXY_TARGET || 'http://api.qlhv.local:5000';
 
   return {
     plugins: [react()],

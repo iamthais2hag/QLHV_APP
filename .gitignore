@@ -6,6 +6,7 @@ node_modules/
 
 # Secrets
 .env
+.env.local
 *.user
 appsettings.Production.json
 appsettings.Local.json

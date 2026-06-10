@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:local": "vite --host qlhv.local",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit"

@@ -20,12 +20,20 @@ builder.Services.AddMemoryCache();
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 
-// CORS for the internal frontend (local dev origins only).
+// CORS for the internal frontend. Local dev origins are allowed only in Development by default.
 const string FrontendCors = "frontend";
+var configuredFrontendOrigins = builder.Configuration
+    .GetSection("Cors:AllowedOrigins")
+    .Get<string[]>();
+var frontendOrigins = configuredFrontendOrigins is { Length: > 0 }
+    ? configuredFrontendOrigins
+    : builder.Environment.IsDevelopment()
+        ? ["http://localhost:5173", "http://qlhv.local:5173"]
+        : [];
 builder.Services.AddCors(options =>
 {
     options.AddPolicy(FrontendCors, policy =>
-        policy.WithOrigins("http://localhost:5173")
+        policy.WithOrigins(frontendOrigins)
             .AllowAnyHeader()
             .AllowAnyMethod());
 });
@@ -58,7 +66,14 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
+var enableHttpsRedirection = builder.Configuration.GetValue(
+    "HttpsRedirection:Enabled",
+    !app.Environment.IsDevelopment());
+if (enableHttpsRedirection)
+{
+    app.UseHttpsRedirection();
+}
+
 app.UseCors(FrontendCors);
 app.UseAuthorization();
 
