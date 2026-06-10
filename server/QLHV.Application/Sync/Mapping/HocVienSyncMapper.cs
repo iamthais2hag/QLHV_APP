@@ -1,20 +1,15 @@
+using System.Security.Cryptography;
+using System.Text;
 using QLHV.Application.Sync.Dtos;
 
 namespace QLHV.Application.Sync.Mapping;
 
 /// <summary>
-/// Ánh xạ một dòng nguồn CSDT_V2 sang mô hình ghi QLHV_APP, áp dụng quy tắc dữ liệu đã chốt
-/// (xem docs/hoc-vien-data-rules.md). Hàm THUẦN (pure), không I/O, không ghi DB.
-///
-/// Quy tắc:
-///   - Chỉ TRIM; bảo toàn giá trị gốc; rỗng → null.
-///   - SoCCCD ← SoCMT: KHÔNG chuyển CMND 9 số sang CCCD 12 số. Nếu khác 12 chữ số → cảnh báo (không sửa).
-///   - GioiTinh: giữ nguyên giá trị gốc (đã trim).
-///   - SourceOfTruth = "V2".
+/// Pure mapper from a CSDT_V2 source row to the QLHV_APP write model.
+/// It performs no I/O and follows docs/hoc-vien-data-rules.md: trim only, preserve original values.
 /// </summary>
 public static class HocVienSyncMapper
 {
-    /// <summary>Kết quả ánh xạ kèm cảnh báo dữ liệu.</summary>
     public sealed record MapResult(
         HocVienTargetWriteModel? Model,
         IReadOnlyList<HocVienDataWarningDto> Warnings,
@@ -27,7 +22,6 @@ public static class HocVienSyncMapper
         var maDK = Trim(source.MaDK);
         if (string.IsNullOrEmpty(maDK))
         {
-            // Không có khóa hợp lệ → bỏ qua (không thể upsert theo MaDK).
             return new MapResult(null, warnings, ShouldSkip: true);
         }
 
@@ -43,7 +37,7 @@ public static class HocVienSyncMapper
             });
         }
 
-        var model = new HocVienTargetWriteModel
+        var modelWithoutHash = new HocVienTargetWriteModel
         {
             MaDK = maDK,
             MaKhoa = Trim(source.MaKhoaHoc),
@@ -51,8 +45,8 @@ public static class HocVienSyncMapper
             HangGPLXHoc = Trim(source.HangGPLX),
             HoTen = Trim(source.HoVaTen),
             NgaySinh = source.NgaySinh,
-            GioiTinh = Trim(source.GioiTinh),   // giữ nguyên giá trị gốc
-            SoCCCD = soCccd,                     // chỉ trim, không chuyển đổi
+            GioiTinh = Trim(source.GioiTinh),
+            SoCCCD = soCccd,
             DiaChiThuongTru = Trim(source.DiaChiThuongTru),
             SoGPLXDaCo = Trim(source.SoGPLXDaCo),
             HangGPLXDaCo = Trim(source.HangGPLXDaCo),
@@ -60,10 +54,55 @@ public static class HocVienSyncMapper
             SourceOfTruth = HocVienDataRules.SourceOfTruthV2,
         };
 
+        var model = new HocVienTargetWriteModel
+        {
+            MaDK = modelWithoutHash.MaDK,
+            MaKhoa = modelWithoutHash.MaKhoa,
+            TenKhoa = modelWithoutHash.TenKhoa,
+            HangGPLXHoc = modelWithoutHash.HangGPLXHoc,
+            HoTen = modelWithoutHash.HoTen,
+            NgaySinh = modelWithoutHash.NgaySinh,
+            GioiTinh = modelWithoutHash.GioiTinh,
+            SoCCCD = modelWithoutHash.SoCCCD,
+            DiaChiThuongTru = modelWithoutHash.DiaChiThuongTru,
+            SoGPLXDaCo = modelWithoutHash.SoGPLXDaCo,
+            HangGPLXDaCo = modelWithoutHash.HangGPLXDaCo,
+            NguoiNhanHoSo = modelWithoutHash.NguoiNhanHoSo,
+            SourceOfTruth = modelWithoutHash.SourceOfTruth,
+            V2RowHash = CalculateV2RowHash(modelWithoutHash),
+        };
+
         return new MapResult(model, warnings, ShouldSkip: false);
     }
 
-    /// <summary>Kiểm tra số CCCD có đúng 12 chữ số hay không (không sửa giá trị).</summary>
+    /// <summary>
+    /// Stable SHA-256 over normalized source fields only.
+    /// Excludes volatile metadata such as LastSyncFromV2At, LastSyncStatus, UpdatedAt, and RowVersion.
+    /// </summary>
+    public static string CalculateV2RowHash(HocVienTargetWriteModel model)
+    {
+        var parts = new[]
+        {
+            model.MaDK,
+            model.MaKhoa,
+            model.TenKhoa,
+            model.HangGPLXHoc,
+            model.HoTen,
+            model.NgaySinh?.ToString("yyyy-MM-dd"),
+            model.GioiTinh,
+            model.SoCCCD,
+            model.DiaChiThuongTru,
+            model.SoGPLXDaCo,
+            model.HangGPLXDaCo,
+            model.NguoiNhanHoSo,
+            model.SourceOfTruth,
+        };
+
+        var canonical = string.Join("|", parts.Select(ToLengthPrefixedValue));
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
+        return Convert.ToHexString(hash);
+    }
+
     public static bool IsCccdLengthValid(string value)
     {
         if (value.Length != HocVienDataRules.CccdExpectedLength)
@@ -84,4 +123,10 @@ public static class HocVienSyncMapper
 
     private static string? Trim(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string ToLengthPrefixedValue(string? value)
+    {
+        value ??= string.Empty;
+        return $"{value.Length}:{value}";
+    }
 }

@@ -2,15 +2,16 @@ using QLHV.Application.Sync.Dtos;
 
 namespace QLHV.Application.Sync;
 
-/// <summary>
-/// Nghiệp vụ đồng bộ học viên một chiều từ CSDT_V2 sang QLHV_APP.
-/// Phase A chỉ hỗ trợ dry-run (không ghi dữ liệu).
-/// </summary>
+/// <summary>Application service for one-way HocVien sync from CSDT_V2 to QLHV_APP.</summary>
 public interface IHocVienSyncService
 {
-    /// <summary>
-    /// Chạy thử: kiểm tra cấu hình/kết nối, dựng kế hoạch ánh xạ và trả về tóm tắt an toàn.
-    /// KHÔNG mở kết nối thật, KHÔNG ghi dữ liệu.
-    /// </summary>
+    /// <summary>Dry-run: configuration/source checks and safe plan only. No target writes.</summary>
     Task<DryRunResultDto> DryRunHocVienAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Guarded manual execution. Must reject unless server-side writes are enabled and explicit confirmation is present.
+    /// </summary>
+    Task<HocVienSyncExecuteResultDto> ExecuteHocVienAsync(
+        HocVienSyncExecuteRequest request,
+        CancellationToken cancellationToken = default);
 }

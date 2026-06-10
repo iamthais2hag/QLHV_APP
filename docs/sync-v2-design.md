@@ -170,3 +170,97 @@ Quy tắc dữ liệu áp dụng: xem [`hoc-vien-data-rules.md`](./hoc-vien-data
 - Công thức `V2RowHash` để phát hiện thay đổi (chọn cột tham gia hash).
 - Có áp `IsDeleted`/đánh dấu bản ghi nguồn biến mất hay không (mặc định không xóa vật lý).
 - Bật công tắc cho phép ghi (enable switch) trước khi thực thi và trước khi lập lịch Hangfire.
+
+## Phase B3B: Guarded target write path
+
+Phase B3B implements the write code path for `CSDT_V2` HocVien -> `QLHV_APP.dbo.App_HocVien`, but keeps it locked by default. Development/build must not execute the endpoint or run sync jobs.
+
+### Execution guards
+
+Server-side options:
+
+- `Sync:EnableTargetWrites` default `false`.
+- `Sync:RequireManualConfirmation` default `true`.
+- `Sync:AllowHangfireSchedule` default `false`.
+
+Manual endpoint:
+
+```text
+POST /api/dong-bo-v2/hoc-vien/execute
+```
+
+The endpoint rejects unless:
+
+- `EnableTargetWrites=true` in protected server configuration.
+- The request body includes `ConfirmTargetWrites=true`.
+- The request body includes `ConfirmationText="EXECUTE_DONG_BO_V2_HOC_VIEN"` when manual confirmation is required.
+- `QLHV_APP` and `CSDT_V2` connections are usable and not placeholders.
+
+Default repository defense also rejects writes when `dryRun=true` or `EnableTargetWrites=false`, even if a caller bypasses the API controller.
+
+### V2RowHash formula
+
+`V2RowHash` is SHA-256 hex over length-prefixed, normalized fields from `HocVienTargetWriteModel`:
+
+```text
+MaDK
+MaKhoa
+TenKhoa
+HangGPLXHoc
+HoTen
+NgaySinh formatted yyyy-MM-dd
+GioiTinh
+SoCCCD
+DiaChiThuongTru
+SoGPLXDaCo
+HangGPLXDaCo
+NguoiNhanHoSo
+SourceOfTruth
+```
+
+Normalization is the mapper output defined in `HocVienSyncMapper`: trim strings, empty to null, preserve source values, do not convert CMND to CCCD, do not interpret `GioiTinh`. Volatile fields are excluded: `LastSyncFromV2At`, `LastSyncStatus`, `LastSyncMessage`, `UpdatedAt`, `RowVersion`.
+
+### Upsert transaction
+
+`QlhvHocVienTargetRepository.UpsertBatchAsync` performs one transaction per batch:
+
+1. Resolve `QLHV_APP` connection internally. The connection string is never returned or logged.
+2. Begin SQL transaction.
+3. Create temp table `#Sync_HocVien_Staging`.
+4. Map and hash source rows with `HocVienSyncMapper`.
+5. Bulk load mapped rows into staging with `SqlBulkCopy`.
+6. `MERGE` staging into `dbo.App_HocVien` keyed by `MaDK`.
+7. Insert rows missing in target.
+8. Update matched rows only when `ISNULL(tgt.V2RowHash, '') <> ISNULL(src.V2RowHash, '')`.
+9. Skip matched rows with identical hash.
+10. Do not include a delete clause. No physical delete is performed.
+11. Commit on success; rollback on any exception.
+
+The MERGE output is counted as safe summary data only: inserted, updated, skipped. It does not expose raw CCCD/GPLX values.
+
+### App_DongBoLog
+
+`SyncRunLogWriter.WriteAsync` writes one sanitized run summary row to `dbo.App_DongBoLog` after guarded manual execution:
+
+- `JobName`
+- `EntityType`
+- `SourceSystem`
+- `StartedAt`
+- `EndedAt`
+- `DurationMs`
+- `Status`
+- `TotalRead`
+- `TotalInserted`
+- `TotalUpdated`
+- `TotalSkipped`
+- `TotalError`
+- `RetryCount`
+- `ErrorMessage`
+- `DetailJson`
+- `CreatedBy`
+
+`DetailJson` contains counts/status/error codes only. Do not put CCCD, GPLX raw values, passwords, tokens, usernames with passwords, or full connection strings into log fields.
+
+### Hangfire
+
+The job class remains ready, but Phase B3B does not schedule recurring jobs. `AllowHangfireSchedule=false` is the default, and scheduling belongs to Phase B4 or later after a separate review.

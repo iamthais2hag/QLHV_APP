@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text.Json;
 using Microsoft.Extensions.Options;
 using QLHV.Application.Sync.Connections;
 using QLHV.Application.Sync.Dtos;
@@ -7,22 +9,28 @@ namespace QLHV.Application.Sync;
 
 /// <summary>
 /// Application service for one-way HocVien sync from CSDT_V2 to QLHV_APP.
-/// Phase A only builds a safe dry-run plan. It does not open SQL connections or write data.
+/// Dry-run remains no-write. Manual execution is guarded by explicit server and request switches.
 /// </summary>
 public sealed class HocVienSyncService : IHocVienSyncService
 {
     private readonly SyncOptions _options;
     private readonly IConnectionSettingsProvider _connections;
     private readonly IV2HocVienSourceRepository _v2Source;
+    private readonly IQlhvHocVienTargetRepository _target;
+    private readonly ISyncRunLogWriter _logWriter;
 
     public HocVienSyncService(
         IOptions<SyncOptions> options,
         IConnectionSettingsProvider connections,
-        IV2HocVienSourceRepository v2Source)
+        IV2HocVienSourceRepository v2Source,
+        IQlhvHocVienTargetRepository target,
+        ISyncRunLogWriter logWriter)
     {
         _options = options.Value;
         _connections = connections;
         _v2Source = v2Source;
+        _target = target;
+        _logWriter = logWriter;
     }
 
     public async Task<DryRunResultDto> DryRunHocVienAsync(CancellationToken cancellationToken = default)
@@ -53,8 +61,6 @@ public sealed class HocVienSyncService : IHocVienSyncService
         var canRun = !hasBlockingError && qlhv.IsUsable && v2.IsUsable;
         var now = DateTime.UtcNow;
 
-        // Phase B2 (CHỈ ĐỌC): nếu nguồn V2 đã cấu hình dùng được, đọc số lượng học viên ở nguồn
-        // bằng SELECT COUNT (không ghi gì). Nếu chưa cấu hình/placeholder thì bỏ qua an toàn.
         int? sourceCount = null;
         if (v2.IsUsable)
         {
@@ -64,7 +70,6 @@ public sealed class HocVienSyncService : IHocVienSyncService
             }
             catch (Exception ex)
             {
-                // Không lộ chuỗi kết nối/bí mật: chỉ ghi nhận thông điệp an toàn.
                 var issue = "Khong doc duoc so luong tu nguon CSDT_V2.";
                 issues.Add(issue);
                 errors.Add(new SyncErrorDto
@@ -106,6 +111,275 @@ public sealed class HocVienSyncService : IHocVienSyncService
             BatchSize = _options.BatchSize,
             TimeoutSeconds = _options.TimeoutSeconds,
         };
+    }
+
+    public async Task<HocVienSyncExecuteResultDto> ExecuteHocVienAsync(
+        HocVienSyncExecuteRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        request ??= new HocVienSyncExecuteRequest();
+        var startedAt = DateTime.UtcNow;
+        var stopwatch = Stopwatch.StartNew();
+        var issues = ValidateExecutionGuards(request);
+
+        if (issues.Count > 0)
+        {
+            return Rejected(startedAt, stopwatch.ElapsedMilliseconds, issues);
+        }
+
+        var qlhv = await _connections.GetQlhvAppConnectionAsync(cancellationToken);
+        var v2 = await _connections.GetSourceConnectionAsync(SourceSystem.V2, cancellationToken);
+
+        if (!qlhv.IsUsable)
+        {
+            issues.Add("QLHV_APP chua co cau hinh ket noi dung duoc.");
+        }
+
+        if (!v2.IsUsable)
+        {
+            issues.Add("CSDT_V2 chua co cau hinh ket noi dung duoc.");
+        }
+
+        if (issues.Count > 0)
+        {
+            return Rejected(startedAt, stopwatch.ElapsedMilliseconds, issues);
+        }
+
+        var filter = (request.Filter ?? HocVienSourceFilter.Empty).Normalized();
+        var batchSize = Math.Max(1, _options.BatchSize);
+        var maxRows = request.MaxRows is > 0 ? request.MaxRows.Value : (int?)null;
+        var totalAvailable = await _v2Source.CountAsync(filter, cancellationToken);
+        var remaining = maxRows.HasValue ? Math.Min(maxRows.Value, totalAvailable) : totalAvailable;
+
+        var totalRead = 0;
+        var totalInserted = 0;
+        var totalUpdated = 0;
+        var totalSkipped = 0;
+        var totalError = 0;
+        var errors = new List<SyncErrorDto>();
+
+        try
+        {
+            for (var offset = 0; remaining > 0; offset += batchSize)
+            {
+                var pageSize = Math.Min(batchSize, remaining);
+                var rows = await _v2Source.ReadPageAsync(filter, offset, pageSize, cancellationToken);
+                if (rows.Count == 0)
+                {
+                    break;
+                }
+
+                var upsert = await _target.UpsertBatchAsync(rows, dryRun: false, cancellationToken);
+                totalRead += upsert.TotalRead;
+                totalInserted += upsert.Inserted;
+                totalUpdated += upsert.Updated;
+                totalSkipped += upsert.Skipped;
+                remaining -= rows.Count;
+            }
+
+            stopwatch.Stop();
+            var summary = BuildSummary(
+                startedAt,
+                stopwatch.ElapsedMilliseconds,
+                "ThanhCong",
+                totalRead,
+                totalInserted,
+                totalUpdated,
+                totalSkipped,
+                totalError,
+                errors);
+
+            await _logWriter.WriteAsync(ToLogEntry(summary, errorMessage: null), cancellationToken);
+
+            return new HocVienSyncExecuteResultDto
+            {
+                Accepted = true,
+                Status = "ThanhCong",
+                Message = "Dong bo HocVien tu CSDT_V2 sang QLHV_APP da hoan tat.",
+                Summary = summary,
+            };
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            totalError++;
+            errors.Add(new SyncErrorDto
+            {
+                Code = "SYNC_EXECUTION_FAILED",
+                Message = $"Dong bo that bai. Chi tiet an toan: {ex.GetType().Name}.",
+            });
+
+            var summary = BuildSummary(
+                startedAt,
+                stopwatch.ElapsedMilliseconds,
+                "Loi",
+                totalRead,
+                totalInserted,
+                totalUpdated,
+                totalSkipped,
+                totalError,
+                errors);
+
+            await TryWriteFailureLogAsync(summary, errors[0].Message, cancellationToken);
+
+            return new HocVienSyncExecuteResultDto
+            {
+                Accepted = true,
+                Status = "Loi",
+                Message = errors[0].Message,
+                Summary = summary,
+                Issues = new[] { errors[0].Message },
+            };
+        }
+    }
+
+    private List<string> ValidateExecutionGuards(HocVienSyncExecuteRequest request)
+    {
+        var issues = new List<string>();
+
+        if (!_options.EnableTargetWrites)
+        {
+            issues.Add("EnableTargetWrites=false. Endpoint execute bi khoa va khong ghi du lieu.");
+        }
+
+        if (_options.RequireManualConfirmation)
+        {
+            if (!request.ConfirmTargetWrites)
+            {
+                issues.Add("Thieu ConfirmTargetWrites=true.");
+            }
+
+            if (!string.Equals(
+                    request.ConfirmationText,
+                    HocVienSyncExecuteRequest.RequiredConfirmationText,
+                    StringComparison.Ordinal))
+            {
+                issues.Add($"ConfirmationText phai bang '{HocVienSyncExecuteRequest.RequiredConfirmationText}'.");
+            }
+        }
+
+        if (_options.BatchSize <= 0)
+        {
+            issues.Add("BatchSize phai lon hon 0.");
+        }
+
+        if (_options.TimeoutSeconds <= 0)
+        {
+            issues.Add("TimeoutSeconds phai lon hon 0.");
+        }
+
+        return issues;
+    }
+
+    private static HocVienSyncExecuteResultDto Rejected(
+        DateTime startedAt,
+        long durationMs,
+        IReadOnlyList<string> issues)
+    {
+        return new HocVienSyncExecuteResultDto
+        {
+            Accepted = false,
+            Status = "Rejected",
+            Message = "Manual execution rejected by safety guards.",
+            Issues = issues,
+            Summary = BuildSummary(
+                startedAt,
+                durationMs,
+                "Rejected",
+                totalRead: 0,
+                totalInserted: 0,
+                totalUpdated: 0,
+                totalSkipped: 0,
+                totalError: issues.Count,
+                errors: issues.Select(issue => new SyncErrorDto
+                {
+                    Code = "EXECUTION_GUARD_REJECTED",
+                    Message = issue,
+                }).ToList()),
+        };
+    }
+
+    private static SyncSummaryDto BuildSummary(
+        DateTime startedAt,
+        long durationMs,
+        string status,
+        int totalRead,
+        int totalInserted,
+        int totalUpdated,
+        int totalSkipped,
+        int totalError,
+        IReadOnlyList<SyncErrorDto> errors)
+    {
+        return new SyncSummaryDto
+        {
+            JobName = IHocVienSyncJob.JobName,
+            EntityType = "HocVien",
+            SourceSystem = "V2",
+            IsDryRun = false,
+            Status = status,
+            TotalRead = totalRead,
+            TotalInserted = totalInserted,
+            TotalUpdated = totalUpdated,
+            TotalSkipped = totalSkipped,
+            TotalError = totalError,
+            RetryCount = 0,
+            StartedAt = startedAt,
+            EndedAt = startedAt.AddMilliseconds(durationMs),
+            DurationMs = durationMs,
+            Errors = errors,
+        };
+    }
+
+    private static SyncRunLogEntry ToLogEntry(SyncSummaryDto summary, string? errorMessage)
+    {
+        var detail = new
+        {
+            summary.JobName,
+            summary.EntityType,
+            summary.SourceSystem,
+            summary.Status,
+            summary.TotalRead,
+            summary.TotalInserted,
+            summary.TotalUpdated,
+            summary.TotalSkipped,
+            summary.TotalError,
+            ErrorCodes = summary.Errors.Select(e => e.Code).ToArray(),
+        };
+
+        return new SyncRunLogEntry
+        {
+            JobName = summary.JobName,
+            EntityType = summary.EntityType,
+            SourceSystem = summary.SourceSystem,
+            StartedAt = summary.StartedAt,
+            EndedAt = summary.EndedAt,
+            DurationMs = summary.DurationMs,
+            Status = summary.Status,
+            TotalRead = summary.TotalRead,
+            TotalInserted = summary.TotalInserted,
+            TotalUpdated = summary.TotalUpdated,
+            TotalSkipped = summary.TotalSkipped,
+            TotalError = summary.TotalError,
+            RetryCount = summary.RetryCount,
+            ErrorMessage = errorMessage,
+            DetailJson = JsonSerializer.Serialize(detail),
+            CreatedBy = "SyncV2",
+        };
+    }
+
+    private async Task TryWriteFailureLogAsync(
+        SyncSummaryDto summary,
+        string errorMessage,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _logWriter.WriteAsync(ToLogEntry(summary, errorMessage), cancellationToken);
+        }
+        catch
+        {
+            // Preserve the original safe failure summary. Do not leak infrastructure details.
+        }
     }
 
     private static void AddConfigIssueIf(
@@ -150,7 +424,7 @@ public sealed class HocVienSyncService : IHocVienSyncService
     private static ConnectionCheckDto ToConnectionCheck(ResolvedConnection connection)
     {
         var message = connection.IsUsable
-            ? "Da co cau hinh ket noi dung duoc. Phase A chua mo ket noi that."
+            ? "Da co cau hinh ket noi dung duoc. Dry-run khong ghi du lieu."
             : connection.IsPlaceholder
                 ? "Cau hinh ket noi dang la placeholder."
                 : "Chua co cau hinh ket noi.";

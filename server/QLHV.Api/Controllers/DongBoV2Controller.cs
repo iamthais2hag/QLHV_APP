@@ -28,4 +28,24 @@ public sealed class DongBoV2Controller : ControllerBase
         var result = await _syncService.DryRunHocVienAsync(cancellationToken);
         return Ok(result);
     }
+
+    /// <summary>
+    /// Guarded manual execution for HocVien sync.
+    /// Defaults reject unless server config enables writes and the request includes explicit confirmation.
+    /// </summary>
+    [HttpPost("hoc-vien/execute")]
+    [ProducesResponseType(typeof(HocVienSyncExecuteResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(HocVienSyncExecuteResultDto), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<HocVienSyncExecuteResultDto>> ExecuteHocVien(
+        [FromBody] HocVienSyncExecuteRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _syncService.ExecuteHocVienAsync(request, cancellationToken);
+        if (!result.Accepted)
+        {
+            return Conflict(result);
+        }
+
+        return Ok(result);
+    }
 }

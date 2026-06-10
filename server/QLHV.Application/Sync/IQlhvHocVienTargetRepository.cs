@@ -2,30 +2,22 @@ using QLHV.Application.Sync.Dtos;
 
 namespace QLHV.Application.Sync;
 
-/// <summary>
-/// Ghi/đối chiếu dữ liệu học viên tại đích QLHV_APP (dbo.App_HocVien).
-///
-/// PHASE B3A: cho phép thao tác CHỈ ĐỌC (đếm, lấy tập khóa MaDK đã có) để dựng kế hoạch dry-run.
-/// Thao tác GHI (<see cref="UpsertBatchAsync"/>) CHƯA hiện thực; gọi sẽ ném lỗi để chặn ghi ngoài ý muốn.
-/// </summary>
+/// <summary>Read and guarded write access to QLHV_APP.dbo.App_HocVien.</summary>
 public interface IQlhvHocVienTargetRepository
 {
-    /// <summary>Đếm số học viên hiện có tại đích (CHỈ ĐỌC).</summary>
+    /// <summary>Counts current non-deleted target rows. Read-only.</summary>
     Task<int> CountAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Lấy tập khóa MaDK đã tồn tại ở đích trong số các khóa cho trước (CHỈ ĐỌC).
-    /// Dùng để phân loại Insert/Update khi dựng kế hoạch dry-run.
-    /// </summary>
+    /// <summary>Returns target keys already present for the supplied MaDK values. Read-only.</summary>
     Task<IReadOnlyCollection<string>> GetExistingKeysAsync(
         IReadOnlyCollection<string> maDks,
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Cập nhật/chèn theo lô (upsert) vào App_HocVien bằng staging + MERGE keyed on MaDK.
-    /// CHƯA hiện thực ở Phase B3A; gọi sẽ ném <see cref="NotSupportedException"/>.
+    /// Upserts source rows into App_HocVien using transaction, temp staging, SqlBulkCopy, and MERGE.
+    /// The caller is responsible for checking execution guards before calling with dryRun=false.
     /// </summary>
-    Task<int> UpsertBatchAsync(
+    Task<HocVienUpsertResultDto> UpsertBatchAsync(
         IReadOnlyList<V2HocVienSourceRow> rows,
         bool dryRun,
         CancellationToken cancellationToken = default);
