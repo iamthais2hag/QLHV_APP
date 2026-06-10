@@ -253,7 +253,7 @@ export default function HocVienPage() {
                 <th>Số GPLX đã có</th>
                 <th>Hạng GPLX đã có</th>
                 <th>Người nhận hồ sơ</th>
-                <th>Mã khóa</th>
+                <th>Khóa</th>
               </tr>
             </thead>
             <tbody>

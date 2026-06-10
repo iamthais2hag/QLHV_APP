@@ -48,7 +48,7 @@ export const HOC_VIEN_COLUMNS: { key: keyof HocVienListItem; header: string }[] 
   { key: 'soGplxDaCo', header: 'Số GPLX đã có' },
   { key: 'hangGplxDaCo', header: 'Hạng GPLX đã có' },
   { key: 'nguoiNhanHoSo', header: 'Người nhận hồ sơ' },
-  { key: 'maKhoa', header: 'Mã khóa' },
+  { key: 'maKhoa', header: 'Khóa' },
 ];
 
 /**

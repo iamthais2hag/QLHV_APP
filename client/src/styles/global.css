@@ -16,6 +16,7 @@
   --tc-text-muted: #5b6675;
 
   --tc-sidebar-width: 264px;
+  --tc-sidebar-collapsed-width: 72px;
   --tc-header-height: 60px;
   --tc-radius: 10px;
   --tc-shadow: 0 1px 3px rgba(15, 76, 146, 0.08), 0 1px 2px rgba(15, 76, 146, 0.06);
