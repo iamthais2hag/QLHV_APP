@@ -151,6 +151,7 @@ public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
         table.Columns.Add("MaDK", typeof(string));
         table.Columns.Add("MaKhoa", typeof(string));
         table.Columns.Add("TenKhoa", typeof(string));
+        table.Columns.Add("MaHangDT", typeof(string));
         table.Columns.Add("HangGPLXHoc", typeof(string));
         table.Columns.Add("HoTen", typeof(string));
         table.Columns.Add("NgaySinh", typeof(DateTime));
@@ -173,6 +174,7 @@ public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
                 row.MaDK,
                 Db(row.MaKhoa),
                 Db(row.TenKhoa),
+                Db(row.MaHangDT),
                 Db(row.HangGPLXHoc),
                 Db(row.HoTen),
                 Db(row.NgaySinh),

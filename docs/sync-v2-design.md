@@ -112,7 +112,8 @@ Target columns confirmed from `database/QLHV_APP_DATABASE_SCHEMA_v2_PERFORMANCE.
 | `NguoiNhanHoSo` | `NguoiLX_HoSo.NguoiNhanHSo` | Confirmed |
 | `TenKhoa` | `KhoaHoc.TenKH` | Confirmed |
 | `MaKhoa` | `NguoiLX_HoSo.MaKhoaHoc` / `KhoaHoc.MaKH` | Confirmed |
-| `HangGPLXHoc` | `NguoiLX_HoSo.HangDaoTao` -> `DM_HangDT.MaHangDT` -> `DM_HangDT.TenHangDT` | Confirmed related field |
+| `MaHangDT` | `NguoiLX_HoSo.HangDaoTao` | Confirmed related field |
+| `HangGPLXHoc` | `DM_HangDT.TenHangDT` joined by `NguoiLX_HoSo.HangDaoTao = DM_HangDT.MaHangDT` | Confirmed related field |
 
 ## Remaining Data Questions
 
@@ -205,6 +206,7 @@ Default repository defense also rejects writes when `EnableTargetWrites=false`, 
 MaDK
 MaKhoa
 TenKhoa
+MaHangDT
 HangGPLXHoc
 HoTen
 NgaySinh formatted yyyy-MM-dd

@@ -11,6 +11,7 @@ CREATE TABLE #Sync_HocVien_Staging (
     MaDK            NVARCHAR(50)   NOT NULL PRIMARY KEY,
     MaKhoa          NVARCHAR(50)   NULL,
     TenKhoa         NVARCHAR(255)  NULL,
+    MaHangDT        NVARCHAR(20)   NULL,
     HangGPLXHoc     NVARCHAR(20)   NULL,
     HoTen           NVARCHAR(255)  NULL,
     NgaySinh        DATE           NULL,
@@ -34,6 +35,7 @@ WHEN MATCHED AND ISNULL(tgt.V2RowHash, '') <> ISNULL(src.V2RowHash, '')
 THEN UPDATE SET
     tgt.MaKhoa           = src.MaKhoa,
     tgt.TenKhoa          = src.TenKhoa,
+    tgt.MaHangDT         = src.MaHangDT,
     tgt.HangGPLXHoc      = src.HangGPLXHoc,
     tgt.HoTen            = src.HoTen,
     tgt.NgaySinh         = src.NgaySinh,
@@ -54,13 +56,13 @@ THEN UPDATE SET
 
 WHEN NOT MATCHED BY TARGET
 THEN INSERT (
-    MaDK, MaKhoa, TenKhoa, HangGPLXHoc, HoTen, NgaySinh, GioiTinh,
+    MaDK, MaKhoa, TenKhoa, MaHangDT, HangGPLXHoc, HoTen, NgaySinh, GioiTinh,
     SoCCCD, DiaChiThuongTru, SoGPLXDaCo, HangGPLXDaCo, NguoiNhanHoSo,
     SourceOfTruth, V2RowHash, LastSyncFromV2At, LastSyncStatus, LastSyncMessage,
     CreatedBy
 )
 VALUES (
-    src.MaDK, src.MaKhoa, src.TenKhoa, src.HangGPLXHoc, src.HoTen, src.NgaySinh, src.GioiTinh,
+    src.MaDK, src.MaKhoa, src.TenKhoa, src.MaHangDT, src.HangGPLXHoc, src.HoTen, src.NgaySinh, src.GioiTinh,
     src.SoCCCD, src.DiaChiThuongTru, src.SoGPLXDaCo, src.HangGPLXDaCo, src.NguoiNhanHoSo,
     src.SourceOfTruth, src.V2RowHash, SYSDATETIME(), N'ThanhCong', NULL,
     N'SyncV2'

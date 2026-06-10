@@ -17,6 +17,9 @@ public sealed class HocVienSearchRequest
     /// <summary>Lọc theo hạng GPLX.</summary>
     public string? HangGplx { get; set; }
 
+    /// <summary>Lọc theo mã hạng đào tạo/hạng học.</summary>
+    public string? MaHangDT { get; set; }
+
     /// <summary>Lọc theo giới tính.</summary>
     public string? GioiTinh { get; set; }
 
@@ -29,11 +32,26 @@ public sealed class HocVienSearchRequest
     /// <summary>Trả về bản sao đã chuẩn hóa giá trị phân trang.</summary>
     public HocVienSearchRequest Normalized() => new()
     {
-        Keyword = string.IsNullOrWhiteSpace(Keyword) ? null : Keyword.Trim(),
-        MaKhoa = string.IsNullOrWhiteSpace(MaKhoa) ? null : MaKhoa.Trim(),
-        HangGplx = string.IsNullOrWhiteSpace(HangGplx) ? null : HangGplx.Trim(),
+        Keyword = NormalizeOptionalText(Keyword),
+        MaKhoa = NormalizeOptionalText(MaKhoa),
+        HangGplx = NormalizeOptionalText(HangGplx),
+        MaHangDT = NormalizeOptionalText(MaHangDT),
         GioiTinh = HocVienGender.NormalizeFilterValue(GioiTinh),
         Page = PagingDefaults.NormalizePage(Page),
         PageSize = PagingDefaults.NormalizePageSize(PageSize),
     };
+
+    private static string? NormalizeOptionalText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var trimmed = value.Trim();
+        return string.Equals(trimmed, "Tất cả", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(trimmed, "Tat ca", StringComparison.OrdinalIgnoreCase)
+                ? null
+                : trimmed;
+    }
 }

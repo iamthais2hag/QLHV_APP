@@ -34,4 +34,28 @@ public sealed class HocVienController : ControllerBase
         var result = await _service.SearchAsync(request, cancellationToken);
         return Ok(result);
     }
+
+    /// <summary>Gợi ý khóa học từ App_HocVien, chỉ đọc.</summary>
+    [HttpGet("lookups/khoa")]
+    [ProducesResponseType(typeof(IReadOnlyList<HocVienKhoaLookupDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<HocVienKhoaLookupDto>>> LookupKhoa(
+        [FromQuery] string? keyword,
+        [FromQuery] int limit,
+        CancellationToken cancellationToken)
+    {
+        var result = await _service.LookupKhoaAsync(keyword, limit <= 0 ? 20 : limit, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>Gợi ý hạng học từ App_HocVien, chỉ đọc.</summary>
+    [HttpGet("lookups/hang-hoc")]
+    [ProducesResponseType(typeof(IReadOnlyList<HocVienHangHocLookupDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<HocVienHangHocLookupDto>>> LookupHangHoc(
+        [FromQuery] string? keyword,
+        [FromQuery] int limit,
+        CancellationToken cancellationToken)
+    {
+        var result = await _service.LookupHangHocAsync(keyword, limit <= 0 ? 20 : limit, cancellationToken);
+        return Ok(result);
+    }
 }

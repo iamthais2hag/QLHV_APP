@@ -61,6 +61,40 @@ public sealed class HocVienRepository : IHocVienRepository
         };
     }
 
+    public async Task<IReadOnlyList<HocVienKhoaLookupDto>> LookupKhoaAsync(
+        string? keyword,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        var connectionString = await ResolveUsableTargetAsync(cancellationToken);
+        await using var connection = new SqlConnection(connectionString);
+        var query = HocVienSearchSqlBuilder.BuildKhoaLookup(keyword, limit);
+        var rows = await connection.QueryAsync<HocVienKhoaLookupDto>(new CommandDefinition(
+            query.Sql,
+            query.Parameters,
+            commandTimeout: _options.TimeoutSeconds,
+            cancellationToken: cancellationToken));
+
+        return rows.ToList();
+    }
+
+    public async Task<IReadOnlyList<HocVienHangHocLookupDto>> LookupHangHocAsync(
+        string? keyword,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        var connectionString = await ResolveUsableTargetAsync(cancellationToken);
+        await using var connection = new SqlConnection(connectionString);
+        var query = HocVienSearchSqlBuilder.BuildHangHocLookup(keyword, limit);
+        var rows = await connection.QueryAsync<HocVienHangHocLookupDto>(new CommandDefinition(
+            query.Sql,
+            query.Parameters,
+            commandTimeout: _options.TimeoutSeconds,
+            cancellationToken: cancellationToken));
+
+        return rows.ToList();
+    }
+
     private async Task<string> ResolveUsableTargetAsync(CancellationToken cancellationToken)
     {
         var target = await _connections.GetQlhvAppConnectionAsync(cancellationToken);
@@ -83,6 +117,7 @@ public sealed class HocVienRepository : IHocVienRepository
         DiaChiThuongTru = row.DiaChiThuongTru,
         AnhRelativePath = ToSafeRelativePath(row.AnhRelativePath),
         SoGplxDaCo = row.SoGplxDaCo,
+        MaHangDT = row.MaHangDT,
         HangGplxHoc = row.HangGplxHoc,
         HangGplxDaCo = row.HangGplxDaCo,
         NguoiNhanHoSo = row.NguoiNhanHoSo,
@@ -120,6 +155,7 @@ public sealed class HocVienRepository : IHocVienRepository
         public string? DiaChiThuongTru { get; init; }
         public string? AnhRelativePath { get; init; }
         public string? SoGplxDaCo { get; init; }
+        public string? MaHangDT { get; init; }
         public string? HangGplxHoc { get; init; }
         public string? HangGplxDaCo { get; init; }
         public string? NguoiNhanHoSo { get; init; }

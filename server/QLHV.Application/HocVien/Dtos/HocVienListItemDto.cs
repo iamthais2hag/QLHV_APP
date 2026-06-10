@@ -29,6 +29,9 @@ public sealed class HocVienListItemDto
     /// <summary>Số GPLX đã có.</summary>
     public string? SoGplxDaCo { get; init; }
 
+    /// <summary>Mã hạng đào tạo/hạng học từ CSDT_V2.</summary>
+    public string? MaHangDT { get; init; }
+
     /// <summary>Hạng học / hạng đăng ký học.</summary>
     public string? HangGplxHoc { get; init; }
 

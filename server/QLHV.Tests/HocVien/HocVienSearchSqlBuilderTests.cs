@@ -19,6 +19,7 @@ public sealed class HocVienSearchSqlBuilderTests
         Assert.Contains("WHERE IsDeleted = 0", query.Sql, StringComparison.Ordinal);
         Assert.Contains("AnhRelativePath", query.Sql, StringComparison.Ordinal);
         Assert.Contains("LastSyncStatus", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("MaHangDT", query.Sql, StringComparison.Ordinal);
         Assert.Contains("HangGPLXHoc", query.Sql, StringComparison.Ordinal);
         Assert.Contains("HangGPLXDaCo", query.Sql, StringComparison.Ordinal);
         Assert.Contains("ORDER BY HocVienId ASC", query.Sql, StringComparison.Ordinal);
@@ -28,6 +29,7 @@ public sealed class HocVienSearchSqlBuilderTests
         Assert.DoesNotContain("@Keyword", query.Sql, StringComparison.Ordinal);
         Assert.DoesNotContain("@MaKhoa", query.Sql, StringComparison.Ordinal);
         Assert.DoesNotContain("@HangGplx", query.Sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("@MaHangDT", query.Sql, StringComparison.Ordinal);
         Assert.DoesNotContain("@GioiTinh", query.Sql, StringComparison.Ordinal);
     }
 
@@ -110,6 +112,27 @@ public sealed class HocVienSearchSqlBuilderTests
     }
 
     [Theory]
+    [InlineData("Tất cả")]
+    [InlineData("Tat ca")]
+    public void All_filter_values_do_not_filter(string value)
+    {
+        var query = HocVienSearchSqlBuilder.BuildCount(new HocVienSearchRequest
+        {
+            MaKhoa = value,
+            HangGplx = value,
+            MaHangDT = value,
+            GioiTinh = value,
+            Page = 1,
+            PageSize = 20,
+        });
+
+        Assert.DoesNotContain("@MaKhoa", query.Sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("@HangGplx", query.Sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("@MaHangDT", query.Sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("@GioiTinh", query.Sql, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
@@ -149,16 +172,53 @@ public sealed class HocVienSearchSqlBuilderTests
         {
             MaKhoa = "K001",
             HangGplx = "B2",
+            MaHangDT = "B2",
             GioiTinh = "1",
             Page = 1,
             PageSize = 20,
         });
 
         Assert.Contains("MaKhoa = @MaKhoa", query.Sql, StringComparison.Ordinal);
-        Assert.Contains("HangGPLXHoc = @HangGplx", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("(MaHangDT = @HangGplx OR HangGPLXHoc = @HangGplx)", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("MaHangDT = @MaHangDT", query.Sql, StringComparison.Ordinal);
         Assert.Contains("GioiTinh = @GioiTinh", query.Sql, StringComparison.Ordinal);
         Assert.Contains("MaKhoa", query.Parameters.ParameterNames);
         Assert.Contains("HangGplx", query.Parameters.ParameterNames);
+        Assert.Contains("MaHangDT", query.Parameters.ParameterNames);
         Assert.Contains("GioiTinh", query.Parameters.ParameterNames);
+    }
+
+    [Fact]
+    public void Khoa_lookup_ranks_tenkhoa_prefix_then_makhoa_prefix_then_contains()
+    {
+        var query = HocVienSearchSqlBuilder.BuildKhoaLookup("A", 20);
+
+        Assert.Contains("FROM dbo.App_HocVien", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("TenKhoa LIKE @KeywordPrefix", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("MaKhoa LIKE @KeywordPrefix", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("TenKhoa LIKE @KeywordContains", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("MaKhoa LIKE @KeywordContains", query.Sql, StringComparison.Ordinal);
+        Assert.Equal("A%", query.Parameters.Get<string>("KeywordPrefix"));
+        Assert.Equal("%A%", query.Parameters.Get<string>("KeywordContains"));
+    }
+
+    [Fact]
+    public void Khoa_lookup_keyword_can_match_makhoa_prefix()
+    {
+        var query = HocVienSearchSqlBuilder.BuildKhoaLookup("66016K26A", 20);
+
+        Assert.Contains("MaKhoa LIKE @KeywordPrefix", query.Sql, StringComparison.Ordinal);
+        Assert.Equal("66016K26A%", query.Parameters.Get<string>("KeywordPrefix"));
+    }
+
+    [Fact]
+    public void Hang_hoc_lookup_keyword_can_match_mahangdt_prefix()
+    {
+        var query = HocVienSearchSqlBuilder.BuildHangHocLookup("Am", 20);
+
+        Assert.Contains("MaHangDT LIKE @KeywordPrefix", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("HangGPLXHoc LIKE @KeywordContains", query.Sql, StringComparison.Ordinal);
+        Assert.Equal("Am%", query.Parameters.Get<string>("KeywordPrefix"));
+        Assert.Equal("%Am%", query.Parameters.Get<string>("KeywordContains"));
     }
 }

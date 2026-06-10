@@ -168,6 +168,7 @@ BEGIN
         MaDK_V2 NVARCHAR(50) NULL,
         MaKhoa NVARCHAR(50) NULL,
         TenKhoa NVARCHAR(255) NULL,
+        MaHangDT NVARCHAR(20) NULL,
         HangGPLXHoc NVARCHAR(20) NULL,
         HoTen NVARCHAR(255) NULL,
         NgaySinh DATE NULL,
@@ -216,6 +217,10 @@ GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_App_HocVien_MaKhoa' AND object_id = OBJECT_ID(N'dbo.App_HocVien'))
     CREATE NONCLUSTERED INDEX IX_App_HocVien_MaKhoa ON dbo.App_HocVien(MaKhoa) WHERE IsDeleted = 0;
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_App_HocVien_MaHangDT' AND object_id = OBJECT_ID(N'dbo.App_HocVien'))
+    CREATE NONCLUSTERED INDEX IX_App_HocVien_MaHangDT ON dbo.App_HocVien(MaHangDT) WHERE IsDeleted = 0;
 GO
 
 
@@ -708,6 +713,7 @@ SELECT
     HoTen,
     MaKhoa,
     TenKhoa,
+    MaHangDT,
     HangGPLXHoc,
     TrangThaiKiemTra,
     DaInThe,

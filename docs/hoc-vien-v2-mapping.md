@@ -60,6 +60,7 @@ Trường liên quan (không nằm trong 11 cột hiển thị nhưng nên đồ
 | Đích `App_HocVien` | Nguồn CSDT_V2 | Ghi chú |
 | --- | --- | --- |
 | `HangGPLXHoc` | `NguoiLX_HoSo.HangDaoTao` → `DM_HangDT.MaHangDT` → `DM_HangDT.TenHangDT` | Hạng đào tạo/hạng học của khóa hiện tại. Không lấy từ `NguoiLX_HoSo.HangGPLX`. |
+| `MaHangDT` | `NguoiLX_HoSo.HangDaoTao` | Mã hạng đào tạo dùng để lọc/tìm kiếm hạng học chính xác, ví dụ `Am`, `A1m`. |
 | `SourceOfTruth` | hằng `'V2'` | Đánh dấu nguồn gốc. |
 | `V2RowHash` | hash các cột nguồn | Phát hiện thay đổi để upsert ở Phase B2. |
 | `LastSyncFromV2At` / `LastSyncStatus` / `LastSyncMessage` | sinh khi đồng bộ | Vết đồng bộ. |

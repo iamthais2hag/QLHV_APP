@@ -383,6 +383,54 @@
   box-shadow: 0 0 0 3px var(--tc-blue-100);
 }
 
+.field__hint {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.field__hint--warning {
+  color: #a15c00;
+}
+
+.autocomplete {
+  position: relative;
+}
+
+.autocomplete__menu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid var(--tc-border);
+  border-radius: 8px;
+  box-shadow: var(--tc-shadow);
+  padding: 4px;
+}
+
+.autocomplete__option {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--tc-text);
+  cursor: pointer;
+  display: block;
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  text-align: left;
+  border-radius: 6px;
+  white-space: normal;
+}
+
+.autocomplete__option:hover {
+  background: var(--tc-blue-50);
+  color: var(--tc-blue-900);
+}
+
 .toolbar__actions {
   display: flex;
   gap: 10px;
@@ -488,7 +536,7 @@
 
 .table--hoc-vien {
   table-layout: fixed;
-  min-width: 1284px;
+  min-width: 1364px;
   font-size: 13px;
 }
 
@@ -549,7 +597,7 @@
 }
 
 .table--hoc-vien .col-course {
-  width: 110px;
+  width: 190px;
 }
 
 .hocvien-photo {

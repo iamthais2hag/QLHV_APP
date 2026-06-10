@@ -47,9 +47,10 @@ public sealed class HocVienMappingRulesTests
     [Fact]
     public void HangGPLXHoc_uses_ten_hang_dt_not_hang_gplx()
     {
-        var result = HocVienSyncMapper.MapAndValidate(Source(tenHangDT: " Hạng B2 ", hangGplx: "A1"));
+        var result = HocVienSyncMapper.MapAndValidate(Source(hangDaoTao: " B2 ", tenHangDT: " Hạng B2 ", hangGplx: "A1"));
 
         Assert.NotNull(result.Model);
+        Assert.Equal("B2", result.Model!.MaHangDT);
         Assert.Equal("Hạng B2", result.Model!.HangGPLXHoc);
     }
 
@@ -77,17 +78,21 @@ public sealed class HocVienMappingRulesTests
         var first = HocVienSyncMapper.MapAndValidate(Source(tenHangDT: "Hang A1", noiTTTenDayDu: "Dia chi 1"));
         var second = HocVienSyncMapper.MapAndValidate(Source(tenHangDT: "Hang B2", noiTTTenDayDu: "Dia chi 1"));
         var third = HocVienSyncMapper.MapAndValidate(Source(tenHangDT: "Hang A1", noiTTTenDayDu: "Dia chi 2"));
+        var fourth = HocVienSyncMapper.MapAndValidate(Source(hangDaoTao: "A1m", tenHangDT: "Hang A1", noiTTTenDayDu: "Dia chi 1"));
 
         Assert.NotNull(first.Model);
         Assert.NotNull(second.Model);
         Assert.NotNull(third.Model);
+        Assert.NotNull(fourth.Model);
         Assert.NotEqual(first.Model!.V2RowHash, second.Model!.V2RowHash);
         Assert.NotEqual(first.Model.V2RowHash, third.Model!.V2RowHash);
+        Assert.NotEqual(first.Model.V2RowHash, fourth.Model!.V2RowHash);
     }
 
     private static V2HocVienSourceRow Source(
         string soCmt = "001234567890",
         string gioiTinh = "M",
+        string hangDaoTao = "B2",
         string tenHangDT = "B2",
         string hangGplx = "B2",
         string noiTT = "Dia chi",
@@ -100,7 +105,7 @@ public sealed class HocVienMappingRulesTests
         GioiTinh = gioiTinh,
         MaKhoaHoc = "K001",
         TenKH = "Khoa 1",
-        HangDaoTao = "B2",
+        HangDaoTao = hangDaoTao,
         TenHangDT = tenHangDT,
         HangGPLX = hangGplx,
         NoiTT = noiTT,

@@ -31,14 +31,26 @@ public sealed class V2RowHashCalculatorTests
         Assert.Equal(first, second);
     }
 
+    [Fact]
+    public void Changed_ma_hang_dt_changes_hash()
+    {
+        var first = V2RowHashCalculator.Compute(Model(maHangDT: "Am", hangGplxHoc: "Hạng Am"));
+        var second = V2RowHashCalculator.Compute(Model(maHangDT: "A1m", hangGplxHoc: "Hạng Am"));
+
+        Assert.NotEqual(first, second);
+    }
+
     private static HocVienTargetWriteModel Model(
         string hoTen = "Nguyen Van A",
+        string maHangDT = "B2",
+        string hangGplxHoc = "B2",
         string existingHash = "") => new()
     {
         MaDK = "DK001",
         MaKhoa = "K001",
         TenKhoa = "Khoa 1",
-        HangGPLXHoc = "B2",
+        MaHangDT = maHangDT,
+        HangGPLXHoc = hangGplxHoc,
         HoTen = hoTen,
         NgaySinh = new DateTime(1990, 1, 2),
         GioiTinh = "1",

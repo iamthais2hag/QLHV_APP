@@ -9,6 +9,7 @@ public sealed class HocVienTargetWriteModel
     public string MaDK { get; init; } = string.Empty;
     public string? MaKhoa { get; init; }
     public string? TenKhoa { get; init; }
+    public string? MaHangDT { get; init; }
     public string? HangGPLXHoc { get; init; }
     public string? HoTen { get; init; }
     public DateTime? NgaySinh { get; init; }

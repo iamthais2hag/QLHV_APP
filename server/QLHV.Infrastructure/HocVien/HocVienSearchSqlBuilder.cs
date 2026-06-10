@@ -18,6 +18,7 @@ SELECT
     DiaChiThuongTru,
     AnhRelativePath,
     SoGPLXDaCo     AS SoGplxDaCo,
+    MaHangDT,
     HangGPLXHoc    AS HangGplxHoc,
     HangGPLXDaCo   AS HangGplxDaCo,
     NguoiNhanHoSo,
@@ -67,8 +68,14 @@ SELECT
 
         if (!string.IsNullOrWhiteSpace(request.HangGplx))
         {
-            conditions.Add("HangGPLXHoc = @HangGplx");
+            conditions.Add("(MaHangDT = @HangGplx OR HangGPLXHoc = @HangGplx)");
             parameters.Add("@HangGplx", request.HangGplx);
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.MaHangDT))
+        {
+            conditions.Add("MaHangDT = @MaHangDT");
+            parameters.Add("@MaHangDT", request.MaHangDT);
         }
 
         if (!string.IsNullOrWhiteSpace(request.GioiTinh))
@@ -85,4 +92,102 @@ SELECT
         .Replace("%", @"\%", StringComparison.Ordinal)
         .Replace("_", @"\_", StringComparison.Ordinal)
         .Replace("[", @"\[", StringComparison.Ordinal);
+
+    public static (string Sql, DynamicParameters Parameters) BuildKhoaLookup(string? keyword, int limit)
+    {
+        var parameters = new DynamicParameters();
+        parameters.Add("@Limit", Math.Clamp(limit, 1, 50));
+        AddLookupKeyword(parameters, keyword);
+
+        var sql = @"
+WITH DistinctKhoa AS (
+    SELECT DISTINCT
+        MaKhoa,
+        TenKhoa
+    FROM dbo.App_HocVien
+    WHERE IsDeleted = 0
+      AND MaKhoa IS NOT NULL
+      AND (
+          @Keyword IS NULL
+          OR TenKhoa LIKE @KeywordContains ESCAPE '\'
+          OR MaKhoa LIKE @KeywordContains ESCAPE '\'
+      )
+)
+SELECT TOP (@Limit)
+    MaKhoa,
+    TenKhoa,
+    CASE
+        WHEN NULLIF(LTRIM(RTRIM(ISNULL(TenKhoa, N''))), N'') IS NULL THEN MaKhoa
+        ELSE TenKhoa + N' - ' + MaKhoa
+    END AS Label
+FROM DistinctKhoa
+ORDER BY
+    CASE
+        WHEN @Keyword IS NULL THEN 3
+        WHEN TenKhoa LIKE @KeywordPrefix ESCAPE '\' THEN 0
+        WHEN MaKhoa LIKE @KeywordPrefix ESCAPE '\' THEN 1
+        ELSE 2
+    END,
+    TenKhoa,
+    MaKhoa;";
+
+        return (sql, parameters);
+    }
+
+    public static (string Sql, DynamicParameters Parameters) BuildHangHocLookup(string? keyword, int limit)
+    {
+        var parameters = new DynamicParameters();
+        parameters.Add("@Limit", Math.Clamp(limit, 1, 50));
+        AddLookupKeyword(parameters, keyword);
+
+        var sql = @"
+WITH DistinctHangHoc AS (
+    SELECT DISTINCT
+        MaHangDT,
+        HangGPLXHoc AS TenHangDT
+    FROM dbo.App_HocVien
+    WHERE IsDeleted = 0
+      AND MaHangDT IS NOT NULL
+      AND (
+          @Keyword IS NULL
+          OR MaHangDT LIKE @KeywordContains ESCAPE '\'
+          OR HangGPLXHoc LIKE @KeywordContains ESCAPE '\'
+      )
+)
+SELECT TOP (@Limit)
+    MaHangDT,
+    TenHangDT,
+    CASE
+        WHEN NULLIF(LTRIM(RTRIM(ISNULL(TenHangDT, N''))), N'') IS NULL THEN MaHangDT
+        ELSE MaHangDT + N' - ' + TenHangDT
+    END AS Label
+FROM DistinctHangHoc
+ORDER BY
+    CASE
+        WHEN @Keyword IS NULL THEN 3
+        WHEN MaHangDT LIKE @KeywordPrefix ESCAPE '\' THEN 0
+        WHEN TenHangDT LIKE @KeywordPrefix ESCAPE '\' THEN 1
+        ELSE 2
+    END,
+    MaHangDT,
+    TenHangDT;";
+
+        return (sql, parameters);
+    }
+
+    private static void AddLookupKeyword(DynamicParameters parameters, string? keyword)
+    {
+        if (string.IsNullOrWhiteSpace(keyword))
+        {
+            parameters.Add("@Keyword", null);
+            parameters.Add("@KeywordPrefix", null);
+            parameters.Add("@KeywordContains", null);
+            return;
+        }
+
+        var escaped = EscapeLike(keyword.Trim());
+        parameters.Add("@Keyword", keyword.Trim());
+        parameters.Add("@KeywordPrefix", $"{escaped}%");
+        parameters.Add("@KeywordContains", $"%{escaped}%");
+    }
 }

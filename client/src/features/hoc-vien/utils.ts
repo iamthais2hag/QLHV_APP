@@ -62,7 +62,7 @@ export const HOC_VIEN_COLUMNS: { key: keyof HocVienListItem; header: string }[] 
   { key: 'gioiTinh', header: 'Giới tính' },
   { key: 'soCccd', header: 'Số CCCD' },
   { key: 'diaChiThuongTru', header: 'Địa chỉ thường trú' },
-  { key: 'hangGplxHoc', header: 'Hạng học' },
+  { key: 'maHangDT', header: 'Hạng học' },
   { key: 'soGplxDaCo', header: 'Số GPLX đã có' },
   { key: 'hangGplxDaCo', header: 'Hạng GPLX đã có' },
   { key: 'nguoiNhanHoSo', header: 'Người nhận hồ sơ' },
@@ -73,6 +73,7 @@ const EXCEL_TEXT_COLUMNS = new Set<keyof HocVienListItem>([
   'maDangKy',
   'soCccd',
   'soGplxDaCo',
+  'maHangDT',
 ]);
 
 /**

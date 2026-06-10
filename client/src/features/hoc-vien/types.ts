@@ -8,6 +8,7 @@ export interface HocVienListItem {
   diaChiThuongTru: string | null;
   anhRelativePath: string | null;
   hangGplxHoc: string | null;
+  maHangDT: string | null;
   soGplxDaCo: string | null;
   hangGplxDaCo: string | null;
   nguoiNhanHoSo: string | null;
@@ -20,6 +21,7 @@ export interface HocVienSearchParams {
   keyword?: string;
   maKhoa?: string;
   hangGplx?: string;
+  maHangDT?: string;
   gioiTinh?: string;
   page: number;
   pageSize: number;
@@ -32,4 +34,16 @@ export interface PagedResult<T> {
   pageSize: number;
   totalItems: number;
   totalPages: number;
+}
+
+export interface HocVienKhoaLookupItem {
+  maKhoa: string;
+  tenKhoa: string | null;
+  label: string;
+}
+
+export interface HocVienHangHocLookupItem {
+  maHangDT: string;
+  tenHangDT: string | null;
+  label: string;
 }

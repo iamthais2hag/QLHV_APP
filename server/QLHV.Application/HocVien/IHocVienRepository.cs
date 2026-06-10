@@ -12,4 +12,14 @@ public interface IHocVienRepository
     Task<PagedResult<HocVienListItemDto>> SearchAsync(
         HocVienSearchRequest request,
         CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<HocVienKhoaLookupDto>> LookupKhoaAsync(
+        string? keyword,
+        int limit,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<HocVienHangHocLookupDto>> LookupHangHocAsync(
+        string? keyword,
+        int limit,
+        CancellationToken cancellationToken = default);
 }

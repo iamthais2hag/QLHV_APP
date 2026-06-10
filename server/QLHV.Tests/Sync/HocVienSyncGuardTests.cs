@@ -100,6 +100,9 @@ public sealed class HocVienSyncGuardTests
             m.SourceFieldPlanned.Contains("NguoiLX_HoSo.HangDaoTao", StringComparison.Ordinal) &&
             m.SourceFieldPlanned.Contains("DM_HangDT.TenHangDT", StringComparison.Ordinal));
         Assert.Contains(result.Mapping, m =>
+            m.TargetColumn == "MaHangDT" &&
+            m.SourceFieldPlanned.Contains("NguoiLX_HoSo.HangDaoTao", StringComparison.Ordinal));
+        Assert.Contains(result.Mapping, m =>
             m.TargetColumn == "NguoiNhanHoSo" &&
             m.SourceFieldPlanned.Contains("NguoiLX_HoSo.NguoiNhanHSo", StringComparison.Ordinal));
     }
