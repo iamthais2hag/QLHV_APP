@@ -39,11 +39,13 @@ public sealed class HocVienExcelExporterTests
         }
 
         Assert.Equal("001-DK", worksheet.Cell(4, 2).GetString());
-        Assert.Equal("Nguyen Van A", worksheet.Cell(4, 3).GetString());
+        Assert.Equal("Nguyen Van A Co Ten Dai De Kiem Tra Do Rong Cot", worksheet.Cell(4, 3).GetString());
         Assert.Equal("02/01/1990", worksheet.Cell(4, 4).GetString());
         Assert.Equal("Nam", worksheet.Cell(4, 5).GetString());
         Assert.Equal("001234567890", worksheet.Cell(4, 6).GetString());
-        Assert.Equal("Phuong 1", worksheet.Cell(4, 7).GetString());
+        Assert.Equal(
+            "So 123 Duong Rat Dai, Phuong 1, Quan Trung Tam, Thanh pho Can wrap text",
+            worksheet.Cell(4, 7).GetString());
         Assert.Equal("B2", worksheet.Cell(4, 8).GetString());
         Assert.Equal("B2", worksheet.Cell(4, 9).GetString());
         Assert.Equal("000GPLX", worksheet.Cell(4, 10).GetString());
@@ -66,6 +68,9 @@ public sealed class HocVienExcelExporterTests
             Assert.Equal(HocVienExcelExporter.DefaultFontName, font.FontName);
             Assert.Equal(HocVienExcelExporter.DefaultFontSize, font.FontSize);
             Assert.True(font.Bold);
+            Assert.Equal(XLAlignmentHorizontalValues.Center, worksheet.Cell(3, column).Style.Alignment.Horizontal);
+            Assert.Equal(XLAlignmentVerticalValues.Center, worksheet.Cell(3, column).Style.Alignment.Vertical);
+            Assert.True(worksheet.Cell(3, column).Style.Alignment.WrapText);
         }
     }
 
@@ -120,17 +125,50 @@ public sealed class HocVienExcelExporterTests
         AssertTextCell(worksheet.Cell(4, 14), "000K01");
     }
 
+    [Fact]
+    public void Export_workbook_applies_column_widths_wrap_text_and_row_heights()
+    {
+        using var stream = new MemoryStream(CreateSampleWorkbook());
+        using var workbook = new XLWorkbook(stream);
+        var worksheet = workbook.Worksheet(HocVienExcelExporter.SheetName);
+
+        AssertColumnWidth(worksheet, 2, min: 22d, max: 32d);
+        AssertColumnWidth(worksheet, 3, min: 18d, max: 35d);
+        AssertColumnWidth(worksheet, 6, min: 15d, max: 18d);
+        AssertColumnWidth(worksheet, 7, min: 25d, max: 55d);
+        AssertColumnWidth(worksheet, 14, min: 18d, max: 32d);
+
+        Assert.True(worksheet.Column(7).Style.Alignment.WrapText);
+        Assert.True(worksheet.Column(2).Style.Alignment.WrapText);
+        Assert.True(worksheet.Column(14).Style.Alignment.WrapText);
+        Assert.True(worksheet.Row(3).Height >= 24d);
+        Assert.True(worksheet.Row(4).Height >= 20d);
+    }
+
+    [Fact]
+    public void Export_workbook_aligns_short_body_columns_to_center()
+    {
+        using var stream = new MemoryStream(CreateSampleWorkbook());
+        using var workbook = new XLWorkbook(stream);
+        var worksheet = workbook.Worksheet(HocVienExcelExporter.SheetName);
+
+        foreach (var column in new[] { 1, 4, 5, 8, 9, 11 })
+        {
+            Assert.Equal(XLAlignmentHorizontalValues.Center, worksheet.Cell(4, column).Style.Alignment.Horizontal);
+        }
+    }
+
     private static byte[] CreateSampleWorkbook()
         => HocVienExcelExporter.CreateWorkbook(
         [
             new HocVienListItemDto
             {
                 MaDangKy = "001-DK",
-                HoVaTen = "Nguyen Van A",
+                HoVaTen = "Nguyen Van A Co Ten Dai De Kiem Tra Do Rong Cot",
                 NgaySinh = new DateOnly(1990, 1, 2),
                 GioiTinh = "M",
                 SoCccd = "001234567890",
-                DiaChiThuongTru = "Phuong 1",
+                DiaChiThuongTru = "So 123 Duong Rat Dai, Phuong 1, Quan Trung Tam, Thanh pho Can wrap text",
                 HangGplxHoc = "Hang B2",
                 MaHangDT = "B2",
                 SoGplxDaCo = "000GPLX",
@@ -145,5 +183,12 @@ public sealed class HocVienExcelExporterTests
     {
         Assert.Equal(expected, cell.GetString());
         Assert.Equal("@", cell.Style.NumberFormat.Format);
+    }
+
+    private static void AssertColumnWidth(IXLWorksheet worksheet, int column, double min, double max)
+    {
+        var width = worksheet.Column(column).Width;
+        Assert.True(width >= min, $"Column {column} width {width} should be >= {min}.");
+        Assert.True(width <= max, $"Column {column} width {width} should be <= {max}.");
     }
 }

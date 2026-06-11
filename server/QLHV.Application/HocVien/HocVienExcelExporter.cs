@@ -10,6 +10,10 @@ public static class HocVienExcelExporter
     public const string DefaultFontName = "Times New Roman";
     public const double DefaultFontSize = 13d;
 
+    private const int HeaderRow = 3;
+    private const double DefaultRowMinHeight = 20d;
+    private const double HeaderRowMinHeight = 24d;
+
     private static readonly CultureInfo VietnameseCulture = CultureInfo.GetCultureInfo("vi-VN");
 
     private static readonly string[] Headers =
@@ -31,6 +35,26 @@ public static class HocVienExcelExporter
     ];
 
     private static readonly int[] TextColumnIndexes = [2, 6, 8, 9, 10, 14];
+    private static readonly int[] CenterAlignedColumnIndexes = [1, 4, 5, 8, 9, 11];
+    private static readonly int[] WrapTextColumnIndexes = [2, 7, 14];
+
+    private static readonly ColumnWidthRule[] ColumnWidthRules =
+    [
+        new(1, 6d, 8d),
+        new(2, 22d, 32d),
+        new(3, 18d, 35d),
+        new(4, 12d, 14d),
+        new(5, 10d, 12d),
+        new(6, 15d, 18d),
+        new(7, 25d, 55d),
+        new(8, 10d, 12d),
+        new(9, 12d, 15d),
+        new(10, 16d, 20d),
+        new(11, 12d, 16d),
+        new(12, 18d, 28d),
+        new(13, 12d, 24d),
+        new(14, 18d, 32d),
+    ];
 
     public static byte[] CreateWorkbook(IReadOnlyList<HocVienListItemDto> rows, int totalCount)
     {
@@ -45,10 +69,9 @@ public static class HocVienExcelExporter
         worksheet.Cell(1, 1).Value = $"Tổng số: {totalCount.ToString("N0", VietnameseCulture)} học viên";
         worksheet.Cell(1, 1).Style.Font.Bold = true;
 
-        const int headerRow = 3;
         for (var index = 0; index < Headers.Length; index++)
         {
-            var cell = worksheet.Cell(headerRow, index + 1);
+            var cell = worksheet.Cell(HeaderRow, index + 1);
             cell.Value = Headers[index];
             cell.Style.Font.Bold = true;
             cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#EAF3FF");
@@ -57,19 +80,15 @@ public static class HocVienExcelExporter
 
         for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)
         {
-            WriteDataRow(worksheet, headerRow + rowIndex + 1, rowIndex + 1, rows[rowIndex]);
+            WriteDataRow(worksheet, HeaderRow + rowIndex + 1, rowIndex + 1, rows[rowIndex]);
         }
-
-        ApplyWorkbookFont(worksheet);
-        worksheet.Row(headerRow).Style.Font.Bold = true;
-        worksheet.Cell(1, 1).Style.Font.Bold = true;
 
         foreach (var columnIndex in TextColumnIndexes)
         {
             worksheet.Column(columnIndex).Style.NumberFormat.Format = "@";
         }
 
-        worksheet.Columns().AdjustToContents();
+        ApplyWorksheetLayout(worksheet);
 
         using var stream = new MemoryStream();
         workbook.SaveAs(stream);
@@ -112,6 +131,67 @@ public static class HocVienExcelExporter
         range.Style.Font.FontSize = DefaultFontSize;
     }
 
+    private static void ApplyWorksheetLayout(IXLWorksheet worksheet)
+    {
+        ApplyWorkbookFont(worksheet);
+
+        var usedRange = worksheet.RangeUsed();
+        if (usedRange is not null)
+        {
+            usedRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+            usedRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+            usedRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        }
+
+        var headerRange = worksheet.Range(HeaderRow, 1, HeaderRow, Headers.Length);
+        headerRange.Style.Font.Bold = true;
+        headerRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        headerRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        headerRange.Style.Alignment.WrapText = true;
+        headerRange.Style.Fill.BackgroundColor = XLColor.FromHtml("#EAF3FF");
+
+        worksheet.Cell(1, 1).Style.Font.Bold = true;
+
+        foreach (var columnIndex in CenterAlignedColumnIndexes)
+        {
+            worksheet.Column(columnIndex).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        }
+
+        foreach (var columnIndex in WrapTextColumnIndexes)
+        {
+            worksheet.Column(columnIndex).Style.Alignment.WrapText = true;
+        }
+
+        worksheet.Columns(1, Headers.Length).AdjustToContents();
+        ApplyColumnWidthRules(worksheet);
+        worksheet.RowsUsed().AdjustToContents();
+        ApplyMinimumRowHeights(worksheet);
+        worksheet.SheetView.FreezeRows(HeaderRow);
+    }
+
+    private static void ApplyColumnWidthRules(IXLWorksheet worksheet)
+    {
+        foreach (var rule in ColumnWidthRules)
+        {
+            var column = worksheet.Column(rule.Index);
+            column.Width = Math.Clamp(column.Width, rule.MinWidth, rule.MaxWidth);
+        }
+    }
+
+    private static void ApplyMinimumRowHeights(IXLWorksheet worksheet)
+    {
+        foreach (var row in worksheet.RowsUsed())
+        {
+            var minHeight = row.RowNumber() == HeaderRow ? HeaderRowMinHeight : DefaultRowMinHeight;
+            if (row.Height < minHeight)
+            {
+                row.Height = minHeight;
+            }
+        }
+    }
+
     private static string FormatDate(DateOnly? value)
         => value.HasValue ? value.Value.ToString("dd/MM/yyyy") : string.Empty;
+
+    private sealed record ColumnWidthRule(int Index, double MinWidth, double MaxWidth);
 }
