@@ -295,11 +295,6 @@ export default function HocVienPage() {
 
   return (
     <div>
-      <div className="page__head">
-        <h2 className="page__title">Học viên</h2>
-        <p className="page__subtitle">Tra cứu danh sách và hồ sơ học viên.</p>
-      </div>
-
       <div className="toolbar">
         <div className="toolbar__row">
           <div className="field" style={{ flexBasis: 260 }}>

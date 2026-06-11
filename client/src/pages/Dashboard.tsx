@@ -9,20 +9,13 @@ const SUMMARY_CARDS = [
 
 export default function Dashboard() {
   return (
-    <div>
-      <div className="page__head">
-        <h2 className="page__title">Tổng quan</h2>
-        <p className="page__subtitle">Bảng tổng hợp tình hình đào tạo và quản lý.</p>
-      </div>
-
-      <div className="card-grid">
-        {SUMMARY_CARDS.map((card) => (
-          <div className="card" key={card.label}>
-            <p className="card__label">{card.label}</p>
-            <p className="card__value">—</p>
-          </div>
-        ))}
-      </div>
+    <div className="card-grid">
+      {SUMMARY_CARDS.map((card) => (
+        <div className="card" key={card.label}>
+          <p className="card__label">{card.label}</p>
+          <p className="card__value">—</p>
+        </div>
+      ))}
     </div>
   );
 }

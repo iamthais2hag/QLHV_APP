@@ -31,6 +31,7 @@ export default function AppLayout() {
     item.path === '/' ? location.pathname === '/' : location.pathname.startsWith(item.path),
   );
   const title = current?.label ?? 'QLHV Thành Công';
+  const subtitle = current?.description;
 
   return (
     <div className={`app-shell${sidebarCollapsed ? ' is-sidebar-collapsed' : ''}`}>
@@ -41,7 +42,11 @@ export default function AppLayout() {
         onNavigate={() => setSidebarOpen(false)}
       />
       <div className="main">
-        <Header title={title} onToggleSidebar={() => setSidebarOpen((v) => !v)} />
+        <Header
+          title={title}
+          subtitle={subtitle}
+          onToggleSidebar={() => setSidebarOpen((v) => !v)}
+        />
         <main className="content">
           <Outlet />
         </main>

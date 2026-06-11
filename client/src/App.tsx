@@ -15,7 +15,7 @@ export default function App() {
           <Route
             key={item.path}
             path={item.path}
-            element={<ModulePage title={item.label} description={item.description} />}
+            element={<ModulePage />}
           />
         ))}
         <Route path="*" element={<Navigate to="/" replace />} />

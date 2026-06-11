@@ -1,9 +1,10 @@
 interface HeaderProps {
   title: string;
+  subtitle?: string;
   onToggleSidebar: () => void;
 }
 
-export default function Header({ title, onToggleSidebar }: HeaderProps) {
+export default function Header({ title, subtitle, onToggleSidebar }: HeaderProps) {
   return (
     <header className="header">
       <button
@@ -14,7 +15,10 @@ export default function Header({ title, onToggleSidebar }: HeaderProps) {
       >
         ☰
       </button>
-      <h1 className="header__title">{title}</h1>
+      <div className="header__heading">
+        <h1 className="header__title">{title}</h1>
+        {subtitle && <p className="header__subtitle">{subtitle}</p>}
+      </div>
       <div className="header__spacer" />
       <div className="header__user">
         <span>Quản trị viên</span>
