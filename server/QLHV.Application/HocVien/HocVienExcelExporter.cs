@@ -10,9 +10,10 @@ public static class HocVienExcelExporter
     public const string DefaultFontName = "Times New Roman";
     public const double DefaultFontSize = 13d;
 
-    private const int HeaderRow = 3;
-    private const double DefaultRowMinHeight = 20d;
-    private const double HeaderRowMinHeight = 24d;
+    private const int HeaderRow = 2;
+    private const double DefaultRowMinHeight = 22d;
+    private const double HeaderRowMinHeight = 32d;
+    private const double MaxWrappedRowHeight = 90d;
 
     private static readonly CultureInfo VietnameseCulture = CultureInfo.GetCultureInfo("vi-VN");
 
@@ -35,25 +36,27 @@ public static class HocVienExcelExporter
     ];
 
     private static readonly int[] TextColumnIndexes = [2, 6, 8, 9, 10, 14];
+    private static readonly int[] LeftAlignedColumnIndexes = [2, 3, 6, 7, 10, 12, 13, 14];
     private static readonly int[] CenterAlignedColumnIndexes = [1, 4, 5, 8, 9, 11];
-    private static readonly int[] WrapTextColumnIndexes = [2, 7, 14];
+    private static readonly int[] NoWrapTextColumnIndexes = [2, 6, 8, 9, 10, 11, 13, 14];
+    private static readonly int[] WrapTextColumnIndexes = [7, 12];
 
     private static readonly ColumnWidthRule[] ColumnWidthRules =
     [
-        new(1, 6d, 8d),
-        new(2, 22d, 32d),
-        new(3, 18d, 35d),
-        new(4, 12d, 14d),
+        new(1, 6d, 6d),
+        new(2, 30d, 34d),
+        new(3, 28d, 35d),
+        new(4, 14d, 14d),
         new(5, 10d, 12d),
-        new(6, 15d, 18d),
-        new(7, 25d, 55d),
+        new(6, 16d, 18d),
+        new(7, 40d, 55d),
         new(8, 10d, 12d),
-        new(9, 12d, 15d),
-        new(10, 16d, 20d),
-        new(11, 12d, 16d),
-        new(12, 18d, 28d),
-        new(13, 12d, 24d),
-        new(14, 18d, 32d),
+        new(9, 12d, 14d),
+        new(10, 18d, 20d),
+        new(11, 14d, 16d),
+        new(12, 18d, 24d),
+        new(13, 14d, 18d),
+        new(14, 26d, 32d),
     ];
 
     public static byte[] CreateWorkbook(IReadOnlyList<HocVienListItemDto> rows, int totalCount)
@@ -66,8 +69,11 @@ public static class HocVienExcelExporter
         worksheet.Style.Font.FontName = DefaultFontName;
         worksheet.Style.Font.FontSize = DefaultFontSize;
 
-        worksheet.Cell(1, 1).Value = $"Tổng số: {totalCount.ToString("N0", VietnameseCulture)} học viên";
-        worksheet.Cell(1, 1).Style.Font.Bold = true;
+        worksheet.Range(1, 1, 1, Headers.Length).Merge();
+        var totalCell = worksheet.Cell(1, 1);
+        totalCell.Value = $"Tổng số: {totalCount.ToString("N0", VietnameseCulture)} học viên";
+        totalCell.Style.Font.Bold = true;
+        totalCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
 
         for (var index = 0; index < Headers.Length; index++)
         {
@@ -152,9 +158,19 @@ public static class HocVienExcelExporter
 
         worksheet.Cell(1, 1).Style.Font.Bold = true;
 
+        foreach (var columnIndex in LeftAlignedColumnIndexes)
+        {
+            worksheet.Column(columnIndex).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
+        }
+
         foreach (var columnIndex in CenterAlignedColumnIndexes)
         {
             worksheet.Column(columnIndex).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        }
+
+        foreach (var columnIndex in NoWrapTextColumnIndexes)
+        {
+            worksheet.Column(columnIndex).Style.Alignment.WrapText = false;
         }
 
         foreach (var columnIndex in WrapTextColumnIndexes)
@@ -162,9 +178,16 @@ public static class HocVienExcelExporter
             worksheet.Column(columnIndex).Style.Alignment.WrapText = true;
         }
 
+        headerRange.Style.Font.Bold = true;
+        headerRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        headerRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        headerRange.Style.Alignment.WrapText = true;
+        headerRange.Style.Fill.BackgroundColor = XLColor.FromHtml("#EAF3FF");
+
         worksheet.Columns(1, Headers.Length).AdjustToContents();
         ApplyColumnWidthRules(worksheet);
         worksheet.RowsUsed().AdjustToContents();
+        ApplyWrappedRowHeights(worksheet);
         ApplyMinimumRowHeights(worksheet);
         worksheet.SheetView.FreezeRows(HeaderRow);
     }
@@ -175,6 +198,35 @@ public static class HocVienExcelExporter
         {
             var column = worksheet.Column(rule.Index);
             column.Width = Math.Clamp(column.Width, rule.MinWidth, rule.MaxWidth);
+        }
+    }
+
+    private static void ApplyWrappedRowHeights(IXLWorksheet worksheet)
+    {
+        foreach (var row in worksheet.RowsUsed())
+        {
+            if (row.RowNumber() <= HeaderRow)
+            {
+                continue;
+            }
+
+            var estimatedLines = 1;
+            foreach (var columnIndex in WrapTextColumnIndexes)
+            {
+                var text = worksheet.Cell(row.RowNumber(), columnIndex).GetString();
+                if (string.IsNullOrEmpty(text))
+                {
+                    continue;
+                }
+
+                var width = Math.Max(8d, worksheet.Column(columnIndex).Width);
+                estimatedLines = Math.Max(estimatedLines, (int)Math.Ceiling(text.Length / width));
+            }
+
+            if (estimatedLines > 1)
+            {
+                row.Height = Math.Min(MaxWrappedRowHeight, Math.Max(row.Height, DefaultRowMinHeight * estimatedLines));
+            }
         }
     }
 

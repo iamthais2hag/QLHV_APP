@@ -35,24 +35,41 @@ public sealed class HocVienExcelExporterTests
 
         for (var index = 0; index < ExpectedHeaders.Length; index++)
         {
-            Assert.Equal(ExpectedHeaders[index], worksheet.Cell(3, index + 1).GetString());
+            Assert.Equal(ExpectedHeaders[index], worksheet.Cell(2, index + 1).GetString());
         }
 
-        Assert.Equal("001-DK", worksheet.Cell(4, 2).GetString());
-        Assert.Equal("Nguyen Van A Co Ten Dai De Kiem Tra Do Rong Cot", worksheet.Cell(4, 3).GetString());
-        Assert.Equal("02/01/1990", worksheet.Cell(4, 4).GetString());
-        Assert.Equal("Nam", worksheet.Cell(4, 5).GetString());
-        Assert.Equal("001234567890", worksheet.Cell(4, 6).GetString());
+        Assert.Equal("001-DK", worksheet.Cell(3, 2).GetString());
+        Assert.Equal("Nguyen Van A Co Ten Dai De Kiem Tra Do Rong Cot", worksheet.Cell(3, 3).GetString());
+        Assert.Equal("02/01/1990", worksheet.Cell(3, 4).GetString());
+        Assert.Equal("Nam", worksheet.Cell(3, 5).GetString());
+        Assert.Equal("001234567890", worksheet.Cell(3, 6).GetString());
         Assert.Equal(
-            "So 123 Duong Rat Dai, Phuong 1, Quan Trung Tam, Thanh pho Can wrap text",
-            worksheet.Cell(4, 7).GetString());
-        Assert.Equal("B2", worksheet.Cell(4, 8).GetString());
-        Assert.Equal("B2", worksheet.Cell(4, 9).GetString());
-        Assert.Equal("000GPLX", worksheet.Cell(4, 10).GetString());
-        Assert.Equal("B1", worksheet.Cell(4, 11).GetString());
-        Assert.Equal("Can bo tiep nhan", worksheet.Cell(4, 12).GetString());
-        Assert.Equal("AK01", worksheet.Cell(4, 13).GetString());
-        Assert.Equal("000K01", worksheet.Cell(4, 14).GetString());
+            "So 123 Duong Rat Dai, Phuong 1, Quan Trung Tam, Thanh pho Can wrap text, " +
+            "tiep tuc them noi dung dai de kiem tra chieu cao dong tu dong tang khi dia chi bi xuong dong",
+            worksheet.Cell(3, 7).GetString());
+        Assert.Equal("B2", worksheet.Cell(3, 8).GetString());
+        Assert.Equal("B2", worksheet.Cell(3, 9).GetString());
+        Assert.Equal("000GPLX", worksheet.Cell(3, 10).GetString());
+        Assert.Equal("B1", worksheet.Cell(3, 11).GetString());
+        Assert.Equal("Can bo tiep nhan", worksheet.Cell(3, 12).GetString());
+        Assert.Equal("AK01", worksheet.Cell(3, 13).GetString());
+        Assert.Equal("000K01", worksheet.Cell(3, 14).GetString());
+    }
+
+    [Fact]
+    public void Export_workbook_places_header_immediately_after_total_row()
+    {
+        using var stream = new MemoryStream(CreateSampleWorkbook());
+        using var workbook = new XLWorkbook(stream);
+        var worksheet = workbook.Worksheet(HocVienExcelExporter.SheetName);
+
+        Assert.Equal("Tổng số: 1 học viên", worksheet.Cell(1, 1).GetString());
+        Assert.Equal("STT", worksheet.Cell(2, 1).GetString());
+        Assert.Equal("Mã đăng ký", worksheet.Cell(2, 2).GetString());
+        Assert.Equal("1", worksheet.Cell(3, 1).GetString());
+        Assert.Equal("001-DK", worksheet.Cell(3, 2).GetString());
+        Assert.False(worksheet.Row(2).IsEmpty());
+        Assert.False(worksheet.Row(3).IsEmpty());
     }
 
     [Fact]
@@ -64,13 +81,13 @@ public sealed class HocVienExcelExporterTests
 
         for (var column = 1; column <= ExpectedHeaders.Length; column++)
         {
-            var font = worksheet.Cell(3, column).Style.Font;
+            var font = worksheet.Cell(2, column).Style.Font;
             Assert.Equal(HocVienExcelExporter.DefaultFontName, font.FontName);
             Assert.Equal(HocVienExcelExporter.DefaultFontSize, font.FontSize);
             Assert.True(font.Bold);
-            Assert.Equal(XLAlignmentHorizontalValues.Center, worksheet.Cell(3, column).Style.Alignment.Horizontal);
-            Assert.Equal(XLAlignmentVerticalValues.Center, worksheet.Cell(3, column).Style.Alignment.Vertical);
-            Assert.True(worksheet.Cell(3, column).Style.Alignment.WrapText);
+            Assert.Equal(XLAlignmentHorizontalValues.Center, worksheet.Cell(2, column).Style.Alignment.Horizontal);
+            Assert.Equal(XLAlignmentVerticalValues.Center, worksheet.Cell(2, column).Style.Alignment.Vertical);
+            Assert.True(worksheet.Cell(2, column).Style.Alignment.WrapText);
         }
     }
 
@@ -85,10 +102,11 @@ public sealed class HocVienExcelExporterTests
         Assert.Equal(HocVienExcelExporter.DefaultFontName, totalFont.FontName);
         Assert.Equal(HocVienExcelExporter.DefaultFontSize, totalFont.FontSize);
         Assert.True(totalFont.Bold);
+        Assert.Equal("A1:N1", worksheet.MergedRanges.Single().RangeAddress.ToString());
 
         for (var column = 1; column <= ExpectedHeaders.Length; column++)
         {
-            var bodyFont = worksheet.Cell(4, column).Style.Font;
+            var bodyFont = worksheet.Cell(3, column).Style.Font;
             Assert.Equal(HocVienExcelExporter.DefaultFontName, bodyFont.FontName);
             Assert.Equal(HocVienExcelExporter.DefaultFontSize, bodyFont.FontSize);
             Assert.False(bodyFont.Bold);
@@ -116,13 +134,13 @@ public sealed class HocVienExcelExporterTests
         using var workbook = new XLWorkbook(stream);
         var worksheet = workbook.Worksheet(HocVienExcelExporter.SheetName);
 
-        Assert.Equal("Nữ", worksheet.Cell(4, 5).GetString());
-        AssertTextCell(worksheet.Cell(4, 2), "001-DK");
-        AssertTextCell(worksheet.Cell(4, 6), "001234567890");
-        AssertTextCell(worksheet.Cell(4, 8), "A1m");
-        AssertTextCell(worksheet.Cell(4, 9), "A1m");
-        AssertTextCell(worksheet.Cell(4, 10), "000GPLX");
-        AssertTextCell(worksheet.Cell(4, 14), "000K01");
+        Assert.Equal("Nữ", worksheet.Cell(3, 5).GetString());
+        AssertTextCell(worksheet.Cell(3, 2), "001-DK");
+        AssertTextCell(worksheet.Cell(3, 6), "001234567890");
+        AssertTextCell(worksheet.Cell(3, 8), "A1m");
+        AssertTextCell(worksheet.Cell(3, 9), "A1m");
+        AssertTextCell(worksheet.Cell(3, 10), "000GPLX");
+        AssertTextCell(worksheet.Cell(3, 14), "000K01");
     }
 
     [Fact]
@@ -132,29 +150,46 @@ public sealed class HocVienExcelExporterTests
         using var workbook = new XLWorkbook(stream);
         var worksheet = workbook.Worksheet(HocVienExcelExporter.SheetName);
 
-        AssertColumnWidth(worksheet, 2, min: 22d, max: 32d);
-        AssertColumnWidth(worksheet, 3, min: 18d, max: 35d);
-        AssertColumnWidth(worksheet, 6, min: 15d, max: 18d);
-        AssertColumnWidth(worksheet, 7, min: 25d, max: 55d);
-        AssertColumnWidth(worksheet, 14, min: 18d, max: 32d);
+        AssertColumnWidth(worksheet, 2, min: 30d, max: 34d);
+        AssertColumnWidth(worksheet, 3, min: 28d, max: 35d);
+        AssertColumnWidth(worksheet, 6, min: 16d, max: 18d);
+        AssertColumnWidth(worksheet, 7, min: 40d, max: 55d);
+        AssertColumnWidth(worksheet, 9, min: 12d, max: 14d);
+        AssertColumnWidth(worksheet, 11, min: 14d, max: 16d);
+        AssertColumnWidth(worksheet, 12, min: 18d, max: 24d);
+        AssertColumnWidth(worksheet, 13, min: 14d, max: 18d);
+        AssertColumnWidth(worksheet, 14, min: 26d, max: 32d);
 
         Assert.True(worksheet.Column(7).Style.Alignment.WrapText);
-        Assert.True(worksheet.Column(2).Style.Alignment.WrapText);
-        Assert.True(worksheet.Column(14).Style.Alignment.WrapText);
-        Assert.True(worksheet.Row(3).Height >= 24d);
-        Assert.True(worksheet.Row(4).Height >= 20d);
+        Assert.True(worksheet.Column(12).Style.Alignment.WrapText);
+        Assert.False(worksheet.Column(2).Style.Alignment.WrapText);
+        Assert.False(worksheet.Column(6).Style.Alignment.WrapText);
+        Assert.False(worksheet.Column(8).Style.Alignment.WrapText);
+        Assert.False(worksheet.Column(9).Style.Alignment.WrapText);
+        Assert.False(worksheet.Column(10).Style.Alignment.WrapText);
+        Assert.False(worksheet.Column(11).Style.Alignment.WrapText);
+        Assert.False(worksheet.Column(13).Style.Alignment.WrapText);
+        Assert.False(worksheet.Column(14).Style.Alignment.WrapText);
+        Assert.True(worksheet.Row(2).Height >= 28d);
+        Assert.True(worksheet.Row(3).Height > 22d);
+        Assert.Equal(2, worksheet.SheetView.SplitRow);
     }
 
     [Fact]
-    public void Export_workbook_aligns_short_body_columns_to_center()
+    public void Export_workbook_aligns_body_columns_by_content_type()
     {
         using var stream = new MemoryStream(CreateSampleWorkbook());
         using var workbook = new XLWorkbook(stream);
         var worksheet = workbook.Worksheet(HocVienExcelExporter.SheetName);
 
+        foreach (var column in new[] { 2, 3, 6, 7, 10, 12, 13, 14 })
+        {
+            Assert.Equal(XLAlignmentHorizontalValues.Left, worksheet.Cell(3, column).Style.Alignment.Horizontal);
+        }
+
         foreach (var column in new[] { 1, 4, 5, 8, 9, 11 })
         {
-            Assert.Equal(XLAlignmentHorizontalValues.Center, worksheet.Cell(4, column).Style.Alignment.Horizontal);
+            Assert.Equal(XLAlignmentHorizontalValues.Center, worksheet.Cell(3, column).Style.Alignment.Horizontal);
         }
     }
 
@@ -168,7 +203,9 @@ public sealed class HocVienExcelExporterTests
                 NgaySinh = new DateOnly(1990, 1, 2),
                 GioiTinh = "M",
                 SoCccd = "001234567890",
-                DiaChiThuongTru = "So 123 Duong Rat Dai, Phuong 1, Quan Trung Tam, Thanh pho Can wrap text",
+                DiaChiThuongTru =
+                    "So 123 Duong Rat Dai, Phuong 1, Quan Trung Tam, Thanh pho Can wrap text, " +
+                    "tiep tuc them noi dung dai de kiem tra chieu cao dong tu dong tang khi dia chi bi xuong dong",
                 HangGplxHoc = "Hang B2",
                 MaHangDT = "B2",
                 SoGplxDaCo = "000GPLX",
