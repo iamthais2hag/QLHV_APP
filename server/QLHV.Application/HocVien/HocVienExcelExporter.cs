@@ -7,6 +7,9 @@ namespace QLHV.Application.HocVien;
 public static class HocVienExcelExporter
 {
     public const string SheetName = "HocVien";
+    public const string DefaultFontName = "Times New Roman";
+    public const double DefaultFontSize = 13d;
+
     private static readonly CultureInfo VietnameseCulture = CultureInfo.GetCultureInfo("vi-VN");
 
     private static readonly string[] Headers =
@@ -27,12 +30,17 @@ public static class HocVienExcelExporter
         "Mã khóa",
     ];
 
-    private static readonly int[] TextColumnIndexes = [2, 6, 9, 10, 14];
+    private static readonly int[] TextColumnIndexes = [2, 6, 8, 9, 10, 14];
 
     public static byte[] CreateWorkbook(IReadOnlyList<HocVienListItemDto> rows, int totalCount)
     {
         using var workbook = new XLWorkbook();
+        workbook.Style.Font.FontName = DefaultFontName;
+        workbook.Style.Font.FontSize = DefaultFontSize;
+
         var worksheet = workbook.Worksheets.Add(SheetName);
+        worksheet.Style.Font.FontName = DefaultFontName;
+        worksheet.Style.Font.FontSize = DefaultFontSize;
 
         worksheet.Cell(1, 1).Value = $"Tổng số: {totalCount.ToString("N0", VietnameseCulture)} học viên";
         worksheet.Cell(1, 1).Style.Font.Bold = true;
@@ -51,6 +59,10 @@ public static class HocVienExcelExporter
         {
             WriteDataRow(worksheet, headerRow + rowIndex + 1, rowIndex + 1, rows[rowIndex]);
         }
+
+        ApplyWorkbookFont(worksheet);
+        worksheet.Row(headerRow).Style.Font.Bold = true;
+        worksheet.Cell(1, 1).Style.Font.Bold = true;
 
         foreach (var columnIndex in TextColumnIndexes)
         {
@@ -73,7 +85,7 @@ public static class HocVienExcelExporter
         worksheet.Cell(rowNumber, 5).Value = HocVienGender.ToDisplayValue(row.GioiTinh) ?? string.Empty;
         SetText(worksheet.Cell(rowNumber, 6), row.SoCccd);
         worksheet.Cell(rowNumber, 7).Value = row.DiaChiThuongTru ?? string.Empty;
-        worksheet.Cell(rowNumber, 8).Value = row.HangGplxHoc ?? string.Empty;
+        SetText(worksheet.Cell(rowNumber, 8), row.MaHangDT);
         SetText(worksheet.Cell(rowNumber, 9), row.MaHangDT);
         SetText(worksheet.Cell(rowNumber, 10), row.SoGplxDaCo);
         worksheet.Cell(rowNumber, 11).Value = row.HangGplxDaCo ?? string.Empty;
@@ -86,6 +98,18 @@ public static class HocVienExcelExporter
     {
         cell.Style.NumberFormat.Format = "@";
         cell.Value = value ?? string.Empty;
+    }
+
+    private static void ApplyWorkbookFont(IXLWorksheet worksheet)
+    {
+        var range = worksheet.RangeUsed();
+        if (range is null)
+        {
+            return;
+        }
+
+        range.Style.Font.FontName = DefaultFontName;
+        range.Style.Font.FontSize = DefaultFontSize;
     }
 
     private static string FormatDate(DateOnly? value)
