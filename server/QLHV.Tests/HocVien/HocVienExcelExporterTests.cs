@@ -47,13 +47,25 @@ public sealed class HocVienExcelExporterTests
             "So 123 Duong Rat Dai, Phuong 1, Quan Trung Tam, Thanh pho Can wrap text, " +
             "tiep tuc them noi dung dai de kiem tra chieu cao dong tu dong tang khi dia chi bi xuong dong",
             worksheet.Cell(3, 7).GetString());
-        Assert.Equal("B2", worksheet.Cell(3, 8).GetString());
-        Assert.Equal("B2", worksheet.Cell(3, 9).GetString());
+        Assert.Equal("H\u1EA1ng Am", worksheet.Cell(3, 8).GetString());
+        Assert.Equal("Am", worksheet.Cell(3, 9).GetString());
         Assert.Equal("000GPLX", worksheet.Cell(3, 10).GetString());
         Assert.Equal("B1", worksheet.Cell(3, 11).GetString());
         Assert.Equal("Can bo tiep nhan", worksheet.Cell(3, 12).GetString());
         Assert.Equal("AK01", worksheet.Cell(3, 13).GetString());
         Assert.Equal("000K01", worksheet.Cell(3, 14).GetString());
+    }
+
+    [Fact]
+    public void Export_workbook_writes_hang_hoc_from_display_name_and_ma_hang_from_code()
+    {
+        using var stream = new MemoryStream(CreateSampleWorkbook());
+        using var workbook = new XLWorkbook(stream);
+        var worksheet = workbook.Worksheet(HocVienExcelExporter.SheetName);
+
+        Assert.Equal("H\u1EA1ng Am", worksheet.Cell(3, 8).GetString());
+        Assert.Equal("Am", worksheet.Cell(3, 9).GetString());
+        Assert.NotEqual(worksheet.Cell(3, 8).GetString(), worksheet.Cell(3, 9).GetString());
     }
 
     [Fact]
@@ -124,6 +136,7 @@ public sealed class HocVienExcelExporterTests
                 HoVaTen = "Nguyen Van A",
                 GioiTinh = "F",
                 SoCccd = "001234567890",
+                HangGplxHoc = "H\u1EA1ng A1m",
                 MaHangDT = "A1m",
                 SoGplxDaCo = "000GPLX",
                 MaKhoa = "000K01",
@@ -137,7 +150,7 @@ public sealed class HocVienExcelExporterTests
         Assert.Equal("Nữ", worksheet.Cell(3, 5).GetString());
         AssertTextCell(worksheet.Cell(3, 2), "001-DK");
         AssertTextCell(worksheet.Cell(3, 6), "001234567890");
-        AssertTextCell(worksheet.Cell(3, 8), "A1m");
+        Assert.Equal("H\u1EA1ng A1m", worksheet.Cell(3, 8).GetString());
         AssertTextCell(worksheet.Cell(3, 9), "A1m");
         AssertTextCell(worksheet.Cell(3, 10), "000GPLX");
         AssertTextCell(worksheet.Cell(3, 14), "000K01");
@@ -206,8 +219,8 @@ public sealed class HocVienExcelExporterTests
                 DiaChiThuongTru =
                     "So 123 Duong Rat Dai, Phuong 1, Quan Trung Tam, Thanh pho Can wrap text, " +
                     "tiep tuc them noi dung dai de kiem tra chieu cao dong tu dong tang khi dia chi bi xuong dong",
-                HangGplxHoc = "Hang B2",
-                MaHangDT = "B2",
+                HangGplxHoc = "H\u1EA1ng Am",
+                MaHangDT = "Am",
                 SoGplxDaCo = "000GPLX",
                 HangGplxDaCo = "B1",
                 NguoiNhanHoSo = "Can bo tiep nhan",

@@ -35,7 +35,7 @@ public static class HocVienExcelExporter
         "Mã khóa",
     ];
 
-    private static readonly int[] TextColumnIndexes = [2, 6, 8, 9, 10, 14];
+    private static readonly int[] TextColumnIndexes = [2, 6, 9, 10, 14];
     private static readonly int[] LeftAlignedColumnIndexes = [2, 3, 6, 7, 10, 12, 13, 14];
     private static readonly int[] CenterAlignedColumnIndexes = [1, 4, 5, 8, 9, 11];
     private static readonly int[] NoWrapTextColumnIndexes = [2, 6, 8, 9, 10, 11, 13, 14];
@@ -110,7 +110,7 @@ public static class HocVienExcelExporter
         worksheet.Cell(rowNumber, 5).Value = HocVienGender.ToDisplayValue(row.GioiTinh) ?? string.Empty;
         SetText(worksheet.Cell(rowNumber, 6), row.SoCccd);
         worksheet.Cell(rowNumber, 7).Value = row.DiaChiThuongTru ?? string.Empty;
-        SetText(worksheet.Cell(rowNumber, 8), row.MaHangDT);
+        worksheet.Cell(rowNumber, 8).Value = row.HangGplxHoc ?? string.Empty;
         SetText(worksheet.Cell(rowNumber, 9), row.MaHangDT);
         SetText(worksheet.Cell(rowNumber, 10), row.SoGplxDaCo);
         worksheet.Cell(rowNumber, 11).Value = row.HangGplxDaCo ?? string.Empty;
