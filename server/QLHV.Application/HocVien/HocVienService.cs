@@ -49,11 +49,13 @@ public sealed class HocVienService : IHocVienService
 
     public Task<IReadOnlyList<HocVienKhoaLookupDto>> SearchKhoaLookupsAsync(
         string? keyword,
+        string? maHangDT,
         int limit,
         CancellationToken cancellationToken = default)
     {
         return _repository.SearchKhoaLookupsAsync(
             NormalizeLookupKeyword(keyword),
+            NormalizeLookupKeyword(maHangDT),
             NormalizeLookupLimit(limit),
             cancellationToken);
     }

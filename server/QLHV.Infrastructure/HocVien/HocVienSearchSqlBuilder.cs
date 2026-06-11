@@ -67,10 +67,19 @@ SELECT
 
     public static (string Sql, DynamicParameters Parameters) BuildKhoaLookup(
         string? keyword,
-        int limit)
+        int limit,
+        string? maHangDT = null)
     {
         var parameters = BuildLookupParameters(keyword, limit);
-        var sql = @"
+        var normalizedMaHangDT = string.IsNullOrWhiteSpace(maHangDT) ? null : maHangDT.Trim();
+        var maHangFilter = string.Empty;
+        if (normalizedMaHangDT is not null)
+        {
+            maHangFilter = "\n      AND UPPER(LTRIM(RTRIM(MaHangDT))) = UPPER(@MaHangDT)";
+            parameters.Add("@MaHangDT", normalizedMaHangDT);
+        }
+
+        var sql = $@"
 WITH DistinctKhoa AS
 (
     SELECT DISTINCT
@@ -78,6 +87,7 @@ WITH DistinctKhoa AS
         NULLIF(LTRIM(RTRIM(TenKhoa)), N'') AS TenKhoa
     FROM dbo.App_HocVien
     WHERE IsDeleted = 0
+{maHangFilter}
       AND NULLIF(LTRIM(RTRIM(MaKhoa)), N'') IS NOT NULL
 )
 SELECT TOP (@Limit)

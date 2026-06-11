@@ -82,13 +82,14 @@ public sealed class HocVienRepository : IHocVienRepository
 
     public async Task<IReadOnlyList<HocVienKhoaLookupDto>> SearchKhoaLookupsAsync(
         string? keyword,
+        string? maHangDT,
         int limit,
         CancellationToken cancellationToken = default)
     {
         var connectionString = await ResolveUsableTargetAsync(cancellationToken);
         await using var connection = new SqlConnection(connectionString);
 
-        var query = HocVienSearchSqlBuilder.BuildKhoaLookup(keyword, limit);
+        var query = HocVienSearchSqlBuilder.BuildKhoaLookup(keyword, limit, maHangDT);
         var rows = await connection.QueryAsync<HocVienKhoaLookupDto>(new CommandDefinition(
             query.Sql,
             query.Parameters,

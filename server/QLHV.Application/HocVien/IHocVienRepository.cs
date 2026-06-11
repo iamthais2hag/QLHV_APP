@@ -20,6 +20,7 @@ public interface IHocVienRepository
 
     Task<IReadOnlyList<HocVienKhoaLookupDto>> SearchKhoaLookupsAsync(
         string? keyword,
+        string? maHangDT,
         int limit,
         CancellationToken cancellationToken = default);
 

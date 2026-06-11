@@ -73,10 +73,12 @@ export async function exportHocVienExcel(
 export async function getHocVienKhoaLookups(
   keyword: string,
   limit = 20,
+  maHangDT?: string | null,
   signal?: AbortSignal,
 ): Promise<HocVienKhoaLookup[]> {
   const query = new URLSearchParams();
   if (keyword) query.set('keyword', keyword);
+  if (maHangDT) query.set('maHangDT', maHangDT);
   query.set('limit', String(limit));
 
   const response = await fetch(`${API_BASE}/hoc-vien/lookups/khoa?${query.toString()}`, {

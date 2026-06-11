@@ -236,9 +236,26 @@ public sealed class HocVienSearchSqlBuilderTests
         Assert.Contains("UPPER(MaKhoa) LIKE UPPER(@LookupContains)", query.Sql, StringComparison.Ordinal);
         Assert.Contains("CONCAT(TenKhoa, N' - ', MaKhoa)", query.Sql, StringComparison.Ordinal);
         Assert.DoesNotContain("OFFSET", query.Sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("UPPER(LTRIM(RTRIM(MaHangDT))) = UPPER(@MaHangDT)", query.Sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("MaHangDT", query.Parameters.ParameterNames);
         Assert.Equal(20, query.Parameters.Get<int>("Limit"));
         Assert.Equal("66016K26A%", query.Parameters.Get<string>("LookupPrefix"));
         Assert.Equal("%66016K26A%", query.Parameters.Get<string>("LookupContains"));
+    }
+
+    [Fact]
+    public void Khoa_lookup_filters_by_ma_hang_dt_when_provided()
+    {
+        var query = HocVienSearchSqlBuilder.BuildKhoaLookup("A", limit: 20, maHangDT: "A1m");
+
+        Assert.Contains("WITH DistinctKhoa", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("FROM dbo.App_HocVien", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("WHERE IsDeleted = 0", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("UPPER(LTRIM(RTRIM(MaHangDT))) = UPPER(@MaHangDT)", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("MaHangDT", query.Parameters.ParameterNames);
+        Assert.Equal("A1m", query.Parameters.Get<string>("MaHangDT"));
+        Assert.Equal("A%", query.Parameters.Get<string>("LookupPrefix"));
+        Assert.Equal("%A%", query.Parameters.Get<string>("LookupContains"));
     }
 
     [Fact]

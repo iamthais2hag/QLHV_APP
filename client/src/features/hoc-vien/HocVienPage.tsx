@@ -134,7 +134,12 @@ export default function HocVienPage() {
 
     const timer = window.setTimeout(async () => {
       try {
-        const result = await getHocVienKhoaLookups(lookupKeyword, 20, controller.signal);
+        const result = await getHocVienKhoaLookups(
+          lookupKeyword,
+          20,
+          selectedHangHoc?.maHangDT,
+          controller.signal,
+        );
         setKhoaSuggestions(result);
         setShowKhoaSuggestions(true);
       } catch {
@@ -153,7 +158,7 @@ export default function HocVienPage() {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [khoaInput, selectedKhoa]);
+  }, [khoaInput, selectedKhoa, selectedHangHoc]);
 
   useEffect(() => {
     const lookupKeyword = hangHocInput.trim();
@@ -211,8 +216,18 @@ export default function HocVienPage() {
   function handleHangHocInputChange(value: string) {
     setHangHocInput(value);
     setSelectedHangHoc(null);
+    clearKhoaSelection();
     setHangHocWarning('');
     setHangHocLookupError('');
+  }
+
+  function clearKhoaSelection() {
+    setKhoaInput('');
+    setSelectedKhoa(null);
+    setKhoaSuggestions([]);
+    setShowKhoaSuggestions(false);
+    setKhoaWarning('');
+    setKhoaLookupError('');
   }
 
   function selectKhoa(option: HocVienKhoaLookup) {
@@ -227,6 +242,7 @@ export default function HocVienPage() {
   function selectHangHoc(option: HocVienHangHocLookup) {
     setSelectedHangHoc(option);
     setHangHocInput(option.label);
+    clearKhoaSelection();
     setHangHocSuggestions([]);
     setShowHangHocSuggestions(false);
     setHangHocWarning('');
@@ -482,12 +498,20 @@ export default function HocVienPage() {
                 <th>Mã ĐK</th>
                 <th>Họ và tên</th>
                 <th>Ngày sinh</th>
-                <th>Giới tính</th>
+                <th>
+                  Giới
+                  <br />
+                  tính
+                </th>
                 <th>Số CCCD</th>
                 <th>Địa chỉ</th>
                 <th>Hạng học</th>
                 <th>Số GPLX đã có</th>
-                <th>Hạng GPLX đã có</th>
+                <th>
+                  Hạng GPLX
+                  <br />
+                  đã có
+                </th>
                 <th>Người nhận hồ sơ</th>
                 <th>Khóa</th>
               </tr>
@@ -517,7 +541,9 @@ export default function HocVienPage() {
                     <td className="cell-ellipsis cell-address" title={row.diaChiThuongTru ?? ''}>
                       {row.diaChiThuongTru ?? ''}
                     </td>
-                    <td title={row.hangGplxHoc ?? ''}>{row.maHangDT ?? ''}</td>
+                    <td title={row.maHangDT ? `Mã hạng học: ${row.maHangDT}` : ''}>
+                      {row.hangGplxHoc ?? ''}
+                    </td>
                     <td>{row.soGplxDaCo ?? ''}</td>
                     <td>{row.hangGplxDaCo ?? ''}</td>
                     <td className="cell-ellipsis" title={row.nguoiNhanHoSo ?? ''}>

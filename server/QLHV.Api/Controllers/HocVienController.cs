@@ -37,16 +37,18 @@ public sealed class HocVienController : ControllerBase
 
     /// <summary>Lookup khoa hoc distinct tu App_HocVien.</summary>
     /// <param name="keyword">Tu khoa tim theo TenKhoa hoac MaKhoa.</param>
+    /// <param name="maHangDT">Neu co, chi goi y khoa co du lieu thuoc ma hang hoc nay.</param>
     /// <param name="limit">So goi y toi da.</param>
     /// <param name="cancellationToken">Token huy.</param>
     [HttpGet("lookups/khoa")]
     [ProducesResponseType(typeof(IReadOnlyList<HocVienKhoaLookupDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IReadOnlyList<HocVienKhoaLookupDto>>> LookupKhoa(
         [FromQuery] string? keyword,
+        [FromQuery] string? maHangDT,
         [FromQuery] int limit = 20,
         CancellationToken cancellationToken = default)
     {
-        var result = await _service.SearchKhoaLookupsAsync(keyword, limit, cancellationToken);
+        var result = await _service.SearchKhoaLookupsAsync(keyword, maHangDT, limit, cancellationToken);
         return Ok(result);
     }
 
