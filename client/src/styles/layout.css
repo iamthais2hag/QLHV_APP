@@ -585,7 +585,7 @@
 
 .table--hoc-vien {
   table-layout: fixed;
-  min-width: 1574px;
+  min-width: 1437px;
   font-size: 13px;
 }
 
@@ -598,17 +598,24 @@
 }
 
 .table--hoc-vien thead th {
+  vertical-align: middle;
   text-align: center;
 }
 
-.table--hoc-vien tbody td:nth-child(1),
-.table--hoc-vien tbody td:nth-child(2),
-.table--hoc-vien tbody td:nth-child(3),
-.table--hoc-vien tbody td:nth-child(5),
-.table--hoc-vien tbody td:nth-child(6),
-.table--hoc-vien tbody td:nth-child(9),
-.table--hoc-vien tbody td:nth-child(11) {
+.table--hoc-vien thead th:nth-child(11) {
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.table--hoc-vien thead th:nth-child(1),
+.table--hoc-vien tbody td:nth-child(1) {
+  font-size: 11px;
   text-align: center;
+}
+
+.table--hoc-vien tbody td {
+  text-align: left;
+  vertical-align: middle;
 }
 
 .table--hoc-vien tbody td:nth-child(7),
@@ -618,8 +625,51 @@
   text-align: left;
 }
 
+.table--hoc-vien tbody td:nth-child(5),
+.table--hoc-vien tbody td:nth-child(7),
+.table--hoc-vien tbody td:nth-child(10) {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+.table--hoc-vien thead th:nth-child(1),
+.table--hoc-vien tbody td:nth-child(1) {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+.table--hoc-vien thead th:nth-child(3),
+.table--hoc-vien tbody td:nth-child(3) {
+  padding-left: 2px;
+  padding-right: 2px;
+  text-align: center;
+}
+
+.table--hoc-vien tbody td:nth-child(3) .btn {
+  height: 26px;
+  padding: 0 4px;
+  font-size: 11px;
+}
+
+.table--hoc-vien tbody td:nth-child(1),
+.table--hoc-vien tbody td:nth-child(5),
+.table--hoc-vien tbody td:nth-child(6),
+.table--hoc-vien tbody td:nth-child(7),
+.table--hoc-vien tbody td:nth-child(9),
+.table--hoc-vien tbody td:nth-child(10),
+.table--hoc-vien tbody td:nth-child(11),
+.table--hoc-vien tbody td:nth-child(13) {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.table--hoc-vien tbody td:nth-child(11) {
+  text-align: center;
+}
+
 .table--hoc-vien .col-stt {
-  width: 44px;
+  width: 33.6px;
 }
 
 .table--hoc-vien .col-photo {
@@ -627,47 +677,47 @@
 }
 
 .table--hoc-vien .col-madk {
-  width: 76px;
+  width: 52.8px;
 }
 
 .table--hoc-vien .col-name {
-  width: 200px;
+  width: 210px;
 }
 
 .table--hoc-vien .col-date {
-  width: 97px;
+  width: 82px;
 }
 
 .table--hoc-vien .col-gender {
-  width: 70px;
+  width: 43.52px;
 }
 
 .table--hoc-vien .col-cccd {
-  width: 123px;
+  width: 109.6px;
 }
 
 .table--hoc-vien .col-address {
-  width: 280px;
+  width: 270px;
 }
 
 .table--hoc-vien .col-hang-hoc {
-  width: 104px;
+  width: 75.6px;
 }
 
 .table--hoc-vien .col-gplx-number {
-  width: 124px;
+  width: 117.8px;
 }
 
 .table--hoc-vien .col-gplx-class {
-  width: 104px;
+  width: 70.4px;
 }
 
 .table--hoc-vien .col-receiver {
-  width: 140px;
+  width: 130px;
 }
 
 .table--hoc-vien .col-course {
-  width: 156px;
+  width: 170px;
 }
 
 .hocvien-photo {
