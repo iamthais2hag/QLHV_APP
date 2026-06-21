@@ -1,5 +1,6 @@
 /** Một dòng học viên trong danh sách (chỉ đọc). */
 export interface HocVienListItem {
+  hocVienId: number;
   maDangKy: string;
   hoVaTen: string;
   ngaySinh: string | null;
@@ -28,6 +29,77 @@ export interface HocVienSearchParams {
 }
 
 export type HocVienExportParams = Omit<HocVienSearchParams, 'page' | 'pageSize'>;
+
+export type HocVienPrintMode = 'selected' | 'single' | 'course' | 'teacherInCourse';
+export type HocVienMissingPhotoMode = 'placeholder' | 'skip';
+export type HocVienPrintSortBy = 'current' | 'hoTen' | 'maDK';
+
+export interface HocVienPrintCardsRequest {
+  mode: HocVienPrintMode;
+  hocVienId?: number;
+  hocVienIds?: number[];
+  maKhoa?: string;
+  giaoVienId?: number;
+  missingPhotoMode?: HocVienMissingPhotoMode;
+  sortBy?: HocVienPrintSortBy;
+}
+
+export interface HocVienCardPrintPreviewItem {
+  hocVienId: number;
+  maDangKy: string;
+  hoVaTen: string;
+  maKhoa: string | null;
+  tenKhoa: string | null;
+  maHangDT: string | null;
+  hangGplxHoc: string | null;
+  hasPhoto: boolean;
+  photoStatus: string;
+}
+
+export interface HocVienCardPrintPreview {
+  totalStudents: number;
+  totalPages: number;
+  cardsPerPage: number;
+  layoutName: string;
+  missingPhotoCount: number;
+  items: HocVienCardPrintPreviewItem[];
+}
+
+export interface HocVienPhotoAuditParams {
+  keyword?: string;
+  maKhoa?: string;
+  maHangDT?: string;
+  page?: number;
+  pageSize?: number;
+  validateDecode?: boolean;
+  onlyMissing?: boolean;
+  onlyInvalid?: boolean;
+}
+
+export interface HocVienPhotoAuditItem {
+  hocVienId: number;
+  maDangKy: string;
+  hoVaTen: string;
+  maKhoa: string | null;
+  tenKhoa: string | null;
+  maHangDT: string | null;
+  hangGplxHoc: string | null;
+  expectedRelativePath: string;
+  hasPhoto: boolean;
+  photoStatus: string;
+  message: string;
+}
+
+export interface HocVienPhotoAuditResult {
+  totalItems: number;
+  totalHasPhoto: number;
+  totalMissingPhoto: number;
+  totalInvalidPhoto: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  items: HocVienPhotoAuditItem[];
+}
 
 export interface HocVienKhoaLookup {
   maKhoa: string;

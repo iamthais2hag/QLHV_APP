@@ -18,7 +18,7 @@ builder.Services.AddMemoryCache();
 
 // Application + Infrastructure services
 builder.Services.AddApplication();
-builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddInfrastructure(builder.Configuration, builder.Environment.ContentRootPath);
 
 // CORS for the internal frontend. Local dev origins are allowed only in Development by default.
 const string FrontendCors = "frontend";

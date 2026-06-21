@@ -13,6 +13,20 @@ public interface IHocVienRepository
         HocVienSearchRequest request,
         CancellationToken cancellationToken = default);
 
+    Task<HocVienListItemDto?> GetByIdAsync(
+        int hocVienId,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<HocVienListItemDto>> GetByIdsAsync(
+        IReadOnlyList<int> hocVienIds,
+        int maxRows,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<HocVienListItemDto>> GetByCourseAsync(
+        string maKhoa,
+        int maxRows,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<HocVienListItemDto>> ExportRowsAsync(
         HocVienSearchRequest request,
         int maxRows,

@@ -10,6 +10,7 @@ FROM dbo.App_HocVien";
 
     private const string SelectColumns = @"
 SELECT
+    HocVienId,
     MaDK           AS MaDangKy,
     HoTen          AS HoVaTen,
     NgaySinh,
@@ -62,6 +63,43 @@ SELECT
             FromClause + where +
             "\nORDER BY HocVienId ASC;";
 
+        return (sql, parameters);
+    }
+
+    public static (string Sql, DynamicParameters Parameters) BuildById(int hocVienId)
+    {
+        var parameters = new DynamicParameters();
+        parameters.Add("@HocVienId", hocVienId);
+        return (SelectColumns + FromClause + "\nWHERE IsDeleted = 0\n  AND HocVienId = @HocVienId;", parameters);
+    }
+
+    public static (string Sql, DynamicParameters Parameters) BuildByIds(
+        IReadOnlyList<int> hocVienIds,
+        int maxRows)
+    {
+        var parameters = new DynamicParameters();
+        parameters.Add("@HocVienIds", hocVienIds.Distinct().ToArray());
+        parameters.Add("@MaxRows", Math.Max(1, maxRows));
+        var sql = SelectColumns.Replace("SELECT", "SELECT TOP (@MaxRows)", StringComparison.Ordinal) +
+            FromClause +
+            "\nWHERE IsDeleted = 0" +
+            "\n  AND HocVienId IN @HocVienIds" +
+            "\nORDER BY HocVienId ASC;";
+        return (sql, parameters);
+    }
+
+    public static (string Sql, DynamicParameters Parameters) BuildByCourse(
+        string maKhoa,
+        int maxRows)
+    {
+        var parameters = new DynamicParameters();
+        parameters.Add("@MaKhoa", maKhoa);
+        parameters.Add("@MaxRows", Math.Max(1, maxRows));
+        var sql = SelectColumns.Replace("SELECT", "SELECT TOP (@MaxRows)", StringComparison.Ordinal) +
+            FromClause +
+            "\nWHERE IsDeleted = 0" +
+            "\n  AND MaKhoa = @MaKhoa" +
+            "\nORDER BY HocVienId ASC;";
         return (sql, parameters);
     }
 

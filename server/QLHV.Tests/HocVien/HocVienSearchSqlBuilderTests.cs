@@ -278,4 +278,31 @@ public sealed class HocVienSearchSqlBuilderTests
         Assert.Equal("AM%", query.Parameters.Get<string>("LookupPrefix"));
         Assert.Equal("%AM%", query.Parameters.Get<string>("LookupContains"));
     }
+
+    [Fact]
+    public void Print_selected_query_reads_only_requested_hoc_vien_ids()
+    {
+        var query = HocVienSearchSqlBuilder.BuildByIds([3, 2, 2], maxRows: 1000);
+
+        Assert.Contains("SELECT TOP (@MaxRows)", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("FROM dbo.App_HocVien", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("WHERE IsDeleted = 0", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("HocVienId IN @HocVienIds", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("ORDER BY HocVienId ASC", query.Sql, StringComparison.Ordinal);
+        Assert.Equal(1000, query.Parameters.Get<int>("MaxRows"));
+        Assert.Equal([3, 2], query.Parameters.Get<int[]>("HocVienIds"));
+    }
+
+    [Fact]
+    public void Print_course_query_reads_only_requested_ma_khoa()
+    {
+        var query = HocVienSearchSqlBuilder.BuildByCourse("66016K26A0001", maxRows: 1000);
+
+        Assert.Contains("SELECT TOP (@MaxRows)", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("FROM dbo.App_HocVien", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("WHERE IsDeleted = 0", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("MaKhoa = @MaKhoa", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("ORDER BY HocVienId ASC", query.Sql, StringComparison.Ordinal);
+        Assert.Equal("66016K26A0001", query.Parameters.Get<string>("MaKhoa"));
+    }
 }

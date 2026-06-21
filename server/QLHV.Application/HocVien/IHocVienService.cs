@@ -13,6 +13,22 @@ public interface IHocVienService
         HocVienSearchRequest request,
         CancellationToken cancellationToken = default);
 
+    Task<HocVienPhotoPreviewDto?> GetPhotoPreviewAsync(
+        int hocVienId,
+        CancellationToken cancellationToken = default);
+
+    Task<HocVienExportFileDto> PrintCardsAsync(
+        HocVienCardPrintRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<HocVienCardPrintPreviewDto> PreviewPrintCardsAsync(
+        HocVienCardPrintRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<HocVienPhotoAuditResultDto> AuditPhotosAsync(
+        HocVienPhotoAuditRequest request,
+        CancellationToken cancellationToken = default);
+
     Task<HocVienExportFileDto> ExportExcelAsync(
         HocVienSearchRequest request,
         CancellationToken cancellationToken = default);

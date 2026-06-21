@@ -5,6 +5,8 @@ namespace QLHV.Application.HocVien.Dtos;
 /// </summary>
 public sealed class HocVienListItemDto
 {
+    public int HocVienId { get; init; }
+
     /// <summary>Mã đăng ký (MaDK) - giá trị đầy đủ, có thể rất dài.</summary>
     public string MaDangKy { get; init; } = string.Empty;
 

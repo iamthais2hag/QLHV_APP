@@ -52,6 +52,54 @@ public sealed class HocVienController : ControllerBase
         return Ok(result);
     }
 
+    [HttpGet("photos/audit")]
+    [ProducesResponseType(typeof(HocVienPhotoAuditResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<HocVienPhotoAuditResultDto>> AuditPhotos(
+        [FromQuery] HocVienPhotoAuditRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _service.AuditPhotosAsync(request, cancellationToken);
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("{hocVienId:int}/photo/preview")]
+    [Produces("image/jpeg", "image/png")]
+    [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status415UnsupportedMediaType)]
+    public async Task<IActionResult> PhotoPreview(
+        [FromRoute] int hocVienId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _service.GetPhotoPreviewAsync(hocVienId, cancellationToken);
+            if (result is null)
+            {
+                return NotFound();
+            }
+
+            Response.Headers.CacheControl = "private, max-age=300";
+            return File(result.Content, result.ContentType);
+        }
+        catch (NotSupportedException ex)
+        {
+            return StatusCode(StatusCodes.Status415UnsupportedMediaType, new { message = ex.Message });
+        }
+        catch (InvalidDataException ex)
+        {
+            return StatusCode(StatusCodes.Status415UnsupportedMediaType, new { message = ex.Message });
+        }
+    }
+
     /// <summary>Lookup hang hoc distinct tu App_HocVien.</summary>
     /// <param name="keyword">Tu khoa tim theo MaHangDT hoac HangGPLXHoc.</param>
     /// <param name="limit">So goi y toi da.</param>
@@ -82,6 +130,43 @@ public sealed class HocVienController : ControllerBase
         try
         {
             var result = await _service.ExportExcelAsync(request, cancellationToken);
+            return File(result.Content, result.ContentType, result.FileName);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("the-hoc-vien/print-preview")]
+    [ProducesResponseType(typeof(HocVienCardPrintPreviewDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> PrintStudentCardsPreview(
+        [FromBody] HocVienCardPrintRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _service.PreviewPrintCardsAsync(request, cancellationToken);
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("the-hoc-vien/print-a4")]
+    [Produces("application/pdf")]
+    [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> PrintStudentCardsA4(
+        [FromBody] HocVienCardPrintRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _service.PrintCardsAsync(request, cancellationToken);
             return File(result.Content, result.ContentType, result.FileName);
         }
         catch (InvalidOperationException ex)

@@ -17,6 +17,11 @@ appsettings.Local.json
 *.mdf
 *.ldf
 
+# Local student photos (real data must not be committed)
+IM_GPLX/*
+!IM_GPLX/.gitkeep
+!IM_GPLX/README.md
+
 # Temporary files
 *.tmp
 *.log

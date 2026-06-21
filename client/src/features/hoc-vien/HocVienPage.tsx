@@ -1,22 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  auditHocVienPhotos,
   exportHocVienExcel,
   getHocVienHangHocLookups,
+  getHocVienPhotoPreviewUrl,
   getHocVienKhoaLookups,
+  previewHocVienCardsA4,
+  printHocVienCardsA4,
   searchHocVien,
 } from './api';
 import type {
+  HocVienCardPrintPreview,
   HocVienExportParams,
   HocVienHangHocLookup,
   HocVienKhoaLookup,
   HocVienListItem,
+  HocVienMissingPhotoMode,
+  HocVienPhotoAuditResult,
+  HocVienPrintCardsRequest,
+  HocVienPrintSortBy,
   HocVienSearchParams,
 } from './types';
 import {
-  buildHocVienPhotoUrl,
   formatGioiTinh,
   formatNgaySinh,
-  getHocVienPhotoTitle,
 } from './utils';
 import CopyButton from './CopyButton';
 
@@ -24,16 +31,51 @@ const PAGE_SIZE = 20;
 
 type Status = 'idle' | 'loading' | 'success' | 'error';
 
-function HocVienPhoto({ path }: { path: string | null }) {
-  const [failed, setFailed] = useState(false);
-  const url = buildHocVienPhotoUrl(path);
-  const title = getHocVienPhotoTitle(path);
+function formatPhotoStatus(status: string): string {
+  switch (status) {
+    case 'HasPhoto':
+      return 'Co anh';
+    case 'Missing':
+      return 'Thieu anh';
+    case 'Invalid':
+      return 'Anh loi';
+    case 'Unsupported':
+      return 'Khong ho tro';
+    case 'UnsafePath':
+      return 'Duong dan khong an toan';
+    default:
+      return status;
+  }
+}
 
-  if (url && !failed) {
+function HocVienPhoto({
+  hocVienId,
+  title,
+  onPreview,
+}: {
+  hocVienId: number;
+  title: string;
+  onPreview: (url: string, title: string) => void;
+}) {
+  const [failed, setFailed] = useState(false);
+  const url = getHocVienPhotoPreviewUrl(hocVienId);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [hocVienId]);
+
+  if (!failed) {
     return (
-      <span className="hocvien-photo" title={title}>
+      <button
+        type="button"
+        className="hocvien-photo-button"
+        title={title}
+        onClick={() => onPreview(url, title)}
+      >
+        <span className="hocvien-photo">
         <img src={url} alt="Ảnh thẻ" onError={() => setFailed(true)} />
-      </span>
+        </span>
+      </button>
     );
   }
 
@@ -72,6 +114,24 @@ export default function HocVienPage() {
   const [errorMessage, setErrorMessage] = useState('');
   const [isExporting, setIsExporting] = useState(false);
   const [exportErrorMessage, setExportErrorMessage] = useState('');
+  const [selectedHocVienIds, setSelectedHocVienIds] = useState<Set<number>>(() => new Set());
+  const [isPrinting, setIsPrinting] = useState(false);
+  const [printErrorMessage, setPrintErrorMessage] = useState('');
+  const [photoPreview, setPhotoPreview] = useState<{ url: string; title: string; hocVienId: number } | null>(null);
+  const [showPhotoAudit, setShowPhotoAudit] = useState(false);
+  const [photoAudit, setPhotoAudit] = useState<HocVienPhotoAuditResult | null>(null);
+  const [photoAuditStatus, setPhotoAuditStatus] = useState<Status>('idle');
+  const [photoAuditErrorMessage, setPhotoAuditErrorMessage] = useState('');
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditValidateDecode, setAuditValidateDecode] = useState(false);
+  const [auditOnlyMissing, setAuditOnlyMissing] = useState(false);
+  const [auditOnlyInvalid, setAuditOnlyInvalid] = useState(false);
+  const [printRequest, setPrintRequest] = useState<HocVienPrintCardsRequest | null>(null);
+  const [printPreviewData, setPrintPreviewData] = useState<HocVienCardPrintPreview | null>(null);
+  const [printPreviewStatus, setPrintPreviewStatus] = useState<Status>('idle');
+  const [printMissingPhotoMode, setPrintMissingPhotoMode] =
+    useState<HocVienMissingPhotoMode>('placeholder');
+  const [printSortBy, setPrintSortBy] = useState<HocVienPrintSortBy>('current');
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -111,6 +171,54 @@ export default function HocVienPage() {
       }
     },
     [],
+  );
+
+  const loadPhotoAudit = useCallback(
+    async (
+      options?: Partial<{
+        page: number;
+        validateDecode: boolean;
+        onlyMissing: boolean;
+        onlyInvalid: boolean;
+      }>,
+    ) => {
+      const nextPage = options?.page ?? auditPage;
+      const nextValidateDecode = options?.validateDecode ?? auditValidateDecode;
+      const nextOnlyMissing = options?.onlyMissing ?? auditOnlyMissing;
+      const nextOnlyInvalid = options?.onlyInvalid ?? auditOnlyInvalid;
+
+      setPhotoAuditStatus('loading');
+      setPhotoAuditErrorMessage('');
+      try {
+        const result = await auditHocVienPhotos({
+          ...currentFilters(),
+          page: nextPage,
+          pageSize: PAGE_SIZE,
+          validateDecode: nextValidateDecode,
+          onlyMissing: nextOnlyMissing,
+          onlyInvalid: nextOnlyInvalid,
+        });
+        setPhotoAudit(result);
+        setAuditPage(result.page);
+        setAuditValidateDecode(nextValidateDecode);
+        setAuditOnlyMissing(nextOnlyMissing);
+        setAuditOnlyInvalid(nextOnlyInvalid);
+        setPhotoAuditStatus('success');
+      } catch (err) {
+        setPhotoAudit(null);
+        setPhotoAuditErrorMessage(
+          err instanceof Error ? err.message : 'Khong the doi soat anh hoc vien.',
+        );
+        setPhotoAuditStatus('error');
+      }
+    },
+    [
+      auditOnlyInvalid,
+      auditOnlyMissing,
+      auditPage,
+      auditValidateDecode,
+      currentFilters,
+    ],
   );
 
   useEffect(() => {
@@ -251,7 +359,15 @@ export default function HocVienPage() {
 
   function handleSearch() {
     setExportErrorMessage('');
+    setPrintErrorMessage('');
     if (!validateSelectedLookups()) return;
+
+    setSelectedHocVienIds(new Set());
+    if (showPhotoAudit) {
+      setAuditPage(1);
+      loadPhotoAudit({ page: 1 });
+      return;
+    }
 
     if (page === 1) {
       load({ ...currentFilters(), page: 1, pageSize: PAGE_SIZE });
@@ -276,6 +392,12 @@ export default function HocVienPage() {
     setHangHocLookupError('');
     setGioiTinh('');
     setExportErrorMessage('');
+    setPrintErrorMessage('');
+    setSelectedHocVienIds(new Set());
+    setShowPhotoAudit(false);
+    setPhotoAudit(null);
+    setPhotoAuditStatus('idle');
+    setPhotoAuditErrorMessage('');
     if (page === 1) {
       load({ page: 1, pageSize: PAGE_SIZE });
     } else {
@@ -285,19 +407,13 @@ export default function HocVienPage() {
 
   async function handleExport() {
     setExportErrorMessage('');
+    setPrintErrorMessage('');
     if (!validateSelectedLookups()) return;
 
     setIsExporting(true);
     try {
       const result = await exportHocVienExcel(currentFilters());
-      const url = URL.createObjectURL(result.blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = result.fileName;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      downloadBlob(result.blob, result.fileName);
     } catch (err) {
       setExportErrorMessage(
         err instanceof Error ? err.message : 'Không thể xuất Excel. Vui lòng thử lại.',
@@ -307,7 +423,161 @@ export default function HocVienPage() {
     }
   }
 
+  function handlePrintSelected() {
+    setExportErrorMessage('');
+    setPrintErrorMessage('');
+    if (selectedHocVienIds.size === 0) return;
+
+    openPrintModal({
+      mode: 'selected',
+      hocVienIds: Array.from(selectedHocVienIds),
+    });
+  }
+
+  function handlePrintCourse() {
+    setExportErrorMessage('');
+    setPrintErrorMessage('');
+    if (!selectedKhoa) {
+      setKhoaWarning('Vui long chon Khoa trong danh sach goi y');
+      return;
+    }
+
+    openPrintModal({
+      mode: 'course',
+      maKhoa: selectedKhoa.maKhoa,
+    });
+  }
+
+  function handlePrintSingle(hocVienId: number) {
+    setPhotoPreview(null);
+    openPrintModal({
+      mode: 'single',
+      hocVienId,
+    });
+  }
+
+  function openPrintModal(request: HocVienPrintCardsRequest) {
+    setPrintRequest(request);
+    setPrintMissingPhotoMode('placeholder');
+    setPrintSortBy('current');
+    loadPrintPreview(request, 'placeholder', 'current');
+  }
+
+  async function loadPrintPreview(
+    request: HocVienPrintCardsRequest,
+    missingPhotoMode = printMissingPhotoMode,
+    sortBy = printSortBy,
+  ) {
+    setPrintPreviewStatus('loading');
+    setPrintErrorMessage('');
+    try {
+      const result = await previewHocVienCardsA4({
+        ...request,
+        missingPhotoMode,
+        sortBy,
+      });
+      setPrintPreviewData(result);
+      setPrintPreviewStatus('success');
+    } catch (err) {
+      setPrintPreviewData(null);
+      setPrintPreviewStatus('error');
+      setPrintErrorMessage(err instanceof Error ? err.message : 'Khong the xem truoc in the.');
+    }
+  }
+
+  async function handleDownloadPrintPdf() {
+    if (!printRequest) return;
+
+    setIsPrinting(true);
+    setPrintErrorMessage('');
+    try {
+      const result = await printHocVienCardsA4({
+        ...printRequest,
+        missingPhotoMode: printMissingPhotoMode,
+        sortBy: printSortBy,
+      });
+      downloadBlob(result.blob, result.fileName);
+    } catch (err) {
+      setPrintErrorMessage(err instanceof Error ? err.message : 'Khong the in the hoc vien.');
+    } finally {
+      setIsPrinting(false);
+    }
+  }
+
+  async function handlePreviewPrintPdf() {
+    if (!printRequest) return;
+
+    setIsPrinting(true);
+    setPrintErrorMessage('');
+    try {
+      const result = await printHocVienCardsA4({
+        ...printRequest,
+        missingPhotoMode: printMissingPhotoMode,
+        sortBy: printSortBy,
+      });
+      const url = URL.createObjectURL(result.blob);
+      const popup = window.open(url, '_blank', 'noopener,noreferrer');
+      if (!popup) {
+        setPrintErrorMessage('Trinh duyet da chan tab xem truoc PDF.');
+      }
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      setPrintErrorMessage(err instanceof Error ? err.message : 'Khong the xem truoc PDF.');
+    } finally {
+      setIsPrinting(false);
+    }
+  }
+
+  function closePrintModal() {
+    setPrintRequest(null);
+    setPrintPreviewData(null);
+    setPrintPreviewStatus('idle');
+    setPrintErrorMessage('');
+  }
+
+  function downloadBlob(blob: Blob, fileName: string) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  function toggleHocVienSelection(hocVienId: number, checked: boolean) {
+    setSelectedHocVienIds((current) => {
+      const next = new Set(current);
+      if (checked) {
+        next.add(hocVienId);
+      } else {
+        next.delete(hocVienId);
+      }
+
+      return next;
+    });
+  }
+
+  function toggleCurrentPageSelection(checked: boolean) {
+    setSelectedHocVienIds((current) => {
+      const next = new Set(current);
+      pageHocVienIds.forEach((hocVienId) => {
+        if (checked) {
+          next.add(hocVienId);
+        } else {
+          next.delete(hocVienId);
+        }
+      });
+
+      return next;
+    });
+  }
+
   const startIndex = (page - 1) * PAGE_SIZE;
+  const pageHocVienIds = rows.map((row) => row.hocVienId).filter((id) => id > 0);
+  const isCurrentPageSelected =
+    pageHocVienIds.length > 0 && pageHocVienIds.every((id) => selectedHocVienIds.has(id));
 
   return (
     <div>
@@ -443,12 +713,180 @@ export default function HocVienPage() {
             >
               {isExporting ? 'Đang xuất...' : 'Xuất Excel'}
             </button>
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={() => {
+                if (showPhotoAudit) {
+                  setShowPhotoAudit(false);
+                  return;
+                }
+
+                setShowPhotoAudit(true);
+                loadPhotoAudit({ page: 1, validateDecode: false });
+              }}
+            >
+              {showPhotoAudit ? 'Danh sach hoc vien' : 'Doi soat anh'}
+            </button>
+            {showPhotoAudit && (
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => loadPhotoAudit({ page: 1, validateDecode: true })}
+                disabled={photoAuditStatus === 'loading'}
+              >
+                Kiem tra decode anh
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={handlePrintSelected}
+              disabled={selectedHocVienIds.size === 0 || isPrinting}
+            >
+              {isPrinting ? 'Dang in...' : `In the da chon (${selectedHocVienIds.size})`}
+            </button>
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={handlePrintCourse}
+              disabled={!selectedKhoa || isPrinting}
+              title={selectedKhoa ? selectedKhoa.label : 'Chon Khoa de in toan khoa'}
+            >
+              In the toan khoa
+            </button>
           </div>
         </div>
         {exportErrorMessage && <div className="toolbar__error">{exportErrorMessage}</div>}
+        {printErrorMessage && <div className="toolbar__error">{printErrorMessage}</div>}
       </div>
 
       <div className="table-wrap">
+        {showPhotoAudit ? (
+          <>
+            <div className="audit-panel">
+              <div className="audit-panel__summary">
+                <strong>Doi soat anh hoc vien</strong>
+                {photoAudit && (
+                  <span>
+                    Tong: {photoAudit.totalItems.toLocaleString('vi-VN')} · Co anh:{' '}
+                    {photoAudit.totalHasPhoto.toLocaleString('vi-VN')} · Thieu:{' '}
+                    {photoAudit.totalMissingPhoto.toLocaleString('vi-VN')} · Loi:{' '}
+                    {photoAudit.totalInvalidPhoto.toLocaleString('vi-VN')}
+                  </span>
+                )}
+              </div>
+              <div className="audit-panel__filters">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={auditOnlyMissing}
+                    onChange={(event) => {
+                      const value = event.target.checked;
+                      loadPhotoAudit({ page: 1, onlyMissing: value });
+                    }}
+                  />{' '}
+                  Chi xem thieu anh
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={auditOnlyInvalid}
+                    onChange={(event) => {
+                      const value = event.target.checked;
+                      loadPhotoAudit({ page: 1, onlyInvalid: value });
+                    }}
+                  />{' '}
+                  Chi xem anh loi/khong ho tro
+                </label>
+                <span>Decode: {auditValidateDecode ? 'da kiem tra' : 'chua kiem tra'}</span>
+                <span>TODO: xuat danh sach thieu anh ra Excel.</span>
+              </div>
+            </div>
+
+            {photoAuditStatus === 'loading' && (
+              <div className="state">
+                <div className="spinner" aria-hidden="true" />
+                <div>Dang doi soat anh...</div>
+              </div>
+            )}
+
+            {photoAuditStatus === 'error' && (
+              <div className="state state--error">
+                <div>{photoAuditErrorMessage}</div>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  style={{ marginTop: 12 }}
+                  onClick={() => loadPhotoAudit()}
+                >
+                  Thu lai
+                </button>
+              </div>
+            )}
+
+            {photoAuditStatus === 'success' && photoAudit?.items.length === 0 && (
+              <div className="state">Khong co hoc vien phu hop voi dieu kien doi soat.</div>
+            )}
+
+            {photoAuditStatus === 'success' && photoAudit && photoAudit.items.length > 0 && (
+              <table className="table table--photo-audit">
+                <thead>
+                  <tr>
+                    <th>Ma DK</th>
+                    <th>Ho ten</th>
+                    <th>Khoa</th>
+                    <th>Hang hoc</th>
+                    <th>Duong dan du kien</th>
+                    <th>Trang thai anh</th>
+                    <th>Ghi chu</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {photoAudit.items.map((item) => {
+                    const khoaLabel =
+                      item.tenKhoa && item.maKhoa
+                        ? `${item.tenKhoa} - ${item.maKhoa}`
+                        : item.maKhoa ?? item.tenKhoa ?? '';
+                    const hangLabel =
+                      item.maHangDT && item.hangGplxHoc
+                        ? `${item.maHangDT} - ${item.hangGplxHoc}`
+                        : item.maHangDT ?? item.hangGplxHoc ?? '';
+
+                    return (
+                      <tr key={item.hocVienId}>
+                        <td className="cell-ellipsis" title={item.maDangKy}>
+                          {item.maDangKy}
+                        </td>
+                        <td className="cell-ellipsis cell-name" title={item.hoVaTen}>
+                          {item.hoVaTen}
+                        </td>
+                        <td className="cell-ellipsis" title={khoaLabel}>
+                          {khoaLabel}
+                        </td>
+                        <td className="cell-ellipsis" title={hangLabel}>
+                          {hangLabel}
+                        </td>
+                        <td className="cell-ellipsis" title={item.expectedRelativePath}>
+                          {item.expectedRelativePath}
+                        </td>
+                        <td>
+                          <span className={`photo-status photo-status--${item.photoStatus.toLowerCase()}`}>
+                            {formatPhotoStatus(item.photoStatus)}
+                          </span>
+                        </td>
+                        <td className="cell-ellipsis" title={item.message}>
+                          {item.message}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </>
+        ) : (
+          <>
         {status === 'loading' && (
           <div className="state">
             <div className="spinner" aria-hidden="true" />
@@ -477,6 +915,7 @@ export default function HocVienPage() {
         {status === 'success' && rows.length > 0 && (
           <table className="table table--hoc-vien">
             <colgroup>
+              <col className="col-select" />
               <col className="col-stt" />
               <col className="col-photo" />
               <col className="col-madk" />
@@ -493,6 +932,14 @@ export default function HocVienPage() {
             </colgroup>
             <thead>
               <tr>
+                <th>
+                  <input
+                    type="checkbox"
+                    aria-label="Chon tat ca hoc vien tren trang"
+                    checked={isCurrentPageSelected}
+                    onChange={(event) => toggleCurrentPageSelection(event.target.checked)}
+                  />
+                </th>
                 <th>STT</th>
                 <th>Ảnh</th>
                 <th>Mã ĐK</th>
@@ -524,10 +971,24 @@ export default function HocVienPage() {
                     : row.maKhoa ?? row.tenKhoa ?? '';
 
                 return (
-                  <tr key={row.maDangKy || index}>
+                  <tr key={row.hocVienId || row.maDangKy || index}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        aria-label={`Chon hoc vien ${row.hoVaTen}`}
+                        checked={selectedHocVienIds.has(row.hocVienId)}
+                        onChange={(event) => toggleHocVienSelection(row.hocVienId, event.target.checked)}
+                      />
+                    </td>
                     <td>{startIndex + index + 1}</td>
                     <td>
-                      <HocVienPhoto path={row.anhRelativePath} />
+                      <HocVienPhoto
+                        hocVienId={row.hocVienId}
+                        title={row.hoVaTen}
+                        onPreview={(url, title) =>
+                          setPhotoPreview({ url, title, hocVienId: row.hocVienId })
+                        }
+                      />
                     </td>
                     <td>
                       <CopyButton value={row.maDangKy} title={row.maDangKy} />
@@ -558,9 +1019,11 @@ export default function HocVienPage() {
             </tbody>
           </table>
         )}
+          </>
+        )}
       </div>
 
-      {status === 'success' && totalItems > 0 && (
+      {!showPhotoAudit && status === 'success' && totalItems > 0 && (
         <div className="pager">
           <span>
             Tổng số: {totalItems.toLocaleString('vi-VN')} học viên · Trang {page}/
@@ -583,6 +1046,232 @@ export default function HocVienPage() {
             >
               Trang sau
             </button>
+          </div>
+        </div>
+      )}
+
+      {showPhotoAudit && photoAuditStatus === 'success' && photoAudit && photoAudit.totalItems > 0 && (
+        <div className="pager">
+          <span>
+            Tong so: {photoAudit.totalItems.toLocaleString('vi-VN')} hoc vien · Trang {photoAudit.page}/
+            {Math.max(photoAudit.totalPages, 1)}
+          </span>
+          <div className="pager__controls">
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              disabled={photoAudit.page <= 1}
+              onClick={() => loadPhotoAudit({ page: Math.max(1, photoAudit.page - 1) })}
+            >
+              Trang truoc
+            </button>
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              disabled={photoAudit.page >= photoAudit.totalPages}
+              onClick={() => loadPhotoAudit({ page: photoAudit.page + 1 })}
+            >
+              Trang sau
+            </button>
+          </div>
+        </div>
+      )}
+
+      {photoPreview && (
+        <div
+          className="photo-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label={photoPreview.title}
+          onClick={() => setPhotoPreview(null)}
+        >
+          <div className="photo-modal__dialog" onClick={(event) => event.stopPropagation()}>
+            <button
+              type="button"
+              className="photo-modal__close"
+              aria-label="Dong anh"
+              onClick={() => setPhotoPreview(null)}
+            >
+              x
+            </button>
+            <img src={photoPreview.url} alt={photoPreview.title} />
+            <div className="photo-modal__actions">
+              <button
+                type="button"
+                className="btn btn--primary btn--sm"
+                onClick={() => handlePrintSingle(photoPreview.hocVienId)}
+              >
+                In the hoc vien nay
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {printRequest && (
+        <div
+          className="print-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="In the hoc vien"
+          onClick={closePrintModal}
+        >
+          <div className="print-modal__dialog" onClick={(event) => event.stopPropagation()}>
+            <div className="print-modal__header">
+              <div>
+                <strong>In the hoc vien</strong>
+                <p>A4 ngang · 3 cot x 4 dong · 12 the/trang · 85mm x 50mm</p>
+              </div>
+              <button
+                type="button"
+                className="photo-modal__close"
+                aria-label="Dong"
+                onClick={closePrintModal}
+              >
+                x
+              </button>
+            </div>
+
+            <div className="print-modal__options">
+              <label>
+                Anh thieu
+                <select
+                  className="field__input"
+                  value={printMissingPhotoMode}
+                  onChange={(event) => {
+                    const value = event.target.value as HocVienMissingPhotoMode;
+                    setPrintMissingPhotoMode(value);
+                    loadPrintPreview(printRequest, value, printSortBy);
+                  }}
+                >
+                  <option value="placeholder">Van in placeholder</option>
+                  <option value="skip">Bo qua hoc vien thieu anh</option>
+                </select>
+              </label>
+              <label>
+                Sap xep
+                <select
+                  className="field__input"
+                  value={printSortBy}
+                  onChange={(event) => {
+                    const value = event.target.value as HocVienPrintSortBy;
+                    setPrintSortBy(value);
+                    loadPrintPreview(printRequest, printMissingPhotoMode, value);
+                  }}
+                >
+                  <option value="current">Thu tu hien tai</option>
+                  <option value="hoTen">Theo ho ten</option>
+                  <option value="maDK">Theo ma dang ky</option>
+                </select>
+              </label>
+            </div>
+
+            {printPreviewStatus === 'loading' && (
+              <div className="state">
+                <div className="spinner" aria-hidden="true" />
+                <div>Dang tao preview...</div>
+              </div>
+            )}
+
+            {printPreviewStatus === 'error' && (
+              <div className="state state--error">{printErrorMessage}</div>
+            )}
+
+            {printPreviewStatus === 'success' && printPreviewData && (
+              <>
+                <div className="print-modal__summary">
+                  <span>Tong se in: {printPreviewData.totalStudents.toLocaleString('vi-VN')}</span>
+                  <span>So trang PDF: {printPreviewData.totalPages.toLocaleString('vi-VN')}</span>
+                  <span>The/trang: {printPreviewData.cardsPerPage}</span>
+                  <span>Layout: {printPreviewData.layoutName}</span>
+                  {printPreviewData.missingPhotoCount > 0 && (
+                    <strong>
+                      Canh bao: {printPreviewData.missingPhotoCount.toLocaleString('vi-VN')} hoc vien
+                      thieu anh
+                    </strong>
+                  )}
+                </div>
+
+                <div className="print-modal__table-wrap">
+                  <table className="table table--print-preview">
+                    <thead>
+                      <tr>
+                        <th>Ma DK</th>
+                        <th>Ho ten</th>
+                        <th>Khoa</th>
+                        <th>Hang hoc</th>
+                        <th>Trang thai anh</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {printPreviewData.items.slice(0, 100).map((item) => {
+                        const khoaLabel =
+                          item.tenKhoa && item.maKhoa
+                            ? `${item.tenKhoa} - ${item.maKhoa}`
+                            : item.maKhoa ?? item.tenKhoa ?? '';
+                        const hangLabel =
+                          item.maHangDT && item.hangGplxHoc
+                            ? `${item.maHangDT} - ${item.hangGplxHoc}`
+                            : item.maHangDT ?? item.hangGplxHoc ?? '';
+
+                        return (
+                          <tr key={item.hocVienId}>
+                            <td className="cell-ellipsis" title={item.maDangKy}>
+                              {item.maDangKy}
+                            </td>
+                            <td className="cell-ellipsis cell-name" title={item.hoVaTen}>
+                              {item.hoVaTen}
+                            </td>
+                            <td className="cell-ellipsis" title={khoaLabel}>
+                              {khoaLabel}
+                            </td>
+                            <td className="cell-ellipsis" title={hangLabel}>
+                              {hangLabel}
+                            </td>
+                            <td>{formatPhotoStatus(item.photoStatus)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                {printPreviewData.items.length > 100 && (
+                  <div className="print-modal__note">
+                    Preview hien 100 dong dau, PDF van dung toan bo danh sach.
+                  </div>
+                )}
+              </>
+            )}
+
+            <div className="print-modal__actions">
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => loadPrintPreview(printRequest)}
+                disabled={printPreviewStatus === 'loading' || isPrinting}
+              >
+                Xem truoc danh sach
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={handlePreviewPrintPdf}
+                disabled={printPreviewStatus !== 'success' || isPrinting}
+              >
+                Xem truoc PDF
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={handleDownloadPrintPdf}
+                disabled={printPreviewStatus !== 'success' || isPrinting}
+              >
+                {isPrinting ? 'Dang tao PDF...' : 'Tai PDF'}
+              </button>
+              <button type="button" className="btn btn--ghost" onClick={closePrintModal}>
+                Huy
+              </button>
+            </div>
           </div>
         </div>
       )}

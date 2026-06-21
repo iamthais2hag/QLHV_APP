@@ -1,8 +1,12 @@
 import type {
   HocVienExportParams,
+  HocVienCardPrintPreview,
   HocVienHangHocLookup,
   HocVienKhoaLookup,
   HocVienListItem,
+  HocVienPhotoAuditParams,
+  HocVienPhotoAuditResult,
+  HocVienPrintCardsRequest,
   HocVienSearchParams,
   PagedResult,
 } from './types';
@@ -70,6 +74,82 @@ export async function exportHocVienExcel(
   };
 }
 
+export function getHocVienPhotoPreviewUrl(hocVienId: number): string {
+  return `${API_BASE}/hoc-vien/${hocVienId}/photo/preview`;
+}
+
+export async function printHocVienCardsA4(
+  request: HocVienPrintCardsRequest,
+  signal?: AbortSignal,
+): Promise<HocVienExportResult> {
+  const response = await fetch(`${API_BASE}/hoc-vien/the-hoc-vien/print-a4`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/pdf',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Không thể in thẻ học viên (mã ${response.status}).`);
+  }
+
+  return {
+    blob: await response.blob(),
+    fileName: getFileNameFromDisposition(response.headers.get('Content-Disposition'), 'TheHocVien', 'pdf'),
+  };
+}
+
+export async function previewHocVienCardsA4(
+  request: HocVienPrintCardsRequest,
+  signal?: AbortSignal,
+): Promise<HocVienCardPrintPreview> {
+  const response = await fetch(`${API_BASE}/hoc-vien/the-hoc-vien/print-preview`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Khong the xem truoc danh sach in the (ma ${response.status}).`);
+  }
+
+  return (await response.json()) as HocVienCardPrintPreview;
+}
+
+export async function auditHocVienPhotos(
+  params: HocVienPhotoAuditParams,
+  signal?: AbortSignal,
+): Promise<HocVienPhotoAuditResult> {
+  const query = new URLSearchParams();
+  if (params.keyword) query.set('keyword', params.keyword);
+  if (params.maKhoa) query.set('maKhoa', params.maKhoa);
+  if (params.maHangDT) query.set('maHangDT', params.maHangDT);
+  if (params.page) query.set('page', String(params.page));
+  if (params.pageSize) query.set('pageSize', String(params.pageSize));
+  if (params.validateDecode) query.set('validateDecode', 'true');
+  if (params.onlyMissing) query.set('onlyMissing', 'true');
+  if (params.onlyInvalid) query.set('onlyInvalid', 'true');
+
+  const response = await fetch(`${API_BASE}/hoc-vien/photos/audit?${query.toString()}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Khong the doi soat anh hoc vien (ma ${response.status}).`);
+  }
+
+  return (await response.json()) as HocVienPhotoAuditResult;
+}
+
 export async function getHocVienKhoaLookups(
   keyword: string,
   limit = 20,
@@ -126,8 +206,12 @@ function buildFilterQuery(params: HocVienExportParams): URLSearchParams {
   return query;
 }
 
-function getFileNameFromDisposition(contentDisposition: string | null): string {
-  const fallback = `HocVien_${formatDownloadTimestamp()}.xlsx`;
+function getFileNameFromDisposition(
+  contentDisposition: string | null,
+  prefix = 'HocVien',
+  extension = 'xlsx',
+): string {
+  const fallback = `${prefix}_${formatDownloadTimestamp()}.${extension}`;
   if (!contentDisposition) return fallback;
 
   const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(contentDisposition);

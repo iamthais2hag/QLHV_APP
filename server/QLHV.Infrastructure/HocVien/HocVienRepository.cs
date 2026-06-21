@@ -61,6 +61,64 @@ public sealed class HocVienRepository : IHocVienRepository
         };
     }
 
+    public async Task<HocVienListItemDto?> GetByIdAsync(
+        int hocVienId,
+        CancellationToken cancellationToken = default)
+    {
+        var connectionString = await ResolveUsableTargetAsync(cancellationToken);
+        await using var connection = new SqlConnection(connectionString);
+
+        var query = HocVienSearchSqlBuilder.BuildById(hocVienId);
+        var row = await connection.QuerySingleOrDefaultAsync<HocVienReadRow>(new CommandDefinition(
+            query.Sql,
+            query.Parameters,
+            commandTimeout: _options.TimeoutSeconds,
+            cancellationToken: cancellationToken));
+
+        return row is null ? null : ToDto(row);
+    }
+
+    public async Task<IReadOnlyList<HocVienListItemDto>> GetByIdsAsync(
+        IReadOnlyList<int> hocVienIds,
+        int maxRows,
+        CancellationToken cancellationToken = default)
+    {
+        if (hocVienIds.Count == 0)
+        {
+            return [];
+        }
+
+        var connectionString = await ResolveUsableTargetAsync(cancellationToken);
+        await using var connection = new SqlConnection(connectionString);
+
+        var query = HocVienSearchSqlBuilder.BuildByIds(hocVienIds, maxRows);
+        var rows = await connection.QueryAsync<HocVienReadRow>(new CommandDefinition(
+            query.Sql,
+            query.Parameters,
+            commandTimeout: _options.TimeoutSeconds,
+            cancellationToken: cancellationToken));
+
+        return rows.Select(ToDto).ToList();
+    }
+
+    public async Task<IReadOnlyList<HocVienListItemDto>> GetByCourseAsync(
+        string maKhoa,
+        int maxRows,
+        CancellationToken cancellationToken = default)
+    {
+        var connectionString = await ResolveUsableTargetAsync(cancellationToken);
+        await using var connection = new SqlConnection(connectionString);
+
+        var query = HocVienSearchSqlBuilder.BuildByCourse(maKhoa, maxRows);
+        var rows = await connection.QueryAsync<HocVienReadRow>(new CommandDefinition(
+            query.Sql,
+            query.Parameters,
+            commandTimeout: _options.TimeoutSeconds,
+            cancellationToken: cancellationToken));
+
+        return rows.Select(ToDto).ToList();
+    }
+
     public async Task<IReadOnlyList<HocVienListItemDto>> ExportRowsAsync(
         HocVienSearchRequest request,
         int maxRows,
@@ -131,6 +189,7 @@ public sealed class HocVienRepository : IHocVienRepository
 
     private static HocVienListItemDto ToDto(HocVienReadRow row) => new()
     {
+        HocVienId = row.HocVienId,
         MaDangKy = row.MaDangKy,
         HoVaTen = row.HoVaTen ?? string.Empty,
         NgaySinh = row.NgaySinh.HasValue ? DateOnly.FromDateTime(row.NgaySinh.Value) : null,
@@ -169,6 +228,7 @@ public sealed class HocVienRepository : IHocVienRepository
 
     private sealed class HocVienReadRow
     {
+        public int HocVienId { get; init; }
         public string MaDangKy { get; init; } = string.Empty;
         public string? HoVaTen { get; init; }
         public DateTime? NgaySinh { get; init; }
