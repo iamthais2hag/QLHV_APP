@@ -62,6 +62,9 @@ export interface HocVienCardPrintPreview {
   cardsPerPage: number;
   layoutName: string;
   missingPhotoCount: number;
+  organizationLine1: string;
+  organizationLine2: string;
+  cardTitle: string;
   items: HocVienCardPrintPreviewItem[];
 }
 

@@ -9,6 +9,7 @@
     <PackageReference Include="ClosedXML" Version="0.105.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
     <PackageReference Include="Microsoft.Extensions.Options" Version="8.0.2" />
+    <PackageReference Include="PDFsharp" Version="6.2.4" />
   </ItemGroup>
 
   <PropertyGroup>

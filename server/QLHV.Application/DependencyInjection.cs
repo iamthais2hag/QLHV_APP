@@ -11,6 +11,7 @@ public static class DependencyInjection
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
         services.AddScoped<IHocVienService, HocVienService>();
+        services.AddSingleton(HocVienCardTemplate.Default);
         services.AddSingleton<IHocVienCardPdfGenerator, HocVienCardPdfGenerator>();
         services.AddScoped<IHocVienSyncService, HocVienSyncService>();
         return services;

@@ -18,6 +18,17 @@ public sealed class HocVienCardLayoutTests
         Assert.Equal(12, HocVienCardLayout.CardsPerPage);
     }
 
+    [Theory]
+    [InlineData(0d, 0d)]
+    [InlineData(25.4d, 72d)]
+    [InlineData(297d, 841.8897637795276d)]
+    public void Millimeters_are_converted_to_pdf_points_in_one_place(
+        double millimeters,
+        double expectedPoints)
+    {
+        Assert.Equal(expectedPoints, HocVienCardLayout.MmToPoint(millimeters), precision: 8);
+    }
+
     [Fact]
     public void A4_layout_uses_expected_margins_and_slots()
     {
@@ -35,6 +46,39 @@ public sealed class HocVienCardLayoutTests
         Assert.Equal(3, last.Row);
         Assert.Equal(192d, last.XMm);
         Assert.Equal(156.5d, last.YMm);
+    }
+
+    [Fact]
+    public void Every_card_slot_stays_inside_a4_page()
+    {
+        for (var index = 0; index < HocVienCardLayout.CardsPerPage; index++)
+        {
+            var slot = HocVienCardLayout.GetSlot(index);
+
+            Assert.True(slot.XMm >= 0d);
+            Assert.True(slot.YMm >= 0d);
+            Assert.True(slot.XMm + slot.WidthMm <= HocVienCardLayout.PageWidthMm);
+            Assert.True(slot.YMm + slot.HeightMm <= HocVienCardLayout.PageHeightMm);
+        }
+    }
+
+    [Fact]
+    public void Card_template_preserves_vietnamese_student_name_and_business_text()
+    {
+        var content = HocVienCardTemplate.Default.CreateContent(new QLHV.Application.HocVien.Dtos.HocVienListItemDto
+        {
+            MaDangKy = "66016-20251229-145551540",
+            HoVaTen = "NGUYỄN ĐỨC ĐẠT",
+            MaHangDT = "Am",
+            TenKhoa = "AK01",
+            MaKhoa = "66016K26A0001",
+        });
+
+        Assert.Equal("NGUYỄN ĐỨC ĐẠT", content.StudentName);
+        Assert.Equal("SỞ XÂY DỰNG TỈNH GIA LAI", content.OrganizationLine1);
+        Assert.Equal("HỌC VIÊN TẬP LÁI XE", content.Title);
+        Assert.Equal("TẬP LÁI XE HẠNG: Am", content.TrainingRank);
+        Assert.Equal("AK01 - 66016K26A0001", content.Course);
     }
 
     [Theory]

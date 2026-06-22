@@ -1,297 +1,298 @@
-using System.Globalization;
-using System.Text;
+using PdfSharp.Drawing;
+using PdfSharp.Fonts;
+using PdfSharp.Pdf;
 using QLHV.Application.HocVien.Dtos;
 
 namespace QLHV.Application.HocVien.Printing;
 
 public sealed class HocVienCardPdfGenerator : IHocVienCardPdfGenerator
 {
-    private const double PageWidthPt = 841.88976378d;
-    private const double PageHeightPt = 595.27559055d;
+    private static readonly object FontSettingsLock = new();
+    private static bool _fontSettingsInitialized;
+
+    private readonly HocVienCardTemplate _template;
+
+    public HocVienCardPdfGenerator(HocVienCardTemplate template)
+    {
+        _template = template;
+    }
 
     public byte[] CreatePdf(
         IReadOnlyList<HocVienListItemDto> hocViens,
         IReadOnlyDictionary<int, HocVienPhotoPreviewDto>? photosByHocVienId = null)
     {
-        var rows = hocViens.Count == 0
-            ? Array.Empty<HocVienListItemDto>()
-            : hocViens.ToArray();
+        EnsureFontSettings();
+
+        using var document = new PdfDocument();
+        document.Info.Title = "Thẻ học viên tập lái xe";
+        document.Info.Subject = "A4 ngang, 12 thẻ mỗi trang";
+        document.Info.Creator = "QLHV_APP";
+
+        var fonts = new FontCache(_template.FontFamily);
+        var rows = hocViens.ToArray();
         var pageCount = HocVienCardLayout.GetPageCount(rows.Length);
-        var objects = new List<byte[]>();
-        var imageRefs = BuildImageRefs(rows, pageCount, photosByHocVienId);
-
-        AddObject(objects, "<< /Type /Catalog /Pages 2 0 R >>");
-
-        var pageObjectNumbers = Enumerable
-            .Range(0, pageCount)
-            .Select(index => 3 + index * 2)
-            .ToArray();
-        AddObject(objects, $"<< /Type /Pages /Kids [{string.Join(" ", pageObjectNumbers.Select(n => $"{n} 0 R"))}] /Count {pageCount} >>");
 
         for (var pageIndex = 0; pageIndex < pageCount; pageIndex++)
         {
-            var pageObjectNumber = 3 + pageIndex * 2;
-            var contentObjectNumber = pageObjectNumber + 1;
-            var pageImages = imageRefs
-                .Where(item => item.PageIndex == pageIndex)
-                .ToArray();
-            var content = BuildPageContent(rows, pageIndex, pageImages);
-            var xObjects = pageImages.Length == 0
-                ? string.Empty
-                : $" /XObject << {string.Join(" ", pageImages.Select(image => $"/{image.Name} {image.ObjectNumber} 0 R"))} >>";
-            AddObject(
-                objects,
-                $"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {Format(PageWidthPt)} {Format(PageHeightPt)}] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> /F2 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >> >>{xObjects} >> /Contents {contentObjectNumber} 0 R >>");
-            AddStreamObject(objects, content);
+            var page = document.AddPage();
+            page.Width = Mm(HocVienCardLayout.PageWidthMm);
+            page.Height = Mm(HocVienCardLayout.PageHeightMm);
+
+            using var graphics = XGraphics.FromPdfPage(page);
+            var start = pageIndex * HocVienCardLayout.CardsPerPage;
+            var end = Math.Min(start + HocVienCardLayout.CardsPerPage, rows.Length);
+
+            for (var studentIndex = start; studentIndex < end; studentIndex++)
+            {
+                var student = rows[studentIndex];
+                var slot = HocVienCardLayout.GetSlot(studentIndex - start);
+                HocVienPhotoPreviewDto? photo = null;
+                photosByHocVienId?.TryGetValue(student.HocVienId, out photo);
+                DrawCard(graphics, fonts, slot, student, photo);
+            }
         }
 
-        foreach (var image in imageRefs)
-        {
-            AddJpegImageObject(objects, image.Photo);
-        }
-
-        return BuildPdf(objects);
+        using var stream = new MemoryStream();
+        document.Save(stream, closeStream: false);
+        return stream.ToArray();
     }
 
-    private static string BuildPageContent(
-        IReadOnlyList<HocVienListItemDto> hocViens,
-        int pageIndex,
-        IReadOnlyList<ImageRef> imageRefs)
-    {
-        var sb = new StringBuilder();
-        var start = pageIndex * HocVienCardLayout.CardsPerPage;
-        var end = Math.Min(start + HocVienCardLayout.CardsPerPage, hocViens.Count);
-
-        for (var index = start; index < end; index++)
-        {
-            var slot = HocVienCardLayout.GetSlot(index - start);
-            var image = imageRefs.FirstOrDefault(item => item.HocVienIndex == index);
-            DrawCard(sb, slot, hocViens[index], image);
-        }
-
-        return sb.ToString();
-    }
-
-    private static void DrawCard(
-        StringBuilder sb,
+    private void DrawCard(
+        XGraphics graphics,
+        FontCache fonts,
         CardSlot slot,
-        HocVienListItemDto hocVien,
-        ImageRef? image)
+        HocVienListItemDto student,
+        HocVienPhotoPreviewDto? photo)
     {
-        var x = HocVienCardLayout.MmToPoint(slot.XMm);
-        var top = PageHeightPt - HocVienCardLayout.MmToPoint(slot.YMm);
-        var width = HocVienCardLayout.MmToPoint(slot.WidthMm);
-        var height = HocVienCardLayout.MmToPoint(slot.HeightMm);
-        var y = top - height;
+        var cardRect = Rect(slot.XMm, slot.YMm, slot.WidthMm, slot.HeightMm);
+        graphics.DrawRectangle(new XPen(XColors.Black, 0.65d), cardRect);
 
-        Rect(sb, x, y, width, height);
+        var photoRect = Rect(
+            slot.XMm + _template.PhotoRect.XMm,
+            slot.YMm + _template.PhotoRect.YMm,
+            _template.PhotoRect.WidthMm,
+            _template.PhotoRect.HeightMm);
 
-        var photoX = x + HocVienCardLayout.MmToPoint(4d);
-        var photoY = top - HocVienCardLayout.MmToPoint(5d) - HocVienCardLayout.MmToPoint(HocVienCardLayout.PhotoHeightMm);
-        var photoWidth = HocVienCardLayout.MmToPoint(HocVienCardLayout.PhotoWidthMm);
-        var photoHeight = HocVienCardLayout.MmToPoint(HocVienCardLayout.PhotoHeightMm);
-        if (image is not null)
+        if (!TryDrawPhoto(graphics, photoRect, photo))
         {
-            DrawImage(sb, image.Name, photoX, photoY, photoWidth, photoHeight);
+            DrawPhotoPlaceholder(graphics, fonts, photoRect);
         }
 
-        Rect(sb, photoX, photoY, photoWidth, photoHeight);
-        if (image is null)
+        graphics.DrawRectangle(new XPen(XColors.Black, 0.55d), photoRect);
+
+        var content = _template.CreateContent(student);
+        var textLeftMm = slot.XMm + _template.TextLeftMm;
+        var textWidthMm = slot.WidthMm - _template.TextLeftMm - _template.TextRightPaddingMm;
+
+        for (var index = 0; index < _template.TextLines.Count; index++)
         {
-            Text(sb, "F1", 8, photoX + photoWidth / 2d - 8d, photoY + photoHeight / 2d - 3d, "Anh");
-        }
-
-        var textX = x + HocVienCardLayout.MmToPoint(37d);
-        var textTop = top - HocVienCardLayout.MmToPoint(6d);
-        var maxChars = 30;
-
-        Text(sb, "F1", 5.2, textX, textTop, "SO XAY DUNG TINH GIA LAI");
-        Text(sb, "F1", 5.2, textX, textTop - 8, "TRUNG TAM DAO TAO LAI XE THANH CONG");
-        Text(sb, "F2", 8.2, textX, textTop - 23, "HOC VIEN TAP LAI XE");
-        Text(sb, "F2", 7.4, textX, textTop - 40, Fit(Sanitize(hocVien.HoVaTen), maxChars));
-        Text(sb, "F1", 6.8, textX, textTop - 56, $"TAP LAI XE HANG: {Fit(Sanitize(hocVien.MaHangDT ?? hocVien.HangGplxHoc), 12)}");
-        Text(sb, "F1", 5.8, textX, textTop - 71, Fit(Sanitize(hocVien.MaKhoa), maxChars));
-    }
-
-    private static IReadOnlyList<ImageRef> BuildImageRefs(
-        IReadOnlyList<HocVienListItemDto> rows,
-        int pageCount,
-        IReadOnlyDictionary<int, HocVienPhotoPreviewDto>? photosByHocVienId)
-    {
-        if (photosByHocVienId is null || photosByHocVienId.Count == 0)
-        {
-            return [];
-        }
-
-        var refs = new List<ImageRef>();
-        var nextObjectNumber = 3 + pageCount * 2;
-        for (var index = 0; index < rows.Count; index++)
-        {
-            if (!photosByHocVienId.TryGetValue(rows[index].HocVienId, out var photo) ||
-                photo.Content.Length == 0 ||
-                photo.PixelWidth <= 0 ||
-                photo.PixelHeight <= 0 ||
-                !photo.ContentType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase))
+            var line = _template.TextLines[index];
+            var text = content.GetText(line.Kind);
+            if (string.IsNullOrWhiteSpace(text))
             {
                 continue;
             }
 
-            refs.Add(new ImageRef(
-                $"Im{refs.Count + 1}",
-                nextObjectNumber++,
-                index / HocVienCardLayout.CardsPerPage,
-                index,
-                photo));
+            var nextTopMm = index + 1 < _template.TextLines.Count
+                ? _template.TextLines[index + 1].TopMm
+                : HocVienCardLayout.CardHeightMm - 3d;
+            var lineHeightMm = Math.Max(3d, nextTopMm - line.TopMm);
+            var lineRect = Rect(
+                textLeftMm,
+                slot.YMm + line.TopMm,
+                textWidthMm,
+                lineHeightMm);
+            var fitted = FitText(graphics, fonts, text, line, lineRect.Width);
+
+            graphics.DrawString(
+                fitted.Text,
+                fitted.Font,
+                XBrushes.Black,
+                lineRect,
+                XStringFormats.CenterLeft);
+        }
+    }
+
+    private static bool TryDrawPhoto(
+        XGraphics graphics,
+        XRect destination,
+        HocVienPhotoPreviewDto? photo)
+    {
+        if (photo is null || photo.Content.Length == 0)
+        {
+            return false;
         }
 
-        return refs;
+        try
+        {
+            using var stream = new MemoryStream(photo.Content, writable: false);
+            using var image = XImage.FromStream(stream);
+            DrawImageCover(graphics, image, destination);
+            return true;
+        }
+        catch (Exception ex) when (
+            ex is ArgumentException or InvalidOperationException or NotSupportedException or IOException)
+        {
+            return false;
+        }
     }
 
-    private static void DrawImage(
-        StringBuilder sb,
-        string imageName,
-        double x,
-        double y,
-        double width,
-        double height)
+    private static void DrawImageCover(XGraphics graphics, XImage image, XRect destination)
     {
-        sb.AppendLine("q");
-        sb.AppendLine($"{Format(width)} 0 0 {Format(height)} {Format(x)} {Format(y)} cm");
-        sb.AppendLine($"/{imageName} Do");
-        sb.AppendLine("Q");
+        var sourceWidth = Math.Max(1d, image.PointWidth);
+        var sourceHeight = Math.Max(1d, image.PointHeight);
+        var destinationRatio = destination.Width / destination.Height;
+        var sourceRatio = sourceWidth / sourceHeight;
+
+        double sourceX = 0d;
+        double sourceY = 0d;
+        double cropWidth = sourceWidth;
+        double cropHeight = sourceHeight;
+
+        if (sourceRatio > destinationRatio)
+        {
+            cropWidth = sourceHeight * destinationRatio;
+            sourceX = (sourceWidth - cropWidth) / 2d;
+        }
+        else if (sourceRatio < destinationRatio)
+        {
+            cropHeight = sourceWidth / destinationRatio;
+            sourceY = (sourceHeight - cropHeight) / 2d;
+        }
+
+        graphics.DrawImage(
+            image,
+            destination,
+            new XRect(sourceX, sourceY, cropWidth, cropHeight),
+            XGraphicsUnit.Point);
     }
 
-    private static void Rect(StringBuilder sb, double x, double y, double width, double height)
+    private static void DrawPhotoPlaceholder(XGraphics graphics, FontCache fonts, XRect rect)
     {
-        sb.AppendLine("0 0 0 RG");
-        sb.AppendLine("0.8 w");
-        sb.AppendLine($"{Format(x)} {Format(y)} {Format(width)} {Format(height)} re S");
+        graphics.DrawRectangle(new XSolidBrush(XColor.FromArgb(244, 247, 250)), rect);
+        var crossPen = new XPen(XColor.FromArgb(195, 205, 215), 0.4d);
+        graphics.DrawLine(crossPen, rect.Left, rect.Top, rect.Right, rect.Bottom);
+        graphics.DrawLine(crossPen, rect.Right, rect.Top, rect.Left, rect.Bottom);
+        graphics.DrawString(
+            "ẢNH",
+            fonts.Get(7d, bold: true),
+            new XSolidBrush(XColor.FromArgb(85, 100, 115)),
+            rect,
+            XStringFormats.Center);
     }
 
-    private static void Text(
-        StringBuilder sb,
-        string font,
-        double size,
-        double x,
-        double y,
-        string? value)
+    private static FittedText FitText(
+        XGraphics graphics,
+        FontCache fonts,
+        string text,
+        CardTextLine line,
+        double maximumWidth)
     {
-        sb.AppendLine("BT");
-        sb.AppendLine($"/{font} {Format(size)} Tf");
-        sb.AppendLine($"{Format(x)} {Format(y)} Td");
-        sb.AppendLine($"({EscapePdfText(value ?? string.Empty)}) Tj");
-        sb.AppendLine("ET");
+        var size = line.PreferredFontSizePt;
+        XFont font;
+        do
+        {
+            font = fonts.Get(size, line.Bold);
+            if (graphics.MeasureString(text, font).Width <= maximumWidth || size <= line.MinimumFontSizePt)
+            {
+                break;
+            }
+
+            size = Math.Max(line.MinimumFontSizePt, size - 0.2d);
+        }
+        while (true);
+
+        return new FittedText(Ellipsize(graphics, text, font, maximumWidth), font);
     }
 
-    private static string Fit(string? value, int maxChars)
+    private static string Ellipsize(XGraphics graphics, string text, XFont font, double maximumWidth)
     {
-        var text = value ?? string.Empty;
-        if (text.Length <= maxChars)
+        if (graphics.MeasureString(text, font).Width <= maximumWidth)
         {
             return text;
         }
 
-        return text[..Math.Max(0, maxChars - 1)] + ".";
-    }
-
-    private static string Sanitize(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
+        const string suffix = "…";
+        var length = text.Length;
+        while (length > 0)
         {
-            return string.Empty;
-        }
-
-        var text = value.Trim()
-            .Replace('Đ', 'D')
-            .Replace('đ', 'd');
-        var normalized = text.Normalize(NormalizationForm.FormD);
-        var sb = new StringBuilder(normalized.Length);
-        foreach (var c in normalized)
-        {
-            var category = CharUnicodeInfo.GetUnicodeCategory(c);
-            if (category == UnicodeCategory.NonSpacingMark)
+            var candidate = text[..length].TrimEnd() + suffix;
+            if (graphics.MeasureString(candidate, font).Width <= maximumWidth)
             {
-                continue;
+                return candidate;
             }
 
-            sb.Append(c <= 126 ? c : ' ');
+            length--;
         }
 
-        return sb.ToString().Normalize(NormalizationForm.FormC);
+        return suffix;
     }
 
-    private static string EscapePdfText(string value) => value
-        .Replace("\\", "\\\\", StringComparison.Ordinal)
-        .Replace("(", "\\(", StringComparison.Ordinal)
-        .Replace(")", "\\)", StringComparison.Ordinal);
+    private static XRect Rect(double xMm, double yMm, double widthMm, double heightMm)
+        => new(MmPoint(xMm), MmPoint(yMm), MmPoint(widthMm), MmPoint(heightMm));
 
-    private static string Format(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);
+    private static XUnit Mm(double value)
+        => XUnit.FromPoint(MmPoint(value));
 
-    private static void AddObject(List<byte[]> objects, string content)
-        => objects.Add(Encoding.ASCII.GetBytes(content));
+    private static double MmPoint(double value)
+        => HocVienCardLayout.MmToPoint(value);
 
-    private static void AddStreamObject(List<byte[]> objects, string content)
+    private static void EnsureFontSettings()
     {
-        var streamBytes = Encoding.ASCII.GetBytes(content);
-        var header = Encoding.ASCII.GetBytes($"<< /Length {streamBytes.Length} >>\nstream\n");
-        var footer = Encoding.ASCII.GetBytes("\nendstream");
-        var bytes = new byte[header.Length + streamBytes.Length + footer.Length];
-        Buffer.BlockCopy(header, 0, bytes, 0, header.Length);
-        Buffer.BlockCopy(streamBytes, 0, bytes, header.Length, streamBytes.Length);
-        Buffer.BlockCopy(footer, 0, bytes, header.Length + streamBytes.Length, footer.Length);
-        objects.Add(bytes);
-    }
-
-    private static void AddJpegImageObject(List<byte[]> objects, HocVienPhotoPreviewDto photo)
-    {
-        var header = Encoding.ASCII.GetBytes(
-            $"<< /Type /XObject /Subtype /Image /Width {photo.PixelWidth} /Height {photo.PixelHeight} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {photo.Content.Length} >>\nstream\n");
-        var footer = Encoding.ASCII.GetBytes("\nendstream");
-        var bytes = new byte[header.Length + photo.Content.Length + footer.Length];
-        Buffer.BlockCopy(header, 0, bytes, 0, header.Length);
-        Buffer.BlockCopy(photo.Content, 0, bytes, header.Length, photo.Content.Length);
-        Buffer.BlockCopy(footer, 0, bytes, header.Length + photo.Content.Length, footer.Length);
-        objects.Add(bytes);
-    }
-
-    private static byte[] BuildPdf(IReadOnlyList<byte[]> objects)
-    {
-        using var stream = new MemoryStream();
-        WriteAscii(stream, "%PDF-1.4\n");
-        var offsets = new List<long> { 0 };
-
-        for (var index = 0; index < objects.Count; index++)
+        if (_fontSettingsInitialized)
         {
-            offsets.Add(stream.Position);
-            WriteAscii(stream, $"{index + 1} 0 obj\n");
-            stream.Write(objects[index]);
-            WriteAscii(stream, "\nendobj\n");
+            return;
         }
 
-        var xrefOffset = stream.Position;
-        WriteAscii(stream, $"xref\n0 {objects.Count + 1}\n");
-        WriteAscii(stream, "0000000000 65535 f \n");
-        foreach (var offset in offsets.Skip(1))
+        lock (FontSettingsLock)
         {
-            WriteAscii(stream, $"{offset:0000000000} 00000 n \n");
+            if (_fontSettingsInitialized)
+            {
+                return;
+            }
+
+            if (!OperatingSystem.IsWindows())
+            {
+                throw new InvalidOperationException(
+                    "In thẻ hiện yêu cầu font Arial hệ thống Windows. Cần cấu hình font resolver khi triển khai trên hệ điều hành khác.");
+            }
+
+            GlobalFontSettings.UseWindowsFontsUnderWindows = true;
+            _fontSettingsInitialized = true;
+        }
+    }
+
+    private sealed class FontCache
+    {
+        private readonly string _fontFamily;
+        private readonly Dictionary<(int SizeTenths, bool Bold), XFont> _fonts = [];
+        private readonly XPdfFontOptions _options = new(
+            PdfFontEncoding.Unicode,
+            PdfFontEmbedding.EmbedCompleteFontFile);
+
+        public FontCache(string fontFamily)
+        {
+            _fontFamily = fontFamily;
         }
 
-        WriteAscii(
-            stream,
-            $"trailer\n<< /Size {objects.Count + 1} /Root 1 0 R >>\nstartxref\n{xrefOffset}\n%%EOF\n");
-        return stream.ToArray();
+        public XFont Get(double size, bool bold)
+        {
+            var sizeTenths = (int)Math.Round(size * 10d, MidpointRounding.AwayFromZero);
+            var key = (sizeTenths, bold);
+            if (_fonts.TryGetValue(key, out var font))
+            {
+                return font;
+            }
+
+            font = new XFont(
+                _fontFamily,
+                sizeTenths / 10d,
+                bold ? XFontStyleEx.Bold : XFontStyleEx.Regular,
+                _options);
+            _fonts[key] = font;
+            return font;
+        }
     }
 
-    private static void WriteAscii(Stream stream, string value)
-    {
-        var bytes = Encoding.ASCII.GetBytes(value);
-        stream.Write(bytes);
-    }
-
-    private sealed record ImageRef(
-        string Name,
-        int ObjectNumber,
-        int PageIndex,
-        int HocVienIndex,
-        HocVienPhotoPreviewDto Photo);
+    private sealed record FittedText(string Text, XFont Font);
 }
