@@ -17,15 +17,18 @@ public sealed class HocVienService : IHocVienService
     private readonly IHocVienRepository _repository;
     private readonly IHocVienPhotoService _photoService;
     private readonly IHocVienCardPdfGenerator _cardPdfGenerator;
+    private readonly HocVienCardTemplate _cardTemplate;
 
     public HocVienService(
         IHocVienRepository repository,
         IHocVienPhotoService photoService,
-        IHocVienCardPdfGenerator cardPdfGenerator)
+        IHocVienCardPdfGenerator cardPdfGenerator,
+        HocVienCardTemplate cardTemplate)
     {
         _repository = repository;
         _photoService = photoService;
         _cardPdfGenerator = cardPdfGenerator;
+        _cardTemplate = cardTemplate;
     }
 
     public Task<PagedResult<HocVienListItemDto>> SearchAsync(
@@ -90,6 +93,9 @@ public sealed class HocVienService : IHocVienService
             CardsPerPage = HocVienCardLayout.CardsPerPage,
             LayoutName = "A4 ngang 3x4",
             MissingPhotoCount = prepared.MissingPhotoCount,
+            OrganizationLine1 = _cardTemplate.OrganizationLine1,
+            OrganizationLine2 = _cardTemplate.OrganizationLine2,
+            CardTitle = _cardTemplate.Title,
             Items = prepared.Items,
         };
     }

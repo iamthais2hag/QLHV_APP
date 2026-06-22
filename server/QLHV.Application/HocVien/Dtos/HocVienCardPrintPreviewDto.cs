@@ -12,5 +12,11 @@ public sealed class HocVienCardPrintPreviewDto
 
     public int MissingPhotoCount { get; init; }
 
+    public string OrganizationLine1 { get; init; } = string.Empty;
+
+    public string OrganizationLine2 { get; init; } = string.Empty;
+
+    public string CardTitle { get; init; } = string.Empty;
+
     public IReadOnlyList<HocVienCardPrintPreviewItemDto> Items { get; init; } = [];
 }

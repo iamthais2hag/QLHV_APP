@@ -78,6 +78,9 @@ public sealed class HocVienCardPrintServiceTests
         Assert.Equal(1, result.TotalStudents);
         Assert.Equal(1, result.TotalPages);
         Assert.Equal(12, result.CardsPerPage);
+        Assert.Equal(HocVienCardTemplate.Default.OrganizationLine1, result.OrganizationLine1);
+        Assert.Equal(HocVienCardTemplate.Default.OrganizationLine2, result.OrganizationLine2);
+        Assert.Equal(HocVienCardTemplate.Default.Title, result.CardTitle);
     }
 
     [Fact]
@@ -233,7 +236,7 @@ public sealed class HocVienCardPrintServiceTests
         FakeRepository repository,
         FakePdfGenerator pdf,
         FakePhotoService? photo = null)
-        => new(repository, photo ?? new FakePhotoService(), pdf);
+        => new(repository, photo ?? new FakePhotoService(), pdf, HocVienCardTemplate.Default);
 
     private static HocVienListItemDto CreateHocVien(int id) => new()
     {
