@@ -38,14 +38,14 @@ public sealed class HocVienCardLayoutTests
     }
 
     [Fact]
-    public void Official_header_is_regular_ten_point_and_body_text_remains_bold()
+    public void Official_header_uses_regular_first_line_and_bold_second_line()
     {
         var lines = HocVienCardTemplate.Default.TextLines.ToDictionary(line => line.Kind);
 
         Assert.Equal(10d, lines[CardTextKind.OrganizationLine1].PreferredFontSizePt);
         Assert.False(lines[CardTextKind.OrganizationLine1].Bold);
         Assert.Equal(10d, lines[CardTextKind.OrganizationLine2].PreferredFontSizePt);
-        Assert.False(lines[CardTextKind.OrganizationLine2].Bold);
+        Assert.True(lines[CardTextKind.OrganizationLine2].Bold);
 
         Assert.Equal(13d, lines[CardTextKind.Title].PreferredFontSizePt);
         Assert.True(lines[CardTextKind.Title].Bold);

@@ -1065,6 +1065,10 @@
   white-space: nowrap;
 }
 
+.card-preview__header > div:nth-child(2) {
+  font-weight: 700;
+}
+
 .card-preview__body {
   display: grid;
   grid-template-columns: 35.294% 64.706%;

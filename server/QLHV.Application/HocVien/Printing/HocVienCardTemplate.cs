@@ -54,7 +54,7 @@ public sealed class HocVienCardTemplate
             new(TextPaddingMm, 5d, HocVienCardLayout.CardWidthMm - 2d * TextPaddingMm, 5d),
             10d,
             8.5d,
-            false),
+            true),
         new(
             CardTextKind.Title,
             new(HocVienCardLayout.PhotoCellWidthMm + TextPaddingMm, 14d,
