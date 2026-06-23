@@ -64,9 +64,6 @@ public sealed class HocVienCardPdfGenerator : IHocVienCardPdfGenerator
         HocVienListItemDto student,
         HocVienPhotoPreviewDto? photo)
     {
-        var cardRect = Rect(slot.XMm, slot.YMm, slot.WidthMm, slot.HeightMm);
-        graphics.DrawRectangle(new XPen(XColors.Black, 0.65d), cardRect);
-
         var photoRect = Rect(
             slot.XMm + _template.PhotoRect.XMm,
             slot.YMm + _template.PhotoRect.YMm,
@@ -78,30 +75,20 @@ public sealed class HocVienCardPdfGenerator : IHocVienCardPdfGenerator
             DrawPhotoPlaceholder(graphics, fonts, photoRect);
         }
 
-        graphics.DrawRectangle(new XPen(XColors.Black, 0.55d), photoRect);
-
         var content = _template.CreateContent(student);
-        var textLeftMm = slot.XMm + _template.TextLeftMm;
-        var textWidthMm = slot.WidthMm - _template.TextLeftMm - _template.TextRightPaddingMm;
-
-        for (var index = 0; index < _template.TextLines.Count; index++)
+        foreach (var line in _template.TextLines)
         {
-            var line = _template.TextLines[index];
             var text = content.GetText(line.Kind);
             if (string.IsNullOrWhiteSpace(text))
             {
                 continue;
             }
 
-            var nextTopMm = index + 1 < _template.TextLines.Count
-                ? _template.TextLines[index + 1].TopMm
-                : HocVienCardLayout.CardHeightMm - 3d;
-            var lineHeightMm = Math.Max(3d, nextTopMm - line.TopMm);
             var lineRect = Rect(
-                textLeftMm,
-                slot.YMm + line.TopMm,
-                textWidthMm,
-                lineHeightMm);
+                slot.XMm + line.Bounds.XMm,
+                slot.YMm + line.Bounds.YMm,
+                line.Bounds.WidthMm,
+                line.Bounds.HeightMm);
             var fitted = FitText(graphics, fonts, text, line, lineRect.Width);
 
             graphics.DrawString(
@@ -109,8 +96,27 @@ public sealed class HocVienCardPdfGenerator : IHocVienCardPdfGenerator
                 fitted.Font,
                 XBrushes.Black,
                 lineRect,
-                XStringFormats.CenterLeft);
+                XStringFormats.Center);
         }
+
+        var separatorPen = new XPen(XColors.Black, 0.55d);
+        var headerBottom = slot.YMm + _template.HeaderRect.HeightMm;
+        var photoRight = slot.XMm + _template.PhotoRect.XMm + _template.PhotoRect.WidthMm;
+        graphics.DrawLine(
+            separatorPen,
+            MmPoint(slot.XMm),
+            MmPoint(headerBottom),
+            MmPoint(slot.XMm + slot.WidthMm),
+            MmPoint(headerBottom));
+        graphics.DrawLine(
+            separatorPen,
+            MmPoint(photoRight),
+            MmPoint(headerBottom),
+            MmPoint(photoRight),
+            MmPoint(slot.YMm + slot.HeightMm));
+
+        var cardRect = Rect(slot.XMm, slot.YMm, slot.WidthMm, slot.HeightMm);
+        graphics.DrawRectangle(new XPen(XColors.Black, 0.65d), cardRect);
     }
 
     private static bool TryDrawPhoto(
@@ -167,18 +173,19 @@ public sealed class HocVienCardPdfGenerator : IHocVienCardPdfGenerator
             XGraphicsUnit.Point);
     }
 
-    private static void DrawPhotoPlaceholder(XGraphics graphics, FontCache fonts, XRect rect)
+    private void DrawPhotoPlaceholder(XGraphics graphics, FontCache fonts, XRect rect)
     {
         graphics.DrawRectangle(new XSolidBrush(XColor.FromArgb(244, 247, 250)), rect);
-        var crossPen = new XPen(XColor.FromArgb(195, 205, 215), 0.4d);
-        graphics.DrawLine(crossPen, rect.Left, rect.Top, rect.Right, rect.Bottom);
-        graphics.DrawLine(crossPen, rect.Right, rect.Top, rect.Left, rect.Bottom);
-        graphics.DrawString(
-            "ẢNH",
-            fonts.Get(7d, bold: true),
-            new XSolidBrush(XColor.FromArgb(85, 100, 115)),
-            rect,
-            XStringFormats.Center);
+        var lineHeight = rect.Height / Math.Max(1, _template.MissingPhotoPlaceholderLines.Count);
+        for (var index = 0; index < _template.MissingPhotoPlaceholderLines.Count; index++)
+        {
+            graphics.DrawString(
+                _template.MissingPhotoPlaceholderLines[index],
+                fonts.Get(8.5d, bold: index == 0),
+                new XSolidBrush(XColor.FromArgb(85, 100, 115)),
+                new XRect(rect.X, rect.Y + index * lineHeight, rect.Width, lineHeight),
+                XStringFormats.Center);
+        }
     }
 
     private static FittedText FitText(
@@ -254,7 +261,7 @@ public sealed class HocVienCardPdfGenerator : IHocVienCardPdfGenerator
             if (!OperatingSystem.IsWindows())
             {
                 throw new InvalidOperationException(
-                    "In thẻ hiện yêu cầu font Arial hệ thống Windows. Cần cấu hình font resolver khi triển khai trên hệ điều hành khác.");
+                    "In thẻ hiện yêu cầu font Times New Roman hệ thống Windows. Cần cấu hình font resolver khi triển khai trên hệ điều hành khác.");
             }
 
             GlobalFontSettings.UseWindowsFontsUnderWindows = true;

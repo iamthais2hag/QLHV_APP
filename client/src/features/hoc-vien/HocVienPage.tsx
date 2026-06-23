@@ -63,7 +63,13 @@ function HocVienCardPreviewPhoto({ item }: { item: HocVienCardPrintPreviewItem }
   }, [item.hocVienId, item.hasPhoto]);
 
   if (failed) {
-    return <span className="card-preview__photo-placeholder">ẢNH</span>;
+    return (
+      <span className="card-preview__photo-placeholder">
+        <strong>Ảnh màu</strong>
+        <span>3 cm x 4 cm</span>
+        <span>chưa có ảnh</span>
+      </span>
+    );
   }
 
   return (
@@ -88,35 +94,38 @@ function HocVienCardSheetPreview({ preview }: { preview: HocVienCardPrintPreview
       </div>
       <div className="card-sheet-preview__viewport">
         <div className="card-sheet-preview__page">
-          {slots.map((item, index) => {
-            if (!item) {
-              return <div className="card-preview card-preview--empty" key={`empty-${index}`} />;
-            }
+          <div className="card-sheet-preview__grid">
+            {slots.map((item, index) => {
+              if (!item) {
+                return <div className="card-preview card-preview--empty" key={`empty-${index}`} />;
+              }
 
-            const trainingRank = item.maHangDT ?? item.hangGplxHoc ?? '';
-            const course = [item.tenKhoa, item.maKhoa].filter(Boolean).join(' - ');
+              const trainingRank = item.hangGplxHoc ?? item.maHangDT ?? '';
 
-            return (
-              <article className="card-preview" key={item.hocVienId}>
-                <div className="card-preview__photo">
-                  <HocVienCardPreviewPhoto item={item} />
-                </div>
-                <div className="card-preview__content">
-                  <div className="card-preview__organization">{preview.organizationLine1}</div>
-                  <div className="card-preview__organization">{preview.organizationLine2}</div>
-                  <div className="card-preview__title">{preview.cardTitle}</div>
-                  <div className="card-preview__name" title={item.hoVaTen}>
-                    {item.hoVaTen}
+              return (
+                <article className="card-preview" key={item.hocVienId}>
+                  <header className="card-preview__header">
+                    <div>{preview.organizationLine1}</div>
+                    <div>{preview.organizationLine2}</div>
+                  </header>
+                  <div className="card-preview__body">
+                    <div className="card-preview__photo">
+                      <HocVienCardPreviewPhoto item={item} />
+                    </div>
+                    <div className="card-preview__content">
+                      <div className="card-preview__title">{preview.cardTitle}</div>
+                      <div className="card-preview__name" title={item.hoVaTen}>
+                        {item.hoVaTen.toLocaleUpperCase('vi-VN')}
+                      </div>
+                      <div className="card-preview__rank" title={trainingRank}>
+                        Tập lái xe hạng: {trainingRank}
+                      </div>
+                    </div>
                   </div>
-                  <div className="card-preview__detail">TẬP LÁI XE HẠNG: {trainingRank}</div>
-                  <div className="card-preview__detail" title={course}>{course}</div>
-                  <div className="card-preview__code" title={item.maDangKy}>
-                    MÃ ĐK: {item.maDangKy}
-                  </div>
-                </div>
-              </article>
-            );
-          })}
+                </article>
+              );
+            })}
+          </div>
         </div>
       </div>
     </section>
