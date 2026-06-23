@@ -22,6 +22,8 @@ public sealed class HocVienCardPrintRequest
 
     public string? TitleLine2 { get; init; }
 
+    public HocVienCardTypographyRequest? Typography { get; init; }
+
     public HocVienCardPrintRequest Normalized() => new()
     {
         Mode = string.IsNullOrWhiteSpace(Mode) ? null : Mode.Trim(),
@@ -38,6 +40,7 @@ public sealed class HocVienCardPrintRequest
         SortBy = string.IsNullOrWhiteSpace(SortBy) ? "current" : SortBy.Trim(),
         TitleLine1 = NormalizeTitle(TitleLine1),
         TitleLine2 = NormalizeTitle(TitleLine2),
+        Typography = Typography?.Normalized(),
     };
 
     private static string? NormalizeTitle(string? value)
@@ -51,5 +54,68 @@ public sealed class HocVienCardPrintRequest
         return trimmed.Length <= MaxTitleLength
             ? trimmed
             : trimmed[..MaxTitleLength];
+    }
+}
+
+public sealed class HocVienCardTypographyRequest
+{
+    public HocVienCardTextStyleRequest? OrganizationLine1 { get; init; }
+
+    public HocVienCardTextStyleRequest? OrganizationLine2 { get; init; }
+
+    public HocVienCardTextStyleRequest? CardTitle { get; init; }
+
+    public HocVienCardTextStyleRequest? StudentName { get; init; }
+
+    public HocVienCardTextStyleRequest? TrainingRank { get; init; }
+
+    public HocVienCardTypographyRequest Normalized() => new()
+    {
+        OrganizationLine1 = OrganizationLine1?.Normalized(),
+        OrganizationLine2 = OrganizationLine2?.Normalized(),
+        CardTitle = CardTitle?.Normalized(),
+        StudentName = StudentName?.Normalized(),
+        TrainingRank = TrainingRank?.Normalized(),
+    };
+}
+
+public sealed class HocVienCardTextStyleRequest
+{
+    public const double MinimumFontSizePt = 6d;
+    public const double MaximumFontSizePt = 24d;
+
+    private static readonly string[] AllowedFontFamilies =
+    [
+        "Times New Roman",
+        "Arial",
+        "Tahoma",
+    ];
+
+    public string? FontFamily { get; init; }
+
+    public double? FontSizePt { get; init; }
+
+    public bool? Bold { get; init; }
+
+    public bool? Uppercase { get; init; }
+
+    public bool? Italic { get; init; }
+
+    public HocVienCardTextStyleRequest Normalized()
+    {
+        var fontFamily = AllowedFontFamilies.FirstOrDefault(
+            candidate => string.Equals(candidate, FontFamily?.Trim(), StringComparison.OrdinalIgnoreCase));
+        double? fontSize = FontSizePt is { } value && double.IsFinite(value)
+            ? Math.Clamp(value, MinimumFontSizePt, MaximumFontSizePt)
+            : null;
+
+        return new HocVienCardTextStyleRequest
+        {
+            FontFamily = fontFamily,
+            FontSizePt = fontSize,
+            Bold = Bold,
+            Uppercase = Uppercase,
+            Italic = Italic,
+        };
     }
 }

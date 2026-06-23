@@ -33,6 +33,23 @@ export type HocVienExportParams = Omit<HocVienSearchParams, 'page' | 'pageSize'>
 export type HocVienPrintMode = 'selected' | 'single' | 'course' | 'teacherInCourse';
 export type HocVienMissingPhotoMode = 'placeholder' | 'skip';
 export type HocVienPrintSortBy = 'current' | 'hoTen' | 'maDK';
+export type HocVienCardFontFamily = 'Times New Roman' | 'Arial' | 'Tahoma';
+
+export interface HocVienCardTextStyleSettings {
+  fontFamily: HocVienCardFontFamily;
+  fontSizePt: number;
+  bold: boolean;
+  uppercase: boolean;
+  italic: boolean;
+}
+
+export interface HocVienCardTypographySettings {
+  organizationLine1: HocVienCardTextStyleSettings;
+  organizationLine2: HocVienCardTextStyleSettings;
+  cardTitle: HocVienCardTextStyleSettings;
+  studentName: HocVienCardTextStyleSettings;
+  trainingRank: HocVienCardTextStyleSettings;
+}
 
 export interface HocVienPrintCardsRequest {
   mode: HocVienPrintMode;
@@ -44,6 +61,7 @@ export interface HocVienPrintCardsRequest {
   sortBy?: HocVienPrintSortBy;
   titleLine1?: string;
   titleLine2?: string;
+  typography?: HocVienCardTypographySettings;
 }
 
 export interface HocVienCardPrintPreviewItem {

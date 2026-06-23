@@ -29,7 +29,8 @@ public sealed class HocVienCardPdfGenerator : IHocVienCardPdfGenerator
         document.Info.Subject = "A4 ngang, 12 thẻ mỗi trang";
         document.Info.Creator = "QLHV_APP";
 
-        var fonts = new FontCache(_template.FontFamily);
+        var fonts = new FontCache();
+        var textLines = _template.ResolveTextLines(titleOptions);
         var rows = hocViens.ToArray();
         var pageCount = HocVienCardLayout.GetPageCount(rows.Length);
 
@@ -49,7 +50,7 @@ public sealed class HocVienCardPdfGenerator : IHocVienCardPdfGenerator
                 var slot = HocVienCardLayout.GetSlot(studentIndex - start);
                 HocVienPhotoPreviewDto? photo = null;
                 photosByHocVienId?.TryGetValue(student.HocVienId, out photo);
-                DrawCard(graphics, fonts, slot, student, photo, titleOptions);
+                DrawCard(graphics, fonts, slot, student, photo, titleOptions, textLines);
             }
         }
 
@@ -64,7 +65,8 @@ public sealed class HocVienCardPdfGenerator : IHocVienCardPdfGenerator
         CardSlot slot,
         HocVienListItemDto student,
         HocVienPhotoPreviewDto? photo,
-        HocVienCardTitleOptions? titleOptions)
+        HocVienCardTitleOptions? titleOptions,
+        IReadOnlyList<CardTextLine> textLines)
     {
         var photoRect = Rect(
             slot.XMm + _template.PhotoRect.XMm,
@@ -78,7 +80,7 @@ public sealed class HocVienCardPdfGenerator : IHocVienCardPdfGenerator
         }
 
         var content = _template.CreateContent(student, titleOptions);
-        foreach (var line in _template.TextLines)
+        foreach (var line in textLines)
         {
             var text = content.GetText(line.Kind);
             if (string.IsNullOrWhiteSpace(text))
@@ -183,7 +185,7 @@ public sealed class HocVienCardPdfGenerator : IHocVienCardPdfGenerator
         {
             graphics.DrawString(
                 _template.MissingPhotoPlaceholderLines[index],
-                fonts.Get(8.5d, bold: index == 0),
+                fonts.Get(_template.FontFamily, 8.5d, bold: index == 0, italic: false),
                 new XSolidBrush(XColor.FromArgb(85, 100, 115)),
                 new XRect(rect.X, rect.Y + index * lineHeight, rect.Width, lineHeight),
                 XStringFormats.Center);
@@ -201,7 +203,7 @@ public sealed class HocVienCardPdfGenerator : IHocVienCardPdfGenerator
         XFont font;
         do
         {
-            font = fonts.Get(size, line.Bold);
+            font = fonts.Get(line.FontFamily, size, line.Bold, line.Italic);
             if (graphics.MeasureString(text, font).Width <= maximumWidth || size <= line.MinimumFontSizePt)
             {
                 break;
@@ -273,31 +275,28 @@ public sealed class HocVienCardPdfGenerator : IHocVienCardPdfGenerator
 
     private sealed class FontCache
     {
-        private readonly string _fontFamily;
-        private readonly Dictionary<(int SizeTenths, bool Bold), XFont> _fonts = [];
+        private readonly Dictionary<(string FontFamily, int SizeTenths, bool Bold, bool Italic), XFont> _fonts = [];
         private readonly XPdfFontOptions _options = new(
             PdfFontEncoding.Unicode,
             PdfFontEmbedding.EmbedCompleteFontFile);
 
-        public FontCache(string fontFamily)
-        {
-            _fontFamily = fontFamily;
-        }
-
-        public XFont Get(double size, bool bold)
+        public XFont Get(string fontFamily, double size, bool bold, bool italic)
         {
             var sizeTenths = (int)Math.Round(size * 10d, MidpointRounding.AwayFromZero);
-            var key = (sizeTenths, bold);
+            var key = (fontFamily, sizeTenths, bold, italic);
             if (_fonts.TryGetValue(key, out var font))
             {
                 return font;
             }
 
-            font = new XFont(
-                _fontFamily,
-                sizeTenths / 10d,
-                bold ? XFontStyleEx.Bold : XFontStyleEx.Regular,
-                _options);
+            var style = (bold, italic) switch
+            {
+                (true, true) => XFontStyleEx.BoldItalic,
+                (true, false) => XFontStyleEx.Bold,
+                (false, true) => XFontStyleEx.Italic,
+                _ => XFontStyleEx.Regular,
+            };
+            font = new XFont(fontFamily, sizeTenths / 10d, style, _options);
             _fonts[key] = font;
             return font;
         }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import {
   getHocVienHangHocLookups,
   getHocVienKhoaLookups,
@@ -10,6 +11,9 @@ import {
 import type {
   HocVienCardPrintPreview,
   HocVienCardPrintPreviewItem,
+  HocVienCardFontFamily,
+  HocVienCardTextStyleSettings,
+  HocVienCardTypographySettings,
   HocVienHangHocLookup,
   HocVienKhoaLookup,
   HocVienListItem,
@@ -23,6 +27,7 @@ import { formatGioiTinh, formatNgaySinh } from './utils';
 const PAGE_SIZE = 20;
 const TITLE_MAX_LENGTH = 100;
 const TITLE_STORAGE_KEY = 'qlhv.hoc-vien-card-titles.v1';
+const FONT_FAMILIES: HocVienCardFontFamily[] = ['Times New Roman', 'Arial', 'Tahoma'];
 const DEFAULT_TITLES = {
   titleLine1: 'SỞ XÂY DỰNG TỈNH GIA LAI',
   titleLine2: 'TRUNG TÂM ĐÀO TẠO LÁI XE THÀNH CÔNG',
@@ -35,28 +40,96 @@ interface CardTitles {
   titleLine2: string;
 }
 
+interface CardPrintSettings extends CardTitles {
+  typography: HocVienCardTypographySettings;
+}
+
+type TypographyLineKey = keyof HocVienCardTypographySettings;
+
 interface PdfPreviewState {
   blob: Blob;
   fileName: string;
   url: string;
 }
 
-function normalizeTitle(value: string, fallback: string): string {
-  const normalized = value.trim() || fallback;
-  return normalized.slice(0, TITLE_MAX_LENGTH).toLocaleUpperCase('vi-VN');
+function createOfficialTypography(): HocVienCardTypographySettings {
+  return {
+    organizationLine1: officialTextStyle(10, false),
+    organizationLine2: officialTextStyle(10, false),
+    cardTitle: officialTextStyle(13, true),
+    studentName: officialTextStyle(14, true),
+    trainingRank: officialTextStyle(14, true),
+  };
 }
 
-function loadSavedTitles(): CardTitles {
+function officialTextStyle(fontSizePt: number, bold: boolean): HocVienCardTextStyleSettings {
+  return {
+    fontFamily: 'Times New Roman',
+    fontSizePt,
+    bold,
+    uppercase: true,
+    italic: false,
+  };
+}
+
+function createOfficialSettings(): CardPrintSettings {
+  return { ...DEFAULT_TITLES, typography: createOfficialTypography() };
+}
+
+function normalizeTitle(value: string, fallback: string): string {
+  const normalized = value.trim() || fallback;
+  return normalized.slice(0, TITLE_MAX_LENGTH);
+}
+
+function normalizeTextStyle(
+  value: Partial<HocVienCardTextStyleSettings> | undefined,
+  fallback: HocVienCardTextStyleSettings,
+): HocVienCardTextStyleSettings {
+  const fontFamily = FONT_FAMILIES.includes(value?.fontFamily as HocVienCardFontFamily)
+    ? value?.fontFamily as HocVienCardFontFamily
+    : fallback.fontFamily;
+  const requestedSize = Number(value?.fontSizePt);
+  const fontSizePt = Number.isFinite(requestedSize)
+    ? Math.min(24, Math.max(6, requestedSize))
+    : fallback.fontSizePt;
+
+  return {
+    fontFamily,
+    fontSizePt,
+    bold: typeof value?.bold === 'boolean' ? value.bold : fallback.bold,
+    uppercase: typeof value?.uppercase === 'boolean' ? value.uppercase : fallback.uppercase,
+    italic: typeof value?.italic === 'boolean' ? value.italic : fallback.italic,
+  };
+}
+
+function normalizeTypography(
+  value?: Partial<HocVienCardTypographySettings>,
+): HocVienCardTypographySettings {
+  const official = createOfficialTypography();
+  return {
+    organizationLine1: normalizeTextStyle(value?.organizationLine1, official.organizationLine1),
+    organizationLine2: normalizeTextStyle(value?.organizationLine2, official.organizationLine2),
+    cardTitle: normalizeTextStyle(value?.cardTitle, official.cardTitle),
+    studentName: normalizeTextStyle(value?.studentName, official.studentName),
+    trainingRank: normalizeTextStyle(value?.trainingRank, official.trainingRank),
+  };
+}
+
+function normalizeSettings(value: Partial<CardPrintSettings>): CardPrintSettings {
+  return {
+    titleLine1: normalizeTitle(value.titleLine1 ?? '', DEFAULT_TITLES.titleLine1),
+    titleLine2: normalizeTitle(value.titleLine2 ?? '', DEFAULT_TITLES.titleLine2),
+    typography: normalizeTypography(value.typography),
+  };
+}
+
+function loadSavedSettings(): CardPrintSettings {
   try {
     const raw = window.localStorage.getItem(TITLE_STORAGE_KEY);
-    if (!raw) return DEFAULT_TITLES;
-    const parsed = JSON.parse(raw) as Partial<CardTitles>;
-    return {
-      titleLine1: normalizeTitle(parsed.titleLine1 ?? '', DEFAULT_TITLES.titleLine1),
-      titleLine2: normalizeTitle(parsed.titleLine2 ?? '', DEFAULT_TITLES.titleLine2),
-    };
+    if (!raw) return createOfficialSettings();
+    return normalizeSettings(JSON.parse(raw) as Partial<CardPrintSettings>);
   } catch {
-    return DEFAULT_TITLES;
+    return createOfficialSettings();
   }
 }
 
@@ -65,7 +138,19 @@ function formatTrainingRank(hangGplxHoc: string | null, maHangDT: string | null)
   while (/^(hạng|hang)\s+/i.test(value)) {
     value = value.replace(/^(hạng|hang)\s+/i, '').trimStart();
   }
-  return value ? `TẬP LÁI XE HẠNG: ${value.toLocaleUpperCase('vi-VN')}` : '';
+  return value ? `Tập lái xe hạng: ${value}` : '';
+}
+
+function toPreviewTextStyle(style: HocVienCardTextStyleSettings): CSSProperties {
+  const minimumPx = Math.max(5, Math.round(style.fontSizePt * 0.55));
+  const viewportScale = (style.fontSizePt * 0.077).toFixed(3);
+  return {
+    fontFamily: `"${style.fontFamily}", serif`,
+    fontSize: `clamp(${minimumPx}px, ${viewportScale}vw, ${style.fontSizePt}px)`,
+    fontStyle: style.italic ? 'italic' : 'normal',
+    fontWeight: style.bold ? 700 : 400,
+    textTransform: style.uppercase ? 'uppercase' : 'none',
+  };
 }
 
 function formatPhotoStatus(status: string): string {
@@ -113,7 +198,81 @@ function CardPhoto({ item }: { item: HocVienCardPrintPreviewItem }) {
   );
 }
 
-function CardSheetPreview({ preview }: { preview: HocVienCardPrintPreview }) {
+function TypographyControlRow({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: HocVienCardTextStyleSettings;
+  onChange: (value: HocVienCardTextStyleSettings) => void;
+}) {
+  return (
+    <div className="card-typography-row">
+      <strong>{label}</strong>
+      <label>
+        <span>Phông chữ</span>
+        <select
+          className="field__input"
+          value={value.fontFamily}
+          onChange={(event) => onChange({
+            ...value,
+            fontFamily: event.target.value as HocVienCardFontFamily,
+          })}
+        >
+          {FONT_FAMILIES.map((font) => <option value={font} key={font}>{font}</option>)}
+        </select>
+      </label>
+      <label>
+        <span>Cỡ chữ (pt)</span>
+        <input
+          className="field__input"
+          type="number"
+          min="6"
+          max="24"
+          step="0.5"
+          value={value.fontSizePt}
+          onChange={(event) => {
+            const fontSizePt = Number(event.target.value);
+            if (Number.isFinite(fontSizePt)) onChange({ ...value, fontSizePt });
+          }}
+        />
+      </label>
+      <label className="card-typography-row__toggle">
+        <input
+          type="checkbox"
+          checked={value.bold}
+          onChange={(event) => onChange({ ...value, bold: event.target.checked })}
+        />
+        Đậm
+      </label>
+      <label className="card-typography-row__toggle">
+        <input
+          type="checkbox"
+          checked={value.uppercase}
+          onChange={(event) => onChange({ ...value, uppercase: event.target.checked })}
+        />
+        In hoa
+      </label>
+      <label className="card-typography-row__toggle">
+        <input
+          type="checkbox"
+          checked={value.italic}
+          onChange={(event) => onChange({ ...value, italic: event.target.checked })}
+        />
+        Nghiêng
+      </label>
+    </div>
+  );
+}
+
+function CardSheetPreview({
+  preview,
+  typography,
+}: {
+  preview: HocVienCardPrintPreview;
+  typography: HocVienCardTypographySettings;
+}) {
   const slots = Array.from(
     { length: 12 },
     (_, index) => preview.items.slice(0, 12)[index] ?? null,
@@ -131,17 +290,33 @@ function CardSheetPreview({ preview }: { preview: HocVienCardPrintPreview }) {
             {slots.map((item, index) => item ? (
               <article className="card-preview" key={item.hocVienId}>
                 <header className="card-preview__header">
-                  <div>{preview.organizationLine1}</div>
-                  <div>{preview.organizationLine2}</div>
+                  <div style={toPreviewTextStyle(typography.organizationLine1)}>
+                    {preview.organizationLine1}
+                  </div>
+                  <div style={toPreviewTextStyle(typography.organizationLine2)}>
+                    {preview.organizationLine2}
+                  </div>
                 </header>
                 <div className="card-preview__body">
                   <div className="card-preview__photo"><CardPhoto item={item} /></div>
                   <div className="card-preview__content">
-                    <div className="card-preview__title">{preview.cardTitle}</div>
-                    <div className="card-preview__name" title={item.hoVaTen}>
-                      {item.hoVaTen.toLocaleUpperCase('vi-VN')}
+                    <div
+                      className="card-preview__title"
+                      style={toPreviewTextStyle(typography.cardTitle)}
+                    >
+                      {preview.cardTitle}
                     </div>
-                    <div className="card-preview__rank">
+                    <div
+                      className="card-preview__name"
+                      style={toPreviewTextStyle(typography.studentName)}
+                      title={item.hoVaTen}
+                    >
+                      {item.hoVaTen}
+                    </div>
+                    <div
+                      className="card-preview__rank"
+                      style={toPreviewTextStyle(typography.trainingRank)}
+                    >
                       {formatTrainingRank(item.hangGplxHoc, item.maHangDT)}
                     </div>
                   </div>
@@ -172,9 +347,9 @@ function ResultPhoto({ row }: { row: HocVienListItem }) {
 }
 
 export default function HocVienCardPrintPage() {
-  const initialTitles = loadSavedTitles();
-  const [titleInputs, setTitleInputs] = useState<CardTitles>(initialTitles);
-  const [savedTitles, setSavedTitles] = useState<CardTitles>(initialTitles);
+  const [initialSettings] = useState<CardPrintSettings>(() => loadSavedSettings());
+  const [settingsInputs, setSettingsInputs] = useState<CardPrintSettings>(initialSettings);
+  const [savedSettings, setSavedSettings] = useState<CardPrintSettings>(initialSettings);
   const [settingsMessage, setSettingsMessage] = useState('');
 
   const [keyword, setKeyword] = useState('');
@@ -349,22 +524,38 @@ export default function HocVienCardPrintPage() {
   }
 
   function handleSaveSettings() {
-    const normalized = {
-      titleLine1: normalizeTitle(titleInputs.titleLine1, DEFAULT_TITLES.titleLine1),
-      titleLine2: normalizeTitle(titleInputs.titleLine2, DEFAULT_TITLES.titleLine2),
-    };
+    const normalized = normalizeSettings(settingsInputs);
     window.localStorage.setItem(TITLE_STORAGE_KEY, JSON.stringify(normalized));
-    setTitleInputs(normalized);
-    setSavedTitles(normalized);
+    setSettingsInputs(normalized);
+    setSavedSettings(normalized);
     setSettingsMessage('Đã lưu thiết lập trên trình duyệt này.');
   }
 
-  function withTitles(request: HocVienPrintCardsRequest): HocVienPrintCardsRequest {
-    return { ...request, ...savedTitles };
+  function handleRestoreOfficialTypography() {
+    setSettingsInputs((current) => ({
+      ...current,
+      typography: createOfficialTypography(),
+    }));
+    setSettingsMessage('Đã khôi phục kiểu chữ đúng quy cách. Nhấn Lưu thiết lập để áp dụng.');
+  }
+
+  function updateTypography(
+    key: TypographyLineKey,
+    value: HocVienCardTextStyleSettings,
+  ) {
+    setSettingsInputs((current) => ({
+      ...current,
+      typography: { ...current.typography, [key]: value },
+    }));
+    setSettingsMessage('');
+  }
+
+  function withSettings(request: HocVienPrintCardsRequest): HocVienPrintCardsRequest {
+    return { ...request, ...savedSettings };
   }
 
   function openPrint(request: HocVienPrintCardsRequest) {
-    const titledRequest = withTitles(request);
+    const titledRequest = withSettings(request);
     setPrintRequest(titledRequest);
     setMissingPhotoMode('placeholder');
     setSortBy('current');
@@ -473,12 +664,21 @@ export default function HocVienCardPrintPage() {
       <section className="panel card-title-settings">
         <div className="card-title-settings__heading">
           <div>
-            <strong>Thiết lập tiêu đề thẻ</strong>
-            <p>Lưu trên trình duyệt hiện tại, không ghi vào cơ sở dữ liệu.</p>
+            <strong>Thiết lập nội dung và kiểu chữ thẻ</strong>
+            <p>Định dạng theo từng dòng, lưu trên trình duyệt và không ghi cơ sở dữ liệu.</p>
           </div>
-          <button type="button" className="btn btn--primary" onClick={handleSaveSettings}>
-            Lưu thiết lập
-          </button>
+          <div className="card-title-settings__actions">
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={handleRestoreOfficialTypography}
+            >
+              Khôi phục đúng quy cách
+            </button>
+            <button type="button" className="btn btn--primary" onClick={handleSaveSettings}>
+              Lưu thiết lập
+            </button>
+          </div>
         </div>
         <div className="card-title-settings__fields">
           <label className="field">
@@ -486,9 +686,9 @@ export default function HocVienCardPrintPage() {
             <input
               className="field__input"
               maxLength={TITLE_MAX_LENGTH}
-              value={titleInputs.titleLine1}
+              value={settingsInputs.titleLine1}
               onChange={(event) => {
-                setTitleInputs((current) => ({ ...current, titleLine1: event.target.value }));
+                setSettingsInputs((current) => ({ ...current, titleLine1: event.target.value }));
                 setSettingsMessage('');
               }}
             />
@@ -498,13 +698,44 @@ export default function HocVienCardPrintPage() {
             <input
               className="field__input"
               maxLength={TITLE_MAX_LENGTH}
-              value={titleInputs.titleLine2}
+              value={settingsInputs.titleLine2}
               onChange={(event) => {
-                setTitleInputs((current) => ({ ...current, titleLine2: event.target.value }));
+                setSettingsInputs((current) => ({ ...current, titleLine2: event.target.value }));
                 setSettingsMessage('');
               }}
             />
           </label>
+        </div>
+        <div className="card-typography-settings">
+          <div className="card-typography-settings__heading">
+            <strong>Kiểu chữ theo từng dòng</strong>
+            <span>Bỏ chọn Nghiêng để dùng chữ đứng.</span>
+          </div>
+          <TypographyControlRow
+            label="Tiêu đề 1"
+            value={settingsInputs.typography.organizationLine1}
+            onChange={(value) => updateTypography('organizationLine1', value)}
+          />
+          <TypographyControlRow
+            label="Tiêu đề 2"
+            value={settingsInputs.typography.organizationLine2}
+            onChange={(value) => updateTypography('organizationLine2', value)}
+          />
+          <TypographyControlRow
+            label="HỌC VIÊN TẬP LÁI XE"
+            value={settingsInputs.typography.cardTitle}
+            onChange={(value) => updateTypography('cardTitle', value)}
+          />
+          <TypographyControlRow
+            label="Họ tên học viên"
+            value={settingsInputs.typography.studentName}
+            onChange={(value) => updateTypography('studentName', value)}
+          />
+          <TypographyControlRow
+            label="Hạng học"
+            value={settingsInputs.typography.trainingRank}
+            onChange={(value) => updateTypography('trainingRank', value)}
+          />
         </div>
         {settingsMessage && <div className="card-title-settings__message">{settingsMessage}</div>}
       </section>
@@ -682,7 +913,10 @@ export default function HocVienCardPrintPage() {
               <span>Thẻ/trang: {printPreview.cardsPerPage}</span><span>Layout: {printPreview.layoutName}</span>
               {printPreview.missingPhotoCount > 0 && <strong>Cảnh báo: {printPreview.missingPhotoCount} học viên thiếu ảnh</strong>}
             </div>
-            <CardSheetPreview preview={printPreview} />
+            <CardSheetPreview
+              preview={printPreview}
+              typography={printRequest.typography ?? savedSettings.typography}
+            />
             {pdfStatus === 'loading' && <section className="pdf-preview-panel"><div className="pdf-preview-panel__status"><div className="spinner" /><div>Đang tạo PDF để xem trước...</div></div></section>}
             {pdfStatus === 'error' && <div className="pdf-preview-panel__error" role="alert">{pdfError}</div>}
             {pdfStatus === 'success' && pdfPreview && <section className="pdf-preview-panel" aria-label="Bản xem trước PDF">

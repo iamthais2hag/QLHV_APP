@@ -33,9 +33,17 @@ public sealed class HocVienCardPdfGeneratorTests
     [Fact]
     public void Pdf_generator_accepts_custom_titles_and_returns_pdf()
     {
+        var typography = HocVienCardTypographyOptions.Official with
+        {
+            OrganizationLine1 = new HocVienCardTextStyleOptions(
+                "Arial", 11d, true, false, true),
+        };
         var bytes = CreateGenerator().CreatePdf(
             [CreateHocVien(1)],
-            titleOptions: new HocVienCardTitleOptions("Cơ quan chủ quản", "Cơ sở đào tạo"));
+            titleOptions: new HocVienCardTitleOptions(
+                "Cơ quan chủ quản",
+                "Cơ sở đào tạo",
+                typography));
 
         Assert.StartsWith("%PDF-", System.Text.Encoding.ASCII.GetString(bytes, 0, 5));
         var titles = HocVienCardTemplate.Default.ResolveTitles(

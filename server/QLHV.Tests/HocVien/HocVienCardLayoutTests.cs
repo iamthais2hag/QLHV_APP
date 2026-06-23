@@ -38,14 +38,14 @@ public sealed class HocVienCardLayoutTests
     }
 
     [Fact]
-    public void Official_header_uses_regular_first_line_and_bold_second_line()
+    public void Official_header_is_regular_ten_point_and_body_text_is_bold()
     {
         var lines = HocVienCardTemplate.Default.TextLines.ToDictionary(line => line.Kind);
 
         Assert.Equal(10d, lines[CardTextKind.OrganizationLine1].PreferredFontSizePt);
         Assert.False(lines[CardTextKind.OrganizationLine1].Bold);
         Assert.Equal(10d, lines[CardTextKind.OrganizationLine2].PreferredFontSizePt);
-        Assert.True(lines[CardTextKind.OrganizationLine2].Bold);
+        Assert.False(lines[CardTextKind.OrganizationLine2].Bold);
 
         Assert.Equal(13d, lines[CardTextKind.Title].PreferredFontSizePt);
         Assert.True(lines[CardTextKind.Title].Bold);
@@ -53,6 +53,69 @@ public sealed class HocVienCardLayoutTests
         Assert.True(lines[CardTextKind.StudentName].Bold);
         Assert.Equal(14d, lines[CardTextKind.TrainingRank].PreferredFontSizePt);
         Assert.True(lines[CardTextKind.TrainingRank].Bold);
+    }
+
+    [Fact]
+    public void Custom_typography_controls_font_size_weight_case_and_italic()
+    {
+        var normalized = new HocVienCardPrintRequest
+        {
+            Typography = new HocVienCardTypographyRequest
+            {
+                OrganizationLine1 = new HocVienCardTextStyleRequest
+                {
+                    FontFamily = "Arial",
+                    FontSizePt = 12d,
+                    Bold = true,
+                    Uppercase = false,
+                    Italic = true,
+                },
+                TrainingRank = new HocVienCardTextStyleRequest
+                {
+                    Uppercase = false,
+                    Bold = false,
+                },
+            },
+        }.Normalized();
+        var options = new HocVienCardTitleOptions(
+            "Cơ quan quản lý",
+            null,
+            HocVienCardTypographyOptions.FromRequest(normalized.Typography));
+        var lines = HocVienCardTemplate.Default.ResolveTextLines(options)
+            .ToDictionary(line => line.Kind);
+        var content = HocVienCardTemplate.Default.CreateContent(new HocVienListItemDto
+        {
+            HoVaTen = "Nguyễn Đức Đạt",
+            HangGplxHoc = "Hạng Am",
+        }, options);
+
+        Assert.Equal("Arial", lines[CardTextKind.OrganizationLine1].FontFamily);
+        Assert.Equal(12d, lines[CardTextKind.OrganizationLine1].PreferredFontSizePt);
+        Assert.True(lines[CardTextKind.OrganizationLine1].Bold);
+        Assert.True(lines[CardTextKind.OrganizationLine1].Italic);
+        Assert.False(lines[CardTextKind.OrganizationLine1].Uppercase);
+        Assert.Equal("Cơ quan quản lý", content.OrganizationLine1);
+        Assert.Equal("Tập lái xe hạng: Am", content.TrainingRank);
+        Assert.False(lines[CardTextKind.TrainingRank].Bold);
+    }
+
+    [Fact]
+    public void Typography_request_rejects_unknown_font_and_clamps_font_size()
+    {
+        var normalized = new HocVienCardTextStyleRequest
+        {
+            FontFamily = "Unknown Font",
+            FontSizePt = 99d,
+        }.Normalized();
+        var options = HocVienCardTypographyOptions.FromRequest(new HocVienCardTypographyRequest
+        {
+            CardTitle = normalized,
+        });
+
+        Assert.Null(normalized.FontFamily);
+        Assert.Equal(HocVienCardTextStyleRequest.MaximumFontSizePt, normalized.FontSizePt);
+        Assert.Equal("Times New Roman", options.CardTitle.FontFamily);
+        Assert.Equal(HocVienCardTextStyleRequest.MaximumFontSizePt, options.CardTitle.FontSizePt);
     }
 
     [Theory]
@@ -69,20 +132,21 @@ public sealed class HocVienCardLayoutTests
     [Fact]
     public void A4_layout_uses_expected_margins_and_slots()
     {
-        Assert.Equal(20d, HocVienCardLayout.MarginXMm);
-        Assert.Equal(3.5d, HocVienCardLayout.MarginYMm);
+        Assert.Equal(0.5d, HocVienCardLayout.GapMm);
+        Assert.Equal(20.5d, HocVienCardLayout.MarginXMm);
+        Assert.Equal(4.25d, HocVienCardLayout.MarginYMm);
 
         var first = HocVienCardLayout.GetSlot(0);
         Assert.Equal(0, first.Column);
         Assert.Equal(0, first.Row);
-        Assert.Equal(20d, first.XMm);
-        Assert.Equal(3.5d, first.YMm);
+        Assert.Equal(20.5d, first.XMm);
+        Assert.Equal(4.25d, first.YMm);
 
         var last = HocVienCardLayout.GetSlot(11);
         Assert.Equal(2, last.Column);
         Assert.Equal(3, last.Row);
-        Assert.Equal(192d, last.XMm);
-        Assert.Equal(156.5d, last.YMm);
+        Assert.Equal(191.5d, last.XMm);
+        Assert.Equal(155.75d, last.YMm);
     }
 
     [Fact]

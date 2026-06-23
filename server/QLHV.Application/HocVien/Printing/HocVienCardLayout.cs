@@ -12,7 +12,7 @@ public static class HocVienCardLayout
     public const double TextCellWidthMm = CardWidthMm - PhotoCellWidthMm;
     public const double PhotoWidthMm = 30d;
     public const double PhotoHeightMm = 40d;
-    public const double GapMm = 1d;
+    public const double GapMm = 0.5d;
     public const int Columns = 3;
     public const int Rows = 4;
     public const int CardsPerPage = Columns * Rows;

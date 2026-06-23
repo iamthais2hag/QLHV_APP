@@ -17,7 +17,7 @@ Chức năng được đặt tại menu **In thẻ học viên**, route
 `/in-the-hoc-vien`. Màn **Học viên** chỉ giữ một liên kết điều hướng nhỏ và tiếp
 tục tập trung vào tra cứu, xuất Excel, xem ảnh và đối soát ảnh.
 
-## Thiết lập tiêu đề thẻ
+## Thiết lập nội dung và kiểu chữ thẻ
 
 Trang **In thẻ học viên** cho phép nhập và lưu:
 
@@ -29,10 +29,28 @@ Giá trị mặc định là:
 1. `SỞ XÂY DỰNG TỈNH GIA LAI`
 2. `TRUNG TÂM ĐÀO TẠO LÁI XE THÀNH CÔNG`
 
-Thiết lập hiện chỉ lưu trong `localStorage` của trình duyệt với key
-`qlhv.hoc-vien-card-titles.v1`, không ghi database. Frontend gửi hai trường
-`titleLine1` và `titleLine2` trong request preview/PDF. Backend trim, giới hạn
-100 ký tự mỗi dòng, dùng giá trị mặc định khi trống và render chữ hoa.
+Mỗi dòng trên thẻ có thiết lập cơ bản tương tự Word:
+
+- Phông chữ: `Times New Roman`, `Arial` hoặc `Tahoma`.
+- Cỡ chữ từ 6pt đến 24pt.
+- Đậm, In hoa và Nghiêng; bỏ chọn Nghiêng tương ứng chữ đứng.
+- Nút **Khôi phục đúng quy cách** đưa toàn bộ kiểu chữ về preset chính thức.
+
+Thiết lập chỉ lưu trong `localStorage` của trình duyệt với key
+`qlhv.hoc-vien-card-titles.v1`, không ghi database. Frontend gửi `titleLine1`,
+`titleLine2` và `typography` trong request preview/PDF. Backend trim tiêu đề,
+giới hạn 100 ký tự, whitelist font, clamp cỡ chữ và dùng preset chính thức khi
+thiếu hoặc có giá trị không hợp lệ. Preview A4 và PDF dùng cùng cấu hình.
+
+Preset đúng quy cách:
+
+| Dòng | Phông | Cỡ | Đậm | In hoa | Nghiêng |
+| --- | --- | ---: | :---: | :---: | :---: |
+| Cơ quan quản lý cấp trên | Times New Roman | 10pt | Không | Có | Không |
+| Tên cơ sở đào tạo | Times New Roman | 10pt | Không | Có | Không |
+| HỌC VIÊN TẬP LÁI XE | Times New Roman | 13pt | Có | Có | Không |
+| Họ tên học viên | Times New Roman | 14pt | Có | Có | Không |
+| Hạng học | Times New Roman | 14pt | Có | Có | Không |
 
 ## API
 
@@ -96,9 +114,9 @@ phụ thuộc Hạng học đã chọn.
 - Khổ giấy: A4 ngang, 297mm x 210mm.
 - Lưới: 3 cột x 4 dòng, 12 thẻ/trang.
 - Kích thước thẻ: 85mm x 50mm.
-- Khoảng cách giữa thẻ: 1mm.
-- Lề trái/phải: 20mm.
-- Lề trên/dưới: 3,5mm.
+- Khoảng cách giữa thẻ: 0,5mm.
+- Lề trái/phải: 20,5mm.
+- Lề trên/dưới: 4,25mm.
 - Header: 85mm x 10mm, chạy toàn chiều ngang thẻ.
 - Body: 85mm x 40mm, nằm ngay dưới header.
 - Ô ảnh bên trái: 30mm x 40mm.

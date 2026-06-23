@@ -69,7 +69,7 @@ public sealed class HocVienService : IHocVienService
         }
 
         var photos = await LoadPrintablePhotosAsync(rows, cancellationToken);
-        var titleOptions = new HocVienCardTitleOptions(normalized.TitleLine1, normalized.TitleLine2);
+        var titleOptions = CreateCardOptions(normalized);
         var content = _cardPdfGenerator.CreatePdf(rows, photos, titleOptions);
         return new HocVienExportFileDto
         {
@@ -86,8 +86,8 @@ public sealed class HocVienService : IHocVienService
         var normalized = request.Normalized();
         var loadedRows = await LoadRowsForPrintAsync(normalized, cancellationToken);
         var prepared = await PreparePrintRowsAsync(normalized, loadedRows, cancellationToken);
-        var titles = _cardTemplate.ResolveTitles(
-            new HocVienCardTitleOptions(normalized.TitleLine1, normalized.TitleLine2));
+        var cardOptions = CreateCardOptions(normalized);
+        var titles = _cardTemplate.ResolveTitles(cardOptions);
 
         return new HocVienCardPrintPreviewDto
         {
@@ -98,10 +98,16 @@ public sealed class HocVienService : IHocVienService
             MissingPhotoCount = prepared.MissingPhotoCount,
             OrganizationLine1 = titles.TitleLine1,
             OrganizationLine2 = titles.TitleLine2,
-            CardTitle = _cardTemplate.Title,
+            CardTitle = _cardTemplate.ResolveCardTitle(cardOptions),
             Items = prepared.Items,
         };
     }
+
+    private static HocVienCardTitleOptions CreateCardOptions(HocVienCardPrintRequest request)
+        => new(
+            request.TitleLine1,
+            request.TitleLine2,
+            HocVienCardTypographyOptions.FromRequest(request.Typography));
 
     public async Task<HocVienPhotoAuditResultDto> AuditPhotosAsync(
         HocVienPhotoAuditRequest request,
