@@ -13,6 +13,27 @@ IM_GPLX/{MaKhoa}/{MaDK}.jp2
 Ảnh JP2 được decode trong bộ nhớ. Hệ thống không tạo thumbnail, JPG trung gian,
 file thẻ hoặc PDF tạm trên ổ đĩa.
 
+Chức năng được đặt tại menu **In thẻ học viên**, route
+`/in-the-hoc-vien`. Màn **Học viên** chỉ giữ một liên kết điều hướng nhỏ và tiếp
+tục tập trung vào tra cứu, xuất Excel, xem ảnh và đối soát ảnh.
+
+## Thiết lập tiêu đề thẻ
+
+Trang **In thẻ học viên** cho phép nhập và lưu:
+
+- **Tiêu đề 1 - Cơ quan quản lý cấp trên trực tiếp**.
+- **Tiêu đề 2 - Tên cơ sở đào tạo**.
+
+Giá trị mặc định là:
+
+1. `SỞ XÂY DỰNG TỈNH GIA LAI`
+2. `TRUNG TÂM ĐÀO TẠO LÁI XE THÀNH CÔNG`
+
+Thiết lập hiện chỉ lưu trong `localStorage` của trình duyệt với key
+`qlhv.hoc-vien-card-titles.v1`, không ghi database. Frontend gửi hai trường
+`titleLine1` và `titleLine2` trong request preview/PDF. Backend trim, giới hạn
+100 ký tự mỗi dòng, dùng giá trị mặc định khi trống và render chữ hoa.
+
 ## API
 
 ### Xem trước danh sách in
@@ -51,6 +72,10 @@ PDF được tạo trong bộ nhớ và trả thẳng về response với conten
   được xác nhận; API trả lỗi 400 rõ ràng.
 
 Giới hạn an toàn hiện tại là 1.000 học viên cho một lần in.
+
+Trang in hỗ trợ tìm kiếm chung, autocomplete Khóa, autocomplete Hạng học, lọc
+giới tính, in lẻ, in các học viên đã chọn và in toàn khóa. Autocomplete Khóa vẫn
+phụ thuộc Hạng học đã chọn.
 
 ## Tùy chọn
 
@@ -95,7 +120,11 @@ Header gồm hai dòng căn giữa:
 
 1. `HỌC VIÊN TẬP LÁI XE`
 2. Họ tên học viên viết hoa
-3. `Tập lái xe hạng: {HangGPLXHoc}`
+3. `TẬP LÁI XE HẠNG: {mã hạng}`
+
+Dòng hạng dùng `HangGPLXHoc`, bỏ tiền tố lặp `Hạng ` hoặc `Hang ` nếu có, rồi
+render chữ hoa và đậm. Ví dụ `Hạng Am` thành `TẬP LÁI XE HẠNG: AM`; nếu tên hạng
+trống thì dùng `MaHangDT` làm fallback.
 
 Mã đăng ký, tên khóa và mã khóa vẫn có thể xuất hiện trong bảng đối chiếu của
 modal nhưng **không được in trên thẻ và không xuất hiện trong preview hình thẻ**.
@@ -116,18 +145,19 @@ trước khi dùng chức năng in.
 
 ## Hướng dẫn in
 
-1. Chọn một học viên, nhiều học viên hoặc một khóa.
-2. Mở modal **In thẻ học viên**.
-3. Kiểm tra tổng số học viên, số trang, cảnh báo ảnh và preview A4 trang đầu.
-4. Chọn chế độ ảnh thiếu và cách sắp xếp.
-5. Chọn **Xem trước PDF** để tải PDF vào panel ngay trong modal. Cách này không
+1. Mở menu **In thẻ học viên**.
+2. Kiểm tra hoặc chỉnh hai dòng tiêu đề, sau đó chọn **Lưu thiết lập**.
+3. Tìm và chọn một học viên, nhiều học viên hoặc một khóa.
+4. Kiểm tra tổng số học viên, số trang, cảnh báo ảnh và preview A4 trang đầu.
+5. Chọn chế độ ảnh thiếu và cách sắp xếp.
+6. Chọn **Xem trước PDF** để tải PDF vào panel ngay trong modal. Cách này không
    phụ thuộc popup và không mở tab sau một request bất đồng bộ.
-6. Có thể chọn **Mở PDF trong tab mới** từ panel; đây là thao tác trực tiếp của
+7. Có thể chọn **Mở PDF trong tab mới** từ panel; đây là thao tác trực tiếp của
    người dùng trên blob URL đã tạo.
-7. Chọn **Tải PDF**. Nếu PDF đã được xem trước, frontend dùng lại chính blob đó;
+8. Chọn **Tải PDF**. Nếu PDF đã được xem trước, frontend dùng lại chính blob đó;
    nếu chưa có, frontend gọi endpoint tạo PDF như trước.
-8. Trong hộp thoại in PDF, chọn A4 ngang và **Actual size / 100%**.
-9. Không chọn Fit/Shrink vì sẽ làm sai kích thước 85mm x 50mm.
+9. Trong hộp thoại in PDF, chọn A4 ngang và **Actual size / 100%**.
+10. Không chọn Fit/Shrink vì sẽ làm sai kích thước 85mm x 50mm.
 
 Blob URL chỉ tồn tại trong bộ nhớ trình duyệt và được thu hồi khi đóng panel,
 đổi tùy chọn in, tạo PDF mới hoặc đóng modal. PDF không được lưu tạm trên server.
@@ -137,6 +167,7 @@ Nên in thử một trang trên giấy thường và đo thẻ trước khi in h
 ## Quy tắc an toàn
 
 - Không ghi database khi preview hoặc tạo PDF.
+- Thiết lập tiêu đề chỉ lưu ở trình duyệt, không thêm bảng/cột database.
 - Không chạy đồng bộ dữ liệu.
 - Không tạo ảnh hoặc PDF phụ trên ổ đĩa.
 - Không trả đường dẫn vật lý `D:\...` ra API/frontend.

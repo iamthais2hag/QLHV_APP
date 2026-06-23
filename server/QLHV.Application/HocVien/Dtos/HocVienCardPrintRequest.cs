@@ -2,6 +2,8 @@ namespace QLHV.Application.HocVien.Dtos;
 
 public sealed class HocVienCardPrintRequest
 {
+    public const int MaxTitleLength = 100;
+
     public string? Mode { get; init; }
 
     public int? HocVienId { get; init; }
@@ -15,6 +17,10 @@ public sealed class HocVienCardPrintRequest
     public string? MissingPhotoMode { get; init; }
 
     public string? SortBy { get; init; }
+
+    public string? TitleLine1 { get; init; }
+
+    public string? TitleLine2 { get; init; }
 
     public HocVienCardPrintRequest Normalized() => new()
     {
@@ -30,5 +36,20 @@ public sealed class HocVienCardPrintRequest
             ? "placeholder"
             : MissingPhotoMode.Trim(),
         SortBy = string.IsNullOrWhiteSpace(SortBy) ? "current" : SortBy.Trim(),
+        TitleLine1 = NormalizeTitle(TitleLine1),
+        TitleLine2 = NormalizeTitle(TitleLine2),
     };
+
+    private static string? NormalizeTitle(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var trimmed = value.Trim();
+        return trimmed.Length <= MaxTitleLength
+            ? trimmed
+            : trimmed[..MaxTitleLength];
+    }
 }

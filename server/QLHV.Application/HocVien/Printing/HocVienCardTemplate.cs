@@ -75,25 +75,77 @@ public sealed class HocVienCardTemplate
                 HocVienCardLayout.TextCellWidthMm - 2d * TextPaddingMm, 10d),
             14d,
             9d,
-            false),
+            true),
     ];
 
-    public HocVienCardContent CreateContent(HocVienListItemDto hocVien)
+    public HocVienCardTitles ResolveTitles(HocVienCardTitleOptions? options = null)
+        => new(
+            ResolveTitle(options?.TitleLine1, OrganizationLine1),
+            ResolveTitle(options?.TitleLine2, OrganizationLine2));
+
+    public HocVienCardContent CreateContent(
+        HocVienListItemDto hocVien,
+        HocVienCardTitleOptions? titleOptions = null)
     {
-        var trainingRank = FirstValue(hocVien.HangGplxHoc, hocVien.MaHangDT);
+        var titles = ResolveTitles(titleOptions);
 
         return new HocVienCardContent(
-            OrganizationLine1.Trim().ToUpperInvariant(),
-            OrganizationLine2.Trim().ToUpperInvariant(),
+            titles.TitleLine1,
+            titles.TitleLine2,
             Title.Trim().ToUpperInvariant(),
             hocVien.HoVaTen.Trim().ToUpperInvariant(),
-            string.IsNullOrWhiteSpace(trainingRank) ? string.Empty : $"Tập lái xe hạng: {trainingRank}");
+            FormatTrainingRank(hocVien.HangGplxHoc, hocVien.MaHangDT));
+    }
+
+    public static string FormatTrainingRank(string? hangGplxHoc, string? maHangDt)
+    {
+        var value = FirstValue(hangGplxHoc, maHangDt);
+        while (value.Length > 0)
+        {
+            if (value.StartsWith("Hạng ", StringComparison.OrdinalIgnoreCase))
+            {
+                value = value[5..].TrimStart();
+                continue;
+            }
+
+            if (value.StartsWith("Hang ", StringComparison.OrdinalIgnoreCase))
+            {
+                value = value[5..].TrimStart();
+                continue;
+            }
+
+            break;
+        }
+
+        return string.IsNullOrWhiteSpace(value)
+            ? string.Empty
+            : $"TẬP LÁI XE HẠNG: {value.ToUpperInvariant()}";
+    }
+
+    private static string ResolveTitle(string? value, string fallback)
+    {
+        var normalized = (string.IsNullOrWhiteSpace(value) ? fallback : value)
+            .Trim();
+        if (normalized.Length > HocVienCardPrintRequest.MaxTitleLength)
+        {
+            normalized = normalized[..HocVienCardPrintRequest.MaxTitleLength];
+        }
+
+        return normalized.ToUpperInvariant();
     }
 
     private static string FirstValue(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
 
 }
+
+public sealed record HocVienCardTitleOptions(
+    string? TitleLine1,
+    string? TitleLine2);
+
+public sealed record HocVienCardTitles(
+    string TitleLine1,
+    string TitleLine2);
 
 public sealed record HocVienCardContent(
     string OrganizationLine1,

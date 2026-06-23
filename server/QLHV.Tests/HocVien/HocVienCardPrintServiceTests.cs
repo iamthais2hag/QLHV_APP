@@ -27,6 +27,28 @@ public sealed class HocVienCardPrintServiceTests
     }
 
     [Fact]
+    public async Task Print_passes_trimmed_custom_titles_to_pdf_generator()
+    {
+        var repository = new FakeRepository
+        {
+            ByIdsResult = [CreateHocVien(1)],
+        };
+        var pdf = new FakePdfGenerator();
+        var service = CreateService(repository, pdf);
+
+        await service.PrintCardsAsync(new HocVienCardPrintRequest
+        {
+            Mode = "single",
+            HocVienId = 1,
+            TitleLine1 = "  Cơ quan quản lý  ",
+            TitleLine2 = "  Cơ sở đào tạo  ",
+        });
+
+        Assert.Equal("Cơ quan quản lý", pdf.LastTitleOptions?.TitleLine1);
+        Assert.Equal("Cơ sở đào tạo", pdf.LastTitleOptions?.TitleLine2);
+    }
+
+    [Fact]
     public async Task Print_course_uses_ma_khoa()
     {
         var repository = new FakeRepository();
@@ -81,6 +103,27 @@ public sealed class HocVienCardPrintServiceTests
         Assert.Equal(HocVienCardTemplate.Default.OrganizationLine1, result.OrganizationLine1);
         Assert.Equal(HocVienCardTemplate.Default.OrganizationLine2, result.OrganizationLine2);
         Assert.Equal(HocVienCardTemplate.Default.Title, result.CardTitle);
+    }
+
+    [Fact]
+    public async Task Print_preview_uses_uppercase_custom_titles_and_blank_title_fallback()
+    {
+        var repository = new FakeRepository
+        {
+            ByIdsResult = [CreateHocVien(1)],
+        };
+        var service = CreateService(repository, new FakePdfGenerator());
+
+        var result = await service.PreviewPrintCardsAsync(new HocVienCardPrintRequest
+        {
+            Mode = "single",
+            HocVienId = 1,
+            TitleLine1 = "  Cơ quan quản lý  ",
+            TitleLine2 = "   ",
+        });
+
+        Assert.Equal("CƠ QUAN QUẢN LÝ", result.OrganizationLine1);
+        Assert.Equal(HocVienCardTemplate.Default.OrganizationLine2, result.OrganizationLine2);
     }
 
     [Fact]
@@ -346,11 +389,15 @@ public sealed class HocVienCardPrintServiceTests
     {
         public IReadOnlyList<int> LastIds { get; private set; } = [];
 
+        public HocVienCardTitleOptions? LastTitleOptions { get; private set; }
+
         public byte[] CreatePdf(
             IReadOnlyList<HocVienListItemDto> hocViens,
-            IReadOnlyDictionary<int, HocVienPhotoPreviewDto>? photosByHocVienId = null)
+            IReadOnlyDictionary<int, HocVienPhotoPreviewDto>? photosByHocVienId = null,
+            HocVienCardTitleOptions? titleOptions = null)
         {
             LastIds = hocViens.Select(row => row.HocVienId).ToArray();
+            LastTitleOptions = titleOptions;
             return [1, 2, 3];
         }
     }

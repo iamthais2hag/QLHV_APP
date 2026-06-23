@@ -23,6 +23,12 @@ export const MENU_ITEMS: MenuItem[] = [
     icon: '🎓',
   },
   {
+    path: '/in-the-hoc-vien',
+    label: 'In thẻ học viên',
+    description: 'Chọn học viên, thiết lập tiêu đề và in thẻ theo mẫu chính thức.',
+    icon: '▤',
+  },
+  {
     path: '/khoa-hoc',
     label: 'Khóa học',
     description: 'Quản lý các khóa học và lịch đào tạo.',

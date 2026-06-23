@@ -42,6 +42,8 @@ export interface HocVienPrintCardsRequest {
   giaoVienId?: number;
   missingPhotoMode?: HocVienMissingPhotoMode;
   sortBy?: HocVienPrintSortBy;
+  titleLine1?: string;
+  titleLine2?: string;
 }
 
 export interface HocVienCardPrintPreviewItem {

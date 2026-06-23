@@ -1,3 +1,4 @@
+using QLHV.Application.HocVien.Dtos;
 using QLHV.Application.HocVien.Printing;
 
 namespace QLHV.Tests.HocVien;
@@ -34,6 +35,24 @@ public sealed class HocVienCardLayoutTests
             template.HeaderRect.HeightMm + template.BodyTextRect.HeightMm);
         Assert.Equal(HocVienCardLayout.CardWidthMm,
             template.PhotoRect.WidthMm + template.BodyTextRect.WidthMm);
+    }
+
+    [Fact]
+    public void Official_header_is_regular_ten_point_and_body_text_remains_bold()
+    {
+        var lines = HocVienCardTemplate.Default.TextLines.ToDictionary(line => line.Kind);
+
+        Assert.Equal(10d, lines[CardTextKind.OrganizationLine1].PreferredFontSizePt);
+        Assert.False(lines[CardTextKind.OrganizationLine1].Bold);
+        Assert.Equal(10d, lines[CardTextKind.OrganizationLine2].PreferredFontSizePt);
+        Assert.False(lines[CardTextKind.OrganizationLine2].Bold);
+
+        Assert.Equal(13d, lines[CardTextKind.Title].PreferredFontSizePt);
+        Assert.True(lines[CardTextKind.Title].Bold);
+        Assert.Equal(14d, lines[CardTextKind.StudentName].PreferredFontSizePt);
+        Assert.True(lines[CardTextKind.StudentName].Bold);
+        Assert.Equal(14d, lines[CardTextKind.TrainingRank].PreferredFontSizePt);
+        Assert.True(lines[CardTextKind.TrainingRank].Bold);
     }
 
     [Theory]
@@ -99,7 +118,7 @@ public sealed class HocVienCardLayoutTests
         Assert.Equal("NGUYỄN ĐỨC ĐẠT", content.StudentName);
         Assert.Equal("SỞ XÂY DỰNG TỈNH GIA LAI", content.OrganizationLine1);
         Assert.Equal("HỌC VIÊN TẬP LÁI XE", content.Title);
-        Assert.Equal("Tập lái xe hạng: Hạng Am", content.TrainingRank);
+        Assert.Equal("TẬP LÁI XE HẠNG: AM", content.TrainingRank);
         Assert.Equal("Times New Roman", template.FontFamily);
         Assert.DoesNotContain(hocVien.MaDangKy, renderedText, StringComparison.Ordinal);
         Assert.DoesNotContain(hocVien.MaKhoa, renderedText, StringComparison.Ordinal);
@@ -113,6 +132,42 @@ public sealed class HocVienCardLayoutTests
                 CardTextKind.TrainingRank,
             ],
             template.TextLines.Select(line => line.Kind).ToArray());
+    }
+
+    [Theory]
+    [InlineData("Hạng Am", null, "TẬP LÁI XE HẠNG: AM")]
+    [InlineData("Hang A1m", null, "TẬP LÁI XE HẠNG: A1M")]
+    [InlineData("Hạng Hạng B", null, "TẬP LÁI XE HẠNG: B")]
+    [InlineData(null, "C", "TẬP LÁI XE HẠNG: C")]
+    [InlineData(null, null, "")]
+    public void Training_rank_removes_repeated_prefix_and_uses_uppercase(
+        string? hangGplxHoc,
+        string? maHangDt,
+        string expected)
+    {
+        Assert.Equal(expected, HocVienCardTemplate.FormatTrainingRank(hangGplxHoc, maHangDt));
+    }
+
+    [Fact]
+    public void Custom_titles_are_trimmed_uppercase_and_limited()
+    {
+        var longTitle = $"  {new string('a', HocVienCardPrintRequest.MaxTitleLength + 20)}  ";
+        var titles = HocVienCardTemplate.Default.ResolveTitles(
+            new HocVienCardTitleOptions(longTitle, "  Cơ sở đào tạo  "));
+
+        Assert.Equal(HocVienCardPrintRequest.MaxTitleLength, titles.TitleLine1.Length);
+        Assert.Equal(new string('A', HocVienCardPrintRequest.MaxTitleLength), titles.TitleLine1);
+        Assert.Equal("CƠ SỞ ĐÀO TẠO", titles.TitleLine2);
+    }
+
+    [Fact]
+    public void Blank_custom_titles_use_official_defaults()
+    {
+        var titles = HocVienCardTemplate.Default.ResolveTitles(
+            new HocVienCardTitleOptions("  ", null));
+
+        Assert.Equal(HocVienCardTemplate.Default.OrganizationLine1, titles.TitleLine1);
+        Assert.Equal(HocVienCardTemplate.Default.OrganizationLine2, titles.TitleLine2);
     }
 
     [Theory]
