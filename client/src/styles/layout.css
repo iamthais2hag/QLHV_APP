@@ -1016,12 +1016,12 @@
 
 .card-sheet-preview__grid {
   position: absolute;
-  inset: 1.667% 6.734%;
+  inset: 2.024% 6.902%;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   grid-template-rows: repeat(4, minmax(0, 1fr));
-  column-gap: 0.389%;
-  row-gap: 0.493%;
+  column-gap: 0.195%;
+  row-gap: 0.248%;
 }
 
 .card-preview {
@@ -1118,7 +1118,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-family: "Times New Roman", Times, serif;
+  font-style: normal;
   line-height: 1;
+  text-transform: uppercase;
 }
 
 .card-preview__title {
@@ -1140,7 +1143,8 @@
 .card-preview__rank {
   top: 65%;
   height: 25%;
-  font-size: clamp(7px, 0.92vw, 12px);
+  font-size: clamp(8px, 1.08vw, 14px);
+  font-weight: 700;
 }
 
 .pdf-preview-panel {

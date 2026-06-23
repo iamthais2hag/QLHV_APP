@@ -6,5 +6,6 @@ public interface IHocVienCardPdfGenerator
 {
     byte[] CreatePdf(
         IReadOnlyList<HocVienListItemDto> hocViens,
-        IReadOnlyDictionary<int, HocVienPhotoPreviewDto>? photosByHocVienId = null);
+        IReadOnlyDictionary<int, HocVienPhotoPreviewDto>? photosByHocVienId = null,
+        HocVienCardTitleOptions? titleOptions = null);
 }
