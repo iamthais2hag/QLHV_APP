@@ -73,6 +73,24 @@ public sealed class HocVienCardPdfGeneratorTests
         Assert.StartsWith("%PDF-", System.Text.Encoding.ASCII.GetString(bytes, 0, 5));
     }
 
+    [Fact]
+    public void Official_template_pdf_excludes_registration_and_course_codes()
+    {
+        var hocVien = CreateHocVien(1);
+        var template = HocVienCardTemplate.Default;
+        var content = template.CreateContent(hocVien);
+        var renderedText = string.Join('|', template.TextLines.Select(line => content.GetText(line.Kind)));
+
+        var bytes = CreateGenerator().CreatePdf([hocVien]);
+        var rawPdf = System.Text.Encoding.Latin1.GetString(bytes);
+
+        Assert.StartsWith("%PDF-", System.Text.Encoding.ASCII.GetString(bytes, 0, 5));
+        Assert.DoesNotContain(hocVien.MaDangKy, renderedText, StringComparison.Ordinal);
+        Assert.DoesNotContain(hocVien.MaKhoa!, renderedText, StringComparison.Ordinal);
+        Assert.DoesNotContain(hocVien.MaDangKy, rawPdf, StringComparison.Ordinal);
+        Assert.DoesNotContain(hocVien.MaKhoa!, rawPdf, StringComparison.Ordinal);
+    }
+
     private static HocVienCardPdfGenerator CreateGenerator()
         => new(HocVienCardTemplate.Default);
 

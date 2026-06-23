@@ -6,6 +6,10 @@ public static class HocVienCardLayout
     public const double PageHeightMm = 210d;
     public const double CardWidthMm = 85d;
     public const double CardHeightMm = 50d;
+    public const double HeaderHeightMm = 10d;
+    public const double BodyHeightMm = CardHeightMm - HeaderHeightMm;
+    public const double PhotoCellWidthMm = 30d;
+    public const double TextCellWidthMm = CardWidthMm - PhotoCellWidthMm;
     public const double PhotoWidthMm = 30d;
     public const double PhotoHeightMm = 40d;
     public const double GapMm = 1d;

@@ -1,8 +1,9 @@
-# In thẻ học viên
+# Mẫu số 02 - Phù hiệu học viên tập lái xe
 
 ## Tổng quan
 
-Chức năng in thẻ học viên tạo PDF trực tiếp trong bộ nhớ từ dữ liệu đọc trong
+Chức năng in thẻ học viên áp dụng template chính thức **Mẫu số 02 - Phù hiệu
+học viên tập lái xe** và tạo PDF trực tiếp trong bộ nhớ từ dữ liệu đọc trong
 `QLHV_APP.dbo.App_HocVien` và ảnh JP2 tại:
 
 ```text
@@ -28,7 +29,7 @@ Endpoint chỉ trả metadata và dữ liệu an toàn cần cho preview fronten
 - `layoutName`
 - `missingPhotoCount`
 - nội dung tổ chức/title dùng trên thẻ
-- `items[]` gồm mã đăng ký, họ tên, khóa, hạng học và trạng thái ảnh
+- `items[]` gồm dữ liệu an toàn phục vụ đối chiếu danh sách và dựng thẻ trang đầu
 
 Endpoint không sinh PDF và không trả đường dẫn vật lý của ảnh.
 
@@ -73,20 +74,31 @@ Giới hạn an toàn hiện tại là 1.000 học viên cho một lần in.
 - Khoảng cách giữa thẻ: 1mm.
 - Lề trái/phải: 20mm.
 - Lề trên/dưới: 3,5mm.
-- Ảnh trong thẻ: 30mm x 40mm.
+- Header: 85mm x 10mm, chạy toàn chiều ngang thẻ.
+- Body: 85mm x 40mm, nằm ngay dưới header.
+- Ô ảnh bên trái: 30mm x 40mm.
+- Ô nội dung bên phải: 55mm x 40mm.
+- Có khung đen mảnh quanh thẻ, đường ngang dưới header và đường dọc phân cách
+  ảnh với nội dung.
 
 Mọi chuyển đổi mm sang point được thực hiện qua `HocVienCardLayout.MmToPoint`.
 Frontend mô phỏng cùng tỷ lệ A4 và lưới 3x4 để kiểm tra trang đầu trước khi tải.
 
-## Nội dung thẻ
+## Nội dung thẻ chính thức
 
-- SỞ XÂY DỰNG TỈNH GIA LAI
-- TRUNG TÂM ĐÀO TẠO LÁI XE THÀNH CÔNG
-- HỌC VIÊN TẬP LÁI XE
-- Họ tên học viên
-- Hạng đào tạo
-- Tên khóa và mã khóa nếu có
-- Mã đăng ký nếu còn không gian
+Header gồm hai dòng căn giữa:
+
+1. `SỞ XÂY DỰNG TỈNH GIA LAI`
+2. `TRUNG TÂM ĐÀO TẠO LÁI XE THÀNH CÔNG`
+
+Ô nội dung bên phải chỉ gồm ba dòng căn giữa:
+
+1. `HỌC VIÊN TẬP LÁI XE`
+2. Họ tên học viên viết hoa
+3. `Tập lái xe hạng: {HangGPLXHoc}`
+
+Mã đăng ký, tên khóa và mã khóa vẫn có thể xuất hiện trong bảng đối chiếu của
+modal nhưng **không được in trên thẻ và không xuất hiện trong preview hình thẻ**.
 
 Template nằm trong `HocVienCardTemplate`; nội dung tổ chức và các vị trí tương đối
 không bị hardcode rải rác trong renderer.
@@ -97,7 +109,7 @@ Renderer dùng PDFsharp 6.2.4 (MIT) để tạo PDF, đo text, nhúng font Unico
 ảnh. Lý do thay renderer cũ là renderer cũ tự nối PDF bằng chuỗi ASCII, bỏ dấu
 tiếng Việt và phụ thuộc nhiều tọa độ hardcode khó kiểm tra.
 
-Font hiện dùng là Arial hệ thống Windows thông qua
+Template chính thức dùng Times New Roman hệ thống Windows thông qua
 `GlobalFontSettings.UseWindowsFontsUnderWindows`. Không có font binary được commit
 vào repository. Khi triển khai trên Linux/macOS phải cấu hình font resolver hợp lệ
 trước khi dùng chức năng in.
@@ -135,6 +147,6 @@ Nên in thử một trang trên giấy thường và đo thẻ trước khi in h
 
 - `teacherInCourse` chưa thể triển khai cho đến khi quan hệ phân công
   giáo viên-học viên được xác nhận.
-- Font Arial hệ thống Windows là dependency runtime hiện tại.
+- Font Times New Roman hệ thống Windows là dependency runtime hiện tại.
 - Preview frontend là mô phỏng để kiểm tra nhanh; PDF từ endpoint mới là tài liệu
   chuẩn dùng để in.

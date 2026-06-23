@@ -11,11 +11,29 @@ public sealed class HocVienCardLayoutTests
         Assert.Equal(210d, HocVienCardLayout.PageHeightMm);
         Assert.Equal(85d, HocVienCardLayout.CardWidthMm);
         Assert.Equal(50d, HocVienCardLayout.CardHeightMm);
+        Assert.Equal(10d, HocVienCardLayout.HeaderHeightMm);
+        Assert.Equal(40d, HocVienCardLayout.BodyHeightMm);
+        Assert.Equal(30d, HocVienCardLayout.PhotoCellWidthMm);
+        Assert.Equal(55d, HocVienCardLayout.TextCellWidthMm);
         Assert.Equal(30d, HocVienCardLayout.PhotoWidthMm);
         Assert.Equal(40d, HocVienCardLayout.PhotoHeightMm);
         Assert.Equal(3, HocVienCardLayout.Columns);
         Assert.Equal(4, HocVienCardLayout.Rows);
         Assert.Equal(12, HocVienCardLayout.CardsPerPage);
+    }
+
+    [Fact]
+    public void Official_template_has_header_and_two_column_body_geometry()
+    {
+        var template = HocVienCardTemplate.Default;
+
+        Assert.Equal(new CardElementRect(0d, 0d, 85d, 10d), template.HeaderRect);
+        Assert.Equal(new CardElementRect(0d, 10d, 30d, 40d), template.PhotoRect);
+        Assert.Equal(new CardElementRect(30d, 10d, 55d, 40d), template.BodyTextRect);
+        Assert.Equal(HocVienCardLayout.CardHeightMm,
+            template.HeaderRect.HeightMm + template.BodyTextRect.HeightMm);
+        Assert.Equal(HocVienCardLayout.CardWidthMm,
+            template.PhotoRect.WidthMm + template.BodyTextRect.WidthMm);
     }
 
     [Theory]
@@ -65,20 +83,36 @@ public sealed class HocVienCardLayoutTests
     [Fact]
     public void Card_template_preserves_vietnamese_student_name_and_business_text()
     {
-        var content = HocVienCardTemplate.Default.CreateContent(new QLHV.Application.HocVien.Dtos.HocVienListItemDto
+        var template = HocVienCardTemplate.Default;
+        var hocVien = new QLHV.Application.HocVien.Dtos.HocVienListItemDto
         {
             MaDangKy = "66016-20251229-145551540",
             HoVaTen = "NGUYỄN ĐỨC ĐẠT",
             MaHangDT = "Am",
+            HangGplxHoc = "Hạng Am",
             TenKhoa = "AK01",
             MaKhoa = "66016K26A0001",
-        });
+        };
+        var content = template.CreateContent(hocVien);
+        var renderedText = string.Join('|', template.TextLines.Select(line => content.GetText(line.Kind)));
 
         Assert.Equal("NGUYỄN ĐỨC ĐẠT", content.StudentName);
         Assert.Equal("SỞ XÂY DỰNG TỈNH GIA LAI", content.OrganizationLine1);
         Assert.Equal("HỌC VIÊN TẬP LÁI XE", content.Title);
-        Assert.Equal("TẬP LÁI XE HẠNG: Am", content.TrainingRank);
-        Assert.Equal("AK01 - 66016K26A0001", content.Course);
+        Assert.Equal("Tập lái xe hạng: Hạng Am", content.TrainingRank);
+        Assert.Equal("Times New Roman", template.FontFamily);
+        Assert.DoesNotContain(hocVien.MaDangKy, renderedText, StringComparison.Ordinal);
+        Assert.DoesNotContain(hocVien.MaKhoa, renderedText, StringComparison.Ordinal);
+        Assert.DoesNotContain(hocVien.TenKhoa, renderedText, StringComparison.Ordinal);
+        Assert.Equal(
+            [
+                CardTextKind.OrganizationLine1,
+                CardTextKind.OrganizationLine2,
+                CardTextKind.Title,
+                CardTextKind.StudentName,
+                CardTextKind.TrainingRank,
+            ],
+            template.TextLines.Select(line => line.Kind).ToArray());
     }
 
     [Theory]

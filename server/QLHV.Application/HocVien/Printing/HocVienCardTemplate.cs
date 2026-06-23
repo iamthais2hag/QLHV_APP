@@ -4,6 +4,8 @@ namespace QLHV.Application.HocVien.Printing;
 
 public sealed class HocVienCardTemplate
 {
+    private const double TextPaddingMm = 1.5d;
+
     public static HocVienCardTemplate Default { get; } = new();
 
     public string OrganizationLine1 { get; init; } = "SỞ XÂY DỰNG TỈNH GIA LAI";
@@ -12,47 +14,85 @@ public sealed class HocVienCardTemplate
 
     public string Title { get; init; } = "HỌC VIÊN TẬP LÁI XE";
 
-    public string FontFamily { get; init; } = "Arial";
+    public string FontFamily { get; init; } = "Times New Roman";
 
-    public CardElementRect PhotoRect { get; init; } = new(4d, 5d, 30d, 40d);
+    public CardElementRect HeaderRect { get; init; } = new(
+        0d,
+        0d,
+        HocVienCardLayout.CardWidthMm,
+        HocVienCardLayout.HeaderHeightMm);
 
-    public double TextLeftMm { get; init; } = 37d;
+    public CardElementRect PhotoRect { get; init; } = new(
+        0d,
+        HocVienCardLayout.HeaderHeightMm,
+        HocVienCardLayout.PhotoCellWidthMm,
+        HocVienCardLayout.BodyHeightMm);
 
-    public double TextRightPaddingMm { get; init; } = 3d;
+    public CardElementRect BodyTextRect { get; init; } = new(
+        HocVienCardLayout.PhotoCellWidthMm,
+        HocVienCardLayout.HeaderHeightMm,
+        HocVienCardLayout.TextCellWidthMm,
+        HocVienCardLayout.BodyHeightMm);
+
+    public IReadOnlyList<string> MissingPhotoPlaceholderLines { get; init; } =
+    [
+        "Ảnh màu",
+        "3 cm x 4 cm",
+        "chưa có ảnh",
+    ];
 
     public IReadOnlyList<CardTextLine> TextLines { get; init; } =
     [
-        new(CardTextKind.OrganizationLine1, 5d, 5.6d, 4.8d, false),
-        new(CardTextKind.OrganizationLine2, 9d, 5.6d, 4.8d, false),
-        new(CardTextKind.Title, 15d, 8.5d, 7d, true),
-        new(CardTextKind.StudentName, 23d, 7.8d, 5.8d, true),
-        new(CardTextKind.TrainingRank, 31d, 6.4d, 5d, false),
-        new(CardTextKind.Course, 37d, 5.8d, 4.8d, false),
-        new(CardTextKind.RegistrationCode, 42d, 5.2d, 4.4d, false),
+        new(
+            CardTextKind.OrganizationLine1,
+            new(TextPaddingMm, 0d, HocVienCardLayout.CardWidthMm - 2d * TextPaddingMm, 5d),
+            10d,
+            8.5d,
+            false),
+        new(
+            CardTextKind.OrganizationLine2,
+            new(TextPaddingMm, 5d, HocVienCardLayout.CardWidthMm - 2d * TextPaddingMm, 5d),
+            10d,
+            8.5d,
+            false),
+        new(
+            CardTextKind.Title,
+            new(HocVienCardLayout.PhotoCellWidthMm + TextPaddingMm, 14d,
+                HocVienCardLayout.TextCellWidthMm - 2d * TextPaddingMm, 9d),
+            13d,
+            10.5d,
+            true),
+        new(
+            CardTextKind.StudentName,
+            new(HocVienCardLayout.PhotoCellWidthMm + TextPaddingMm, 24d,
+                HocVienCardLayout.TextCellWidthMm - 2d * TextPaddingMm, 11d),
+            14d,
+            9d,
+            true),
+        new(
+            CardTextKind.TrainingRank,
+            new(HocVienCardLayout.PhotoCellWidthMm + TextPaddingMm, 36d,
+                HocVienCardLayout.TextCellWidthMm - 2d * TextPaddingMm, 10d),
+            14d,
+            9d,
+            false),
     ];
 
     public HocVienCardContent CreateContent(HocVienListItemDto hocVien)
     {
-        var trainingRank = FirstValue(hocVien.MaHangDT, hocVien.HangGplxHoc);
-        var course = JoinValues(" - ", hocVien.TenKhoa, hocVien.MaKhoa);
+        var trainingRank = FirstValue(hocVien.HangGplxHoc, hocVien.MaHangDT);
 
         return new HocVienCardContent(
-            OrganizationLine1,
-            OrganizationLine2,
-            Title,
-            hocVien.HoVaTen.Trim(),
-            string.IsNullOrWhiteSpace(trainingRank) ? string.Empty : $"TẬP LÁI XE HẠNG: {trainingRank}",
-            course,
-            string.IsNullOrWhiteSpace(hocVien.MaDangKy) ? string.Empty : $"MÃ ĐK: {hocVien.MaDangKy.Trim()}");
+            OrganizationLine1.Trim().ToUpperInvariant(),
+            OrganizationLine2.Trim().ToUpperInvariant(),
+            Title.Trim().ToUpperInvariant(),
+            hocVien.HoVaTen.Trim().ToUpperInvariant(),
+            string.IsNullOrWhiteSpace(trainingRank) ? string.Empty : $"Tập lái xe hạng: {trainingRank}");
     }
 
     private static string FirstValue(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
 
-    private static string JoinValues(string separator, params string?[] values)
-        => string.Join(separator, values
-            .Where(value => !string.IsNullOrWhiteSpace(value))
-            .Select(value => value!.Trim()));
 }
 
 public sealed record HocVienCardContent(
@@ -60,9 +100,7 @@ public sealed record HocVienCardContent(
     string OrganizationLine2,
     string Title,
     string StudentName,
-    string TrainingRank,
-    string Course,
-    string RegistrationCode)
+    string TrainingRank)
 {
     public string GetText(CardTextKind kind) => kind switch
     {
@@ -71,8 +109,6 @@ public sealed record HocVienCardContent(
         CardTextKind.Title => Title,
         CardTextKind.StudentName => StudentName,
         CardTextKind.TrainingRank => TrainingRank,
-        CardTextKind.Course => Course,
-        CardTextKind.RegistrationCode => RegistrationCode,
         _ => string.Empty,
     };
 }
@@ -85,7 +121,7 @@ public sealed record CardElementRect(
 
 public sealed record CardTextLine(
     CardTextKind Kind,
-    double TopMm,
+    CardElementRect Bounds,
     double PreferredFontSizePt,
     double MinimumFontSizePt,
     bool Bold);
@@ -97,6 +133,4 @@ public enum CardTextKind
     Title,
     StudentName,
     TrainingRank,
-    Course,
-    RegistrationCode,
 }
