@@ -3,6 +3,7 @@ import AppLayout from './layout/AppLayout';
 import Dashboard from './pages/Dashboard';
 import ModulePage from './pages/ModulePage';
 import HocVienPage from './features/hoc-vien/HocVienPage';
+import HocVienCardPrintPage from './features/hoc-vien/HocVienCardPrintPage';
 import { MENU_ITEMS } from './navigation/menu';
 
 export default function App() {
@@ -11,7 +12,8 @@ export default function App() {
       <Route element={<AppLayout />}>
         <Route index element={<Dashboard />} />
         <Route path="/hoc-vien" element={<HocVienPage />} />
-        {MENU_ITEMS.filter((item) => item.path !== '/' && item.path !== '/hoc-vien').map((item) => (
+        <Route path="/in-the-hoc-vien" element={<HocVienCardPrintPage />} />
+        {MENU_ITEMS.filter((item) => !['/', '/hoc-vien', '/in-the-hoc-vien'].includes(item.path)).map((item) => (
           <Route
             key={item.path}
             path={item.path}

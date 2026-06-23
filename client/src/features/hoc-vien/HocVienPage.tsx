@@ -1,25 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   auditHocVienPhotos,
   exportHocVienExcel,
   getHocVienHangHocLookups,
   getHocVienPhotoPreviewUrl,
   getHocVienKhoaLookups,
-  previewHocVienCardsA4,
-  printHocVienCardsA4,
   searchHocVien,
 } from './api';
 import type {
-  HocVienCardPrintPreview,
-  HocVienCardPrintPreviewItem,
   HocVienExportParams,
   HocVienHangHocLookup,
   HocVienKhoaLookup,
   HocVienListItem,
-  HocVienMissingPhotoMode,
   HocVienPhotoAuditResult,
-  HocVienPrintCardsRequest,
-  HocVienPrintSortBy,
   HocVienSearchParams,
 } from './types';
 import {
@@ -31,12 +25,6 @@ import CopyButton from './CopyButton';
 const PAGE_SIZE = 20;
 
 type Status = 'idle' | 'loading' | 'success' | 'error';
-
-interface PdfPreviewState {
-  blob: Blob;
-  fileName: string;
-  url: string;
-}
 
 function formatPhotoStatus(status: string): string {
   switch (status) {
@@ -53,83 +41,6 @@ function formatPhotoStatus(status: string): string {
     default:
       return status;
   }
-}
-
-function HocVienCardPreviewPhoto({ item }: { item: HocVienCardPrintPreviewItem }) {
-  const [failed, setFailed] = useState(!item.hasPhoto);
-
-  useEffect(() => {
-    setFailed(!item.hasPhoto);
-  }, [item.hocVienId, item.hasPhoto]);
-
-  if (failed) {
-    return (
-      <span className="card-preview__photo-placeholder">
-        <strong>Ảnh màu</strong>
-        <span>3 cm x 4 cm</span>
-        <span>chưa có ảnh</span>
-      </span>
-    );
-  }
-
-  return (
-    <img
-      className="card-preview__photo-image"
-      src={getHocVienPhotoPreviewUrl(item.hocVienId)}
-      alt={`Ảnh thẻ ${item.hoVaTen}`}
-      onError={() => setFailed(true)}
-    />
-  );
-}
-
-function HocVienCardSheetPreview({ preview }: { preview: HocVienCardPrintPreview }) {
-  const firstPage = preview.items.slice(0, 12);
-  const slots = Array.from({ length: 12 }, (_, index) => firstPage[index] ?? null);
-
-  return (
-    <section className="card-sheet-preview" aria-label="Xem trước trang A4 đầu tiên">
-      <div className="card-sheet-preview__toolbar">
-        <strong>Xem trước trang A4 đầu tiên</strong>
-        <span>Tỷ lệ mô phỏng, khi in chọn Actual size / 100%</span>
-      </div>
-      <div className="card-sheet-preview__viewport">
-        <div className="card-sheet-preview__page">
-          <div className="card-sheet-preview__grid">
-            {slots.map((item, index) => {
-              if (!item) {
-                return <div className="card-preview card-preview--empty" key={`empty-${index}`} />;
-              }
-
-              const trainingRank = item.hangGplxHoc ?? item.maHangDT ?? '';
-
-              return (
-                <article className="card-preview" key={item.hocVienId}>
-                  <header className="card-preview__header">
-                    <div>{preview.organizationLine1}</div>
-                    <div>{preview.organizationLine2}</div>
-                  </header>
-                  <div className="card-preview__body">
-                    <div className="card-preview__photo">
-                      <HocVienCardPreviewPhoto item={item} />
-                    </div>
-                    <div className="card-preview__content">
-                      <div className="card-preview__title">{preview.cardTitle}</div>
-                      <div className="card-preview__name" title={item.hoVaTen}>
-                        {item.hoVaTen.toLocaleUpperCase('vi-VN')}
-                      </div>
-                      <div className="card-preview__rank" title={trainingRank}>
-                        Tập lái xe hạng: {trainingRank}
-                      </div>
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    </section>
-  );
 }
 
 function HocVienPhoto({
@@ -198,10 +109,7 @@ export default function HocVienPage() {
   const [errorMessage, setErrorMessage] = useState('');
   const [isExporting, setIsExporting] = useState(false);
   const [exportErrorMessage, setExportErrorMessage] = useState('');
-  const [selectedHocVienIds, setSelectedHocVienIds] = useState<Set<number>>(() => new Set());
-  const [isPrinting, setIsPrinting] = useState(false);
-  const [printErrorMessage, setPrintErrorMessage] = useState('');
-  const [photoPreview, setPhotoPreview] = useState<{ url: string; title: string; hocVienId: number } | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<{ url: string; title: string } | null>(null);
   const [showPhotoAudit, setShowPhotoAudit] = useState(false);
   const [photoAudit, setPhotoAudit] = useState<HocVienPhotoAuditResult | null>(null);
   const [photoAuditStatus, setPhotoAuditStatus] = useState<Status>('idle');
@@ -210,19 +118,7 @@ export default function HocVienPage() {
   const [auditValidateDecode, setAuditValidateDecode] = useState(false);
   const [auditOnlyMissing, setAuditOnlyMissing] = useState(false);
   const [auditOnlyInvalid, setAuditOnlyInvalid] = useState(false);
-  const [printRequest, setPrintRequest] = useState<HocVienPrintCardsRequest | null>(null);
-  const [printPreviewData, setPrintPreviewData] = useState<HocVienCardPrintPreview | null>(null);
-  const [printPreviewStatus, setPrintPreviewStatus] = useState<Status>('idle');
-  const [printMissingPhotoMode, setPrintMissingPhotoMode] =
-    useState<HocVienMissingPhotoMode>('placeholder');
-  const [printSortBy, setPrintSortBy] = useState<HocVienPrintSortBy>('current');
-  const [pdfPreview, setPdfPreview] = useState<PdfPreviewState | null>(null);
-  const [pdfPreviewStatus, setPdfPreviewStatus] = useState<Status>('idle');
-  const [pdfPreviewErrorMessage, setPdfPreviewErrorMessage] = useState('');
-
   const abortRef = useRef<AbortController | null>(null);
-  const pdfPreviewAbortRef = useRef<AbortController | null>(null);
-  const pdfPreviewUrlRef = useRef<string | null>(null);
 
   const currentFilters = useCallback(
     (): HocVienExportParams => ({
@@ -233,13 +129,6 @@ export default function HocVienPage() {
     }),
     [keyword, selectedKhoa, selectedHangHoc, gioiTinh],
   );
-
-  useEffect(() => () => {
-    pdfPreviewAbortRef.current?.abort();
-    if (pdfPreviewUrlRef.current) {
-      URL.revokeObjectURL(pdfPreviewUrlRef.current);
-    }
-  }, []);
 
   const load = useCallback(
     async (params: HocVienSearchParams) => {
@@ -455,10 +344,8 @@ export default function HocVienPage() {
 
   function handleSearch() {
     setExportErrorMessage('');
-    setPrintErrorMessage('');
     if (!validateSelectedLookups()) return;
 
-    setSelectedHocVienIds(new Set());
     if (showPhotoAudit) {
       setAuditPage(1);
       loadPhotoAudit({ page: 1 });
@@ -488,8 +375,6 @@ export default function HocVienPage() {
     setHangHocLookupError('');
     setGioiTinh('');
     setExportErrorMessage('');
-    setPrintErrorMessage('');
-    setSelectedHocVienIds(new Set());
     setShowPhotoAudit(false);
     setPhotoAudit(null);
     setPhotoAuditStatus('idle');
@@ -503,7 +388,6 @@ export default function HocVienPage() {
 
   async function handleExport() {
     setExportErrorMessage('');
-    setPrintErrorMessage('');
     if (!validateSelectedLookups()) return;
 
     setIsExporting(true);
@@ -519,150 +403,6 @@ export default function HocVienPage() {
     }
   }
 
-  function handlePrintSelected() {
-    setExportErrorMessage('');
-    setPrintErrorMessage('');
-    if (selectedHocVienIds.size === 0) return;
-
-    openPrintModal({
-      mode: 'selected',
-      hocVienIds: Array.from(selectedHocVienIds),
-    });
-  }
-
-  function handlePrintCourse() {
-    setExportErrorMessage('');
-    setPrintErrorMessage('');
-    if (!selectedKhoa) {
-      setKhoaWarning('Vui long chon Khoa trong danh sach goi y');
-      return;
-    }
-
-    openPrintModal({
-      mode: 'course',
-      maKhoa: selectedKhoa.maKhoa,
-    });
-  }
-
-  function handlePrintSingle(hocVienId: number) {
-    setPhotoPreview(null);
-    openPrintModal({
-      mode: 'single',
-      hocVienId,
-    });
-  }
-
-  function openPrintModal(request: HocVienPrintCardsRequest) {
-    setPrintRequest(request);
-    setPrintMissingPhotoMode('placeholder');
-    setPrintSortBy('current');
-    loadPrintPreview(request, 'placeholder', 'current');
-  }
-
-  async function loadPrintPreview(
-    request: HocVienPrintCardsRequest,
-    missingPhotoMode = printMissingPhotoMode,
-    sortBy = printSortBy,
-  ) {
-    clearPdfPreview();
-    setPrintPreviewStatus('loading');
-    setPrintErrorMessage('');
-    try {
-      const result = await previewHocVienCardsA4({
-        ...request,
-        missingPhotoMode,
-        sortBy,
-      });
-      setPrintPreviewData(result);
-      setPrintPreviewStatus('success');
-    } catch (err) {
-      setPrintPreviewData(null);
-      setPrintPreviewStatus('error');
-      setPrintErrorMessage(err instanceof Error ? err.message : 'Khong the xem truoc in the.');
-    }
-  }
-
-  async function handleDownloadPrintPdf() {
-    if (!printRequest) return;
-
-    if (pdfPreview) {
-      downloadBlob(pdfPreview.blob, pdfPreview.fileName);
-      return;
-    }
-
-    setIsPrinting(true);
-    setPrintErrorMessage('');
-    try {
-      const result = await printHocVienCardsA4({
-        ...printRequest,
-        missingPhotoMode: printMissingPhotoMode,
-        sortBy: printSortBy,
-      });
-      downloadBlob(result.blob, result.fileName);
-    } catch (err) {
-      setPrintErrorMessage(err instanceof Error ? err.message : 'Khong the in the hoc vien.');
-    } finally {
-      setIsPrinting(false);
-    }
-  }
-
-  async function handlePreviewPrintPdf() {
-    if (!printRequest) return;
-
-    clearPdfPreview();
-    const controller = new AbortController();
-    pdfPreviewAbortRef.current = controller;
-    setPdfPreviewStatus('loading');
-    setPdfPreviewErrorMessage('');
-    setPrintErrorMessage('');
-    try {
-      const result = await printHocVienCardsA4({
-        ...printRequest,
-        missingPhotoMode: printMissingPhotoMode,
-        sortBy: printSortBy,
-      }, controller.signal);
-      if (controller.signal.aborted) return;
-
-      const url = URL.createObjectURL(result.blob);
-      pdfPreviewUrlRef.current = url;
-      setPdfPreview({ blob: result.blob, fileName: result.fileName, url });
-      setPdfPreviewStatus('success');
-    } catch (err) {
-      if (controller.signal.aborted) return;
-
-      setPdfPreviewStatus('error');
-      setPdfPreviewErrorMessage(
-        err instanceof Error ? err.message : 'Không thể tạo bản xem trước PDF.',
-      );
-    } finally {
-      if (pdfPreviewAbortRef.current === controller) {
-        pdfPreviewAbortRef.current = null;
-      }
-    }
-  }
-
-  function closePrintModal() {
-    clearPdfPreview();
-    setPrintRequest(null);
-    setPrintPreviewData(null);
-    setPrintPreviewStatus('idle');
-    setPrintErrorMessage('');
-  }
-
-  function clearPdfPreview() {
-    pdfPreviewAbortRef.current?.abort();
-    pdfPreviewAbortRef.current = null;
-
-    if (pdfPreviewUrlRef.current) {
-      URL.revokeObjectURL(pdfPreviewUrlRef.current);
-      pdfPreviewUrlRef.current = null;
-    }
-
-    setPdfPreview(null);
-    setPdfPreviewStatus('idle');
-    setPdfPreviewErrorMessage('');
-  }
-
   function downloadBlob(blob: Blob, fileName: string) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -674,38 +414,7 @@ export default function HocVienPage() {
     URL.revokeObjectURL(url);
   }
 
-  function toggleHocVienSelection(hocVienId: number, checked: boolean) {
-    setSelectedHocVienIds((current) => {
-      const next = new Set(current);
-      if (checked) {
-        next.add(hocVienId);
-      } else {
-        next.delete(hocVienId);
-      }
-
-      return next;
-    });
-  }
-
-  function toggleCurrentPageSelection(checked: boolean) {
-    setSelectedHocVienIds((current) => {
-      const next = new Set(current);
-      pageHocVienIds.forEach((hocVienId) => {
-        if (checked) {
-          next.add(hocVienId);
-        } else {
-          next.delete(hocVienId);
-        }
-      });
-
-      return next;
-    });
-  }
-
   const startIndex = (page - 1) * PAGE_SIZE;
-  const pageHocVienIds = rows.map((row) => row.hocVienId).filter((id) => id > 0);
-  const isCurrentPageSelected =
-    pageHocVienIds.length > 0 && pageHocVienIds.every((id) => selectedHocVienIds.has(id));
 
   return (
     <div>
@@ -866,27 +575,12 @@ export default function HocVienPage() {
                 Kiem tra decode anh
               </button>
             )}
-            <button
-              type="button"
-              className="btn btn--ghost"
-              onClick={handlePrintSelected}
-              disabled={selectedHocVienIds.size === 0 || isPrinting}
-            >
-              {isPrinting ? 'Dang in...' : `In the da chon (${selectedHocVienIds.size})`}
-            </button>
-            <button
-              type="button"
-              className="btn btn--ghost"
-              onClick={handlePrintCourse}
-              disabled={!selectedKhoa || isPrinting}
-              title={selectedKhoa ? selectedKhoa.label : 'Chon Khoa de in toan khoa'}
-            >
-              In the toan khoa
-            </button>
+            <Link className="btn btn--ghost" to="/in-the-hoc-vien">
+              Sang màn In thẻ học viên
+            </Link>
           </div>
         </div>
         {exportErrorMessage && <div className="toolbar__error">{exportErrorMessage}</div>}
-        {printErrorMessage && <div className="toolbar__error">{printErrorMessage}</div>}
       </div>
 
       <div className="table-wrap">
@@ -1043,7 +737,6 @@ export default function HocVienPage() {
         {status === 'success' && rows.length > 0 && (
           <table className="table table--hoc-vien">
             <colgroup>
-              <col className="col-select" />
               <col className="col-stt" />
               <col className="col-photo" />
               <col className="col-madk" />
@@ -1060,14 +753,6 @@ export default function HocVienPage() {
             </colgroup>
             <thead>
               <tr>
-                <th>
-                  <input
-                    type="checkbox"
-                    aria-label="Chon tat ca hoc vien tren trang"
-                    checked={isCurrentPageSelected}
-                    onChange={(event) => toggleCurrentPageSelection(event.target.checked)}
-                  />
-                </th>
                 <th>STT</th>
                 <th>Ảnh</th>
                 <th>Mã ĐK</th>
@@ -1100,21 +785,13 @@ export default function HocVienPage() {
 
                 return (
                   <tr key={row.hocVienId || row.maDangKy || index}>
-                    <td>
-                      <input
-                        type="checkbox"
-                        aria-label={`Chon hoc vien ${row.hoVaTen}`}
-                        checked={selectedHocVienIds.has(row.hocVienId)}
-                        onChange={(event) => toggleHocVienSelection(row.hocVienId, event.target.checked)}
-                      />
-                    </td>
                     <td>{startIndex + index + 1}</td>
                     <td>
                       <HocVienPhoto
                         hocVienId={row.hocVienId}
                         title={row.hoVaTen}
                         onPreview={(url, title) =>
-                          setPhotoPreview({ url, title, hocVienId: row.hocVienId })
+                          setPhotoPreview({ url, title })
                         }
                       />
                     </td>
@@ -1223,240 +900,10 @@ export default function HocVienPage() {
               x
             </button>
             <img src={photoPreview.url} alt={photoPreview.title} />
-            <div className="photo-modal__actions">
-              <button
-                type="button"
-                className="btn btn--primary btn--sm"
-                onClick={() => handlePrintSingle(photoPreview.hocVienId)}
-              >
-                In the hoc vien nay
-              </button>
-            </div>
           </div>
         </div>
       )}
 
-      {printRequest && (
-        <div
-          className="print-modal"
-          role="dialog"
-          aria-modal="true"
-          aria-label="In thẻ học viên"
-          onClick={closePrintModal}
-        >
-          <div className="print-modal__dialog" onClick={(event) => event.stopPropagation()}>
-            <div className="print-modal__header">
-              <div>
-                <strong>In thẻ học viên</strong>
-                <p>A4 ngang · 3 cột × 4 dòng · 12 thẻ/trang · 85mm × 50mm</p>
-              </div>
-              <button
-                type="button"
-                className="photo-modal__close"
-                aria-label="Dong"
-                onClick={closePrintModal}
-              >
-                x
-              </button>
-            </div>
-
-            <div className="print-modal__options">
-              <label>
-                Ảnh thiếu
-                <select
-                  className="field__input"
-                  value={printMissingPhotoMode}
-                  onChange={(event) => {
-                    const value = event.target.value as HocVienMissingPhotoMode;
-                    setPrintMissingPhotoMode(value);
-                    loadPrintPreview(printRequest, value, printSortBy);
-                  }}
-                >
-                  <option value="placeholder">Vẫn in ảnh placeholder</option>
-                  <option value="skip">Bỏ qua học viên thiếu ảnh</option>
-                </select>
-              </label>
-              <label>
-                Sắp xếp
-                <select
-                  className="field__input"
-                  value={printSortBy}
-                  onChange={(event) => {
-                    const value = event.target.value as HocVienPrintSortBy;
-                    setPrintSortBy(value);
-                    loadPrintPreview(printRequest, printMissingPhotoMode, value);
-                  }}
-                >
-                  <option value="current">Thứ tự hiện tại</option>
-                  <option value="hoTen">Theo họ tên</option>
-                  <option value="maDK">Theo mã đăng ký</option>
-                </select>
-              </label>
-            </div>
-
-            {printPreviewStatus === 'loading' && (
-              <div className="state">
-                <div className="spinner" aria-hidden="true" />
-                <div>Đang tạo bản xem trước...</div>
-              </div>
-            )}
-
-            {printPreviewStatus === 'error' && (
-              <div className="state state--error">{printErrorMessage}</div>
-            )}
-
-            {printPreviewStatus === 'success' && printPreviewData && (
-              <>
-                <div className="print-modal__summary">
-                  <span>Tổng sẽ in: {printPreviewData.totalStudents.toLocaleString('vi-VN')}</span>
-                  <span>Số trang PDF: {printPreviewData.totalPages.toLocaleString('vi-VN')}</span>
-                  <span>Thẻ/trang: {printPreviewData.cardsPerPage}</span>
-                  <span>Layout: {printPreviewData.layoutName}</span>
-                  {printPreviewData.missingPhotoCount > 0 && (
-                    <strong>
-                      Cảnh báo: {printPreviewData.missingPhotoCount.toLocaleString('vi-VN')} học viên
-                      thiếu ảnh
-                    </strong>
-                  )}
-                </div>
-
-                <HocVienCardSheetPreview preview={printPreviewData} />
-
-                {pdfPreviewStatus === 'loading' && (
-                  <section className="pdf-preview-panel" aria-label="Đang tải bản xem trước PDF">
-                    <div className="pdf-preview-panel__status">
-                      <div className="spinner" aria-hidden="true" />
-                      <div>Đang tạo PDF để xem trước...</div>
-                    </div>
-                  </section>
-                )}
-
-                {pdfPreviewStatus === 'error' && (
-                  <div className="pdf-preview-panel__error" role="alert">
-                    {pdfPreviewErrorMessage}
-                  </div>
-                )}
-
-                {pdfPreviewStatus === 'success' && pdfPreview && (
-                  <section className="pdf-preview-panel" aria-label="Bản xem trước PDF">
-                    <div className="pdf-preview-panel__header">
-                      <div>
-                        <strong>Bản xem trước PDF</strong>
-                        <span>{pdfPreview.fileName}</span>
-                      </div>
-                      <div className="pdf-preview-panel__actions">
-                        <a
-                          className="btn btn--ghost btn--sm"
-                          href={pdfPreview.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          Mở PDF trong tab mới
-                        </a>
-                        <button
-                          type="button"
-                          className="btn btn--ghost btn--sm"
-                          onClick={clearPdfPreview}
-                        >
-                          Đóng bản xem trước
-                        </button>
-                      </div>
-                    </div>
-                    <iframe
-                      className="pdf-preview-panel__frame"
-                      src={`${pdfPreview.url}#toolbar=1&navpanes=0&view=FitH`}
-                      title={`Bản xem trước ${pdfPreview.fileName}`}
-                    />
-                  </section>
-                )}
-
-                <div className="print-modal__table-wrap">
-                  <table className="table table--print-preview">
-                    <thead>
-                      <tr>
-                        <th>Mã ĐK</th>
-                        <th>Họ tên</th>
-                        <th>Khóa</th>
-                        <th>Hạng học</th>
-                        <th>Trạng thái ảnh</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {printPreviewData.items.slice(0, 100).map((item) => {
-                        const khoaLabel =
-                          item.tenKhoa && item.maKhoa
-                            ? `${item.tenKhoa} - ${item.maKhoa}`
-                            : item.maKhoa ?? item.tenKhoa ?? '';
-                        const hangLabel =
-                          item.maHangDT && item.hangGplxHoc
-                            ? `${item.maHangDT} - ${item.hangGplxHoc}`
-                            : item.maHangDT ?? item.hangGplxHoc ?? '';
-
-                        return (
-                          <tr key={item.hocVienId}>
-                            <td className="cell-ellipsis" title={item.maDangKy}>
-                              {item.maDangKy}
-                            </td>
-                            <td className="cell-ellipsis cell-name" title={item.hoVaTen}>
-                              {item.hoVaTen}
-                            </td>
-                            <td className="cell-ellipsis" title={khoaLabel}>
-                              {khoaLabel}
-                            </td>
-                            <td className="cell-ellipsis" title={hangLabel}>
-                              {hangLabel}
-                            </td>
-                            <td>{formatPhotoStatus(item.photoStatus)}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-                {printPreviewData.items.length > 100 && (
-                  <div className="print-modal__note">
-                    Danh sách chỉ hiện 100 dòng đầu; PDF vẫn dùng toàn bộ học viên đã chọn.
-                  </div>
-                )}
-              </>
-            )}
-
-            <div className="print-modal__actions">
-              <button
-                type="button"
-                className="btn btn--ghost"
-                onClick={() => loadPrintPreview(printRequest)}
-                disabled={printPreviewStatus === 'loading' || isPrinting || pdfPreviewStatus === 'loading'}
-              >
-                Làm mới xem trước
-              </button>
-              <button
-                type="button"
-                className="btn btn--ghost"
-                onClick={handlePreviewPrintPdf}
-                disabled={printPreviewStatus !== 'success' || isPrinting || pdfPreviewStatus === 'loading'}
-              >
-                {pdfPreviewStatus === 'loading'
-                  ? 'Đang tải PDF...'
-                  : pdfPreview
-                    ? 'Tạo lại PDF'
-                    : 'Xem trước PDF'}
-              </button>
-              <button
-                type="button"
-                className="btn btn--primary"
-                onClick={handleDownloadPrintPdf}
-                disabled={printPreviewStatus !== 'success' || isPrinting || pdfPreviewStatus === 'loading'}
-              >
-                {isPrinting ? 'Đang tạo PDF...' : 'Tải PDF'}
-              </button>
-              <button type="button" className="btn btn--ghost" onClick={closePrintModal}>
-                Hủy
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

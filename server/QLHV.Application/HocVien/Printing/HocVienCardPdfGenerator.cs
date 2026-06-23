@@ -19,7 +19,8 @@ public sealed class HocVienCardPdfGenerator : IHocVienCardPdfGenerator
 
     public byte[] CreatePdf(
         IReadOnlyList<HocVienListItemDto> hocViens,
-        IReadOnlyDictionary<int, HocVienPhotoPreviewDto>? photosByHocVienId = null)
+        IReadOnlyDictionary<int, HocVienPhotoPreviewDto>? photosByHocVienId = null,
+        HocVienCardTitleOptions? titleOptions = null)
     {
         EnsureFontSettings();
 
@@ -48,7 +49,7 @@ public sealed class HocVienCardPdfGenerator : IHocVienCardPdfGenerator
                 var slot = HocVienCardLayout.GetSlot(studentIndex - start);
                 HocVienPhotoPreviewDto? photo = null;
                 photosByHocVienId?.TryGetValue(student.HocVienId, out photo);
-                DrawCard(graphics, fonts, slot, student, photo);
+                DrawCard(graphics, fonts, slot, student, photo, titleOptions);
             }
         }
 
@@ -62,7 +63,8 @@ public sealed class HocVienCardPdfGenerator : IHocVienCardPdfGenerator
         FontCache fonts,
         CardSlot slot,
         HocVienListItemDto student,
-        HocVienPhotoPreviewDto? photo)
+        HocVienPhotoPreviewDto? photo,
+        HocVienCardTitleOptions? titleOptions)
     {
         var photoRect = Rect(
             slot.XMm + _template.PhotoRect.XMm,
@@ -75,7 +77,7 @@ public sealed class HocVienCardPdfGenerator : IHocVienCardPdfGenerator
             DrawPhotoPlaceholder(graphics, fonts, photoRect);
         }
 
-        var content = _template.CreateContent(student);
+        var content = _template.CreateContent(student, titleOptions);
         foreach (var line in _template.TextLines)
         {
             var text = content.GetText(line.Kind);

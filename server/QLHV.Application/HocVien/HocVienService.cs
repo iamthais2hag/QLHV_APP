@@ -69,7 +69,8 @@ public sealed class HocVienService : IHocVienService
         }
 
         var photos = await LoadPrintablePhotosAsync(rows, cancellationToken);
-        var content = _cardPdfGenerator.CreatePdf(rows, photos);
+        var titleOptions = new HocVienCardTitleOptions(normalized.TitleLine1, normalized.TitleLine2);
+        var content = _cardPdfGenerator.CreatePdf(rows, photos, titleOptions);
         return new HocVienExportFileDto
         {
             FileName = $"TheHocVien_{DateTime.Now:yyyyMMdd_HHmm}.pdf",
@@ -85,6 +86,8 @@ public sealed class HocVienService : IHocVienService
         var normalized = request.Normalized();
         var loadedRows = await LoadRowsForPrintAsync(normalized, cancellationToken);
         var prepared = await PreparePrintRowsAsync(normalized, loadedRows, cancellationToken);
+        var titles = _cardTemplate.ResolveTitles(
+            new HocVienCardTitleOptions(normalized.TitleLine1, normalized.TitleLine2));
 
         return new HocVienCardPrintPreviewDto
         {
@@ -93,8 +96,8 @@ public sealed class HocVienService : IHocVienService
             CardsPerPage = HocVienCardLayout.CardsPerPage,
             LayoutName = "A4 ngang 3x4",
             MissingPhotoCount = prepared.MissingPhotoCount,
-            OrganizationLine1 = _cardTemplate.OrganizationLine1,
-            OrganizationLine2 = _cardTemplate.OrganizationLine2,
+            OrganizationLine1 = titles.TitleLine1,
+            OrganizationLine2 = titles.TitleLine2,
             CardTitle = _cardTemplate.Title,
             Items = prepared.Items,
         };
