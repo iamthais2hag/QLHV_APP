@@ -36,7 +36,7 @@ public sealed class HocVienCardPdfGeneratorTests
         var typography = HocVienCardTypographyOptions.Official with
         {
             OrganizationLine1 = new HocVienCardTextStyleOptions(
-                "Arial", 11d, true, false, true),
+                "Arial", 11d, true, HocVienCardTextCase.Original, true),
         };
         var bytes = CreateGenerator().CreatePdf(
             [CreateHocVien(1)],

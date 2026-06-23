@@ -12,6 +12,7 @@ import type {
   HocVienCardPrintPreview,
   HocVienCardPrintPreviewItem,
   HocVienCardFontFamily,
+  HocVienCardTextCase,
   HocVienCardTextStyleSettings,
   HocVienCardTypographySettings,
   HocVienHangHocLookup,
@@ -46,6 +47,18 @@ interface CardPrintSettings extends CardTitles {
 
 type TypographyLineKey = keyof HocVienCardTypographySettings;
 
+type StoredTextStyle = Partial<HocVienCardTextStyleSettings> & {
+  uppercase?: boolean;
+};
+
+type StoredTypography = {
+  [Key in TypographyLineKey]?: StoredTextStyle;
+};
+
+type StoredCardPrintSettings = Partial<Omit<CardPrintSettings, 'typography'>> & {
+  typography?: StoredTypography;
+};
+
 interface PdfPreviewState {
   blob: Blob;
   fileName: string;
@@ -67,7 +80,7 @@ function officialTextStyle(fontSizePt: number, bold: boolean): HocVienCardTextSt
     fontFamily: 'Times New Roman',
     fontSizePt,
     bold,
-    uppercase: true,
+    textCase: 'uppercase',
     italic: false,
   };
 }
@@ -82,7 +95,7 @@ function normalizeTitle(value: string, fallback: string): string {
 }
 
 function normalizeTextStyle(
-  value: Partial<HocVienCardTextStyleSettings> | undefined,
+  value: StoredTextStyle | undefined,
   fallback: HocVienCardTextStyleSettings,
 ): HocVienCardTextStyleSettings {
   const fontFamily = FONT_FAMILIES.includes(value?.fontFamily as HocVienCardFontFamily)
@@ -97,13 +110,34 @@ function normalizeTextStyle(
     fontFamily,
     fontSizePt,
     bold: typeof value?.bold === 'boolean' ? value.bold : fallback.bold,
-    uppercase: typeof value?.uppercase === 'boolean' ? value.uppercase : fallback.uppercase,
+    textCase: normalizeTextCase(value, fallback.textCase),
     italic: typeof value?.italic === 'boolean' ? value.italic : fallback.italic,
   };
 }
 
+function normalizeTextCase(
+  value: StoredTextStyle | undefined,
+  fallback: HocVienCardTextCase,
+): HocVienCardTextCase {
+  const textCase = value?.textCase;
+  if (
+    textCase === 'original'
+    || textCase === 'uppercase'
+    || textCase === 'titleCase'
+    || textCase === 'lowercase'
+  ) {
+    return textCase;
+  }
+
+  if (typeof value?.uppercase === 'boolean') {
+    return value.uppercase ? 'uppercase' : 'original';
+  }
+
+  return fallback;
+}
+
 function normalizeTypography(
-  value?: Partial<HocVienCardTypographySettings>,
+  value?: StoredTypography,
 ): HocVienCardTypographySettings {
   const official = createOfficialTypography();
   return {
@@ -115,7 +149,7 @@ function normalizeTypography(
   };
 }
 
-function normalizeSettings(value: Partial<CardPrintSettings>): CardPrintSettings {
+function normalizeSettings(value: StoredCardPrintSettings): CardPrintSettings {
   return {
     titleLine1: normalizeTitle(value.titleLine1 ?? '', DEFAULT_TITLES.titleLine1),
     titleLine2: normalizeTitle(value.titleLine2 ?? '', DEFAULT_TITLES.titleLine2),
@@ -127,7 +161,7 @@ function loadSavedSettings(): CardPrintSettings {
   try {
     const raw = window.localStorage.getItem(TITLE_STORAGE_KEY);
     if (!raw) return createOfficialSettings();
-    return normalizeSettings(JSON.parse(raw) as Partial<CardPrintSettings>);
+    return normalizeSettings(JSON.parse(raw) as StoredCardPrintSettings);
   } catch {
     return createOfficialSettings();
   }
@@ -149,8 +183,28 @@ function toPreviewTextStyle(style: HocVienCardTextStyleSettings): CSSProperties 
     fontSize: `clamp(${minimumPx}px, ${viewportScale}vw, ${style.fontSizePt}px)`,
     fontStyle: style.italic ? 'italic' : 'normal',
     fontWeight: style.bold ? 700 : 400,
-    textTransform: style.uppercase ? 'uppercase' : 'none',
+    textTransform: 'none',
   };
+}
+
+function applyTextCase(value: string, textCase: HocVienCardTextCase): string {
+  switch (textCase) {
+    case 'uppercase':
+      return value.toLocaleUpperCase('vi-VN');
+    case 'lowercase':
+      return value.toLocaleLowerCase('vi-VN');
+    case 'titleCase':
+      return value
+        .toLocaleLowerCase('vi-VN')
+        .replace(
+          /(^|[\s:./-])(\S)/gu,
+          (_, separator: string, character: string) => (
+            `${separator}${character.toLocaleUpperCase('vi-VN')}`
+          ),
+        );
+    default:
+      return value;
+  }
 }
 
 function formatPhotoStatus(status: string): string {
@@ -238,6 +292,22 @@ function TypographyControlRow({
           }}
         />
       </label>
+      <label>
+        <span>Kiểu chữ</span>
+        <select
+          className="field__input"
+          value={value.textCase}
+          onChange={(event) => onChange({
+            ...value,
+            textCase: event.target.value as HocVienCardTextCase,
+          })}
+        >
+          <option value="original">Giữ nguyên</option>
+          <option value="uppercase">IN HOA</option>
+          <option value="titleCase">Viết Hoa Đầu Từ</option>
+          <option value="lowercase">chữ thường</option>
+        </select>
+      </label>
       <label className="card-typography-row__toggle">
         <input
           type="checkbox"
@@ -245,14 +315,6 @@ function TypographyControlRow({
           onChange={(event) => onChange({ ...value, bold: event.target.checked })}
         />
         Đậm
-      </label>
-      <label className="card-typography-row__toggle">
-        <input
-          type="checkbox"
-          checked={value.uppercase}
-          onChange={(event) => onChange({ ...value, uppercase: event.target.checked })}
-        />
-        In hoa
       </label>
       <label className="card-typography-row__toggle">
         <input
@@ -291,10 +353,16 @@ function CardSheetPreview({
               <article className="card-preview" key={item.hocVienId}>
                 <header className="card-preview__header">
                   <div style={toPreviewTextStyle(typography.organizationLine1)}>
-                    {preview.organizationLine1}
+                    {applyTextCase(
+                      preview.organizationLine1,
+                      typography.organizationLine1.textCase,
+                    )}
                   </div>
                   <div style={toPreviewTextStyle(typography.organizationLine2)}>
-                    {preview.organizationLine2}
+                    {applyTextCase(
+                      preview.organizationLine2,
+                      typography.organizationLine2.textCase,
+                    )}
                   </div>
                 </header>
                 <div className="card-preview__body">
@@ -304,20 +372,23 @@ function CardSheetPreview({
                       className="card-preview__title"
                       style={toPreviewTextStyle(typography.cardTitle)}
                     >
-                      {preview.cardTitle}
+                      {applyTextCase(preview.cardTitle, typography.cardTitle.textCase)}
                     </div>
                     <div
                       className="card-preview__name"
                       style={toPreviewTextStyle(typography.studentName)}
                       title={item.hoVaTen}
                     >
-                      {item.hoVaTen}
+                      {applyTextCase(item.hoVaTen, typography.studentName.textCase)}
                     </div>
                     <div
                       className="card-preview__rank"
                       style={toPreviewTextStyle(typography.trainingRank)}
                     >
-                      {formatTrainingRank(item.hangGplxHoc, item.maHangDT)}
+                      {applyTextCase(
+                        formatTrainingRank(item.hangGplxHoc, item.maHangDT),
+                        typography.trainingRank.textCase,
+                      )}
                     </div>
                   </div>
                 </div>

@@ -1,3 +1,4 @@
+using System.Globalization;
 using QLHV.Application.HocVien.Dtos;
 
 namespace QLHV.Application.HocVien.Printing;
@@ -90,18 +91,18 @@ public sealed class HocVienCardTemplate
     {
         var styles = ResolveTextLines(options).ToDictionary(line => line.Kind);
         return new HocVienCardTitles(
-            ApplyCase(
+            ApplyTextCase(
                 ResolveTitle(options?.TitleLine1, OrganizationLine1),
-                styles[CardTextKind.OrganizationLine1].Uppercase),
-            ApplyCase(
+                styles[CardTextKind.OrganizationLine1].TextCase),
+            ApplyTextCase(
                 ResolveTitle(options?.TitleLine2, OrganizationLine2),
-                styles[CardTextKind.OrganizationLine2].Uppercase));
+                styles[CardTextKind.OrganizationLine2].TextCase));
     }
 
     public string ResolveCardTitle(HocVienCardTitleOptions? options = null)
     {
         var style = ResolveTextLines(options).Single(line => line.Kind == CardTextKind.Title);
-        return ApplyCase(Title.Trim(), style.Uppercase);
+        return ApplyTextCase(Title.Trim(), style.TextCase);
     }
 
     public HocVienCardContent CreateContent(
@@ -114,18 +115,18 @@ public sealed class HocVienCardTemplate
         return new HocVienCardContent(
             titles.TitleLine1,
             titles.TitleLine2,
-            ApplyCase(Title.Trim(), styles[CardTextKind.Title].Uppercase),
-            ApplyCase(hocVien.HoVaTen.Trim(), styles[CardTextKind.StudentName].Uppercase),
+            ApplyTextCase(Title.Trim(), styles[CardTextKind.Title].TextCase),
+            ApplyTextCase(hocVien.HoVaTen.Trim(), styles[CardTextKind.StudentName].TextCase),
             FormatTrainingRank(
                 hocVien.HangGplxHoc,
                 hocVien.MaHangDT,
-                styles[CardTextKind.TrainingRank].Uppercase));
+                styles[CardTextKind.TrainingRank].TextCase));
     }
 
     public static string FormatTrainingRank(
         string? hangGplxHoc,
         string? maHangDt,
-        bool uppercase = true)
+        HocVienCardTextCase textCase = HocVienCardTextCase.Uppercase)
     {
         var value = FirstValue(hangGplxHoc, maHangDt);
         while (value.Length > 0)
@@ -148,7 +149,7 @@ public sealed class HocVienCardTemplate
         var trainingRank = string.IsNullOrWhiteSpace(value)
             ? string.Empty
             : $"Tập lái xe hạng: {value}";
-        return ApplyCase(trainingRank, uppercase);
+        return ApplyTextCase(trainingRank, textCase);
     }
 
     private static string ResolveTitle(string? value, string fallback)
@@ -173,11 +174,20 @@ public sealed class HocVienCardTemplate
             Bold = style.Bold,
             FontFamily = style.FontFamily,
             Italic = style.Italic,
-            Uppercase = style.Uppercase,
+            TextCase = style.TextCase,
         };
 
-    private static string ApplyCase(string value, bool uppercase)
-        => uppercase ? value.ToUpperInvariant() : value;
+    private static string ApplyTextCase(string value, HocVienCardTextCase textCase)
+    {
+        var culture = CultureInfo.GetCultureInfo("vi-VN");
+        return textCase switch
+        {
+            HocVienCardTextCase.Uppercase => value.ToUpper(culture),
+            HocVienCardTextCase.TitleCase => culture.TextInfo.ToTitleCase(value.ToLower(culture)),
+            HocVienCardTextCase.Lowercase => value.ToLower(culture),
+            _ => value,
+        };
+    }
 
     private static string FirstValue(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
@@ -193,7 +203,7 @@ public sealed record HocVienCardTextStyleOptions(
     string FontFamily,
     double FontSizePt,
     bool Bold,
-    bool Uppercase,
+    HocVienCardTextCase TextCase,
     bool Italic);
 
 public sealed record HocVienCardTypographyOptions(
@@ -204,11 +214,11 @@ public sealed record HocVienCardTypographyOptions(
     HocVienCardTextStyleOptions TrainingRank)
 {
     public static HocVienCardTypographyOptions Official { get; } = new(
-        new("Times New Roman", 10d, false, true, false),
-        new("Times New Roman", 10d, false, true, false),
-        new("Times New Roman", 13d, true, true, false),
-        new("Times New Roman", 14d, true, true, false),
-        new("Times New Roman", 14d, true, true, false));
+        new("Times New Roman", 10d, false, HocVienCardTextCase.Uppercase, false),
+        new("Times New Roman", 10d, false, HocVienCardTextCase.Uppercase, false),
+        new("Times New Roman", 13d, true, HocVienCardTextCase.Uppercase, false),
+        new("Times New Roman", 14d, true, HocVienCardTextCase.Uppercase, false),
+        new("Times New Roman", 14d, true, HocVienCardTextCase.Uppercase, false));
 
     public static HocVienCardTypographyOptions FromRequest(HocVienCardTypographyRequest? request)
     {
@@ -238,8 +248,17 @@ public sealed record HocVienCardTypographyOptions(
             request?.FontFamily ?? fallback.FontFamily,
             request?.FontSizePt ?? fallback.FontSizePt,
             request?.Bold ?? fallback.Bold,
-            request?.Uppercase ?? fallback.Uppercase,
+            ParseTextCase(request?.TextCase) ?? fallback.TextCase,
             request?.Italic ?? fallback.Italic);
+
+    private static HocVienCardTextCase? ParseTextCase(string? value) => value switch
+    {
+        "original" => HocVienCardTextCase.Original,
+        "uppercase" => HocVienCardTextCase.Uppercase,
+        "titleCase" => HocVienCardTextCase.TitleCase,
+        "lowercase" => HocVienCardTextCase.Lowercase,
+        _ => null,
+    };
 }
 
 public sealed record HocVienCardTitles(
@@ -278,7 +297,15 @@ public sealed record CardTextLine(
     bool Bold,
     string FontFamily = "Times New Roman",
     bool Italic = false,
-    bool Uppercase = true);
+    HocVienCardTextCase TextCase = HocVienCardTextCase.Uppercase);
+
+public enum HocVienCardTextCase
+{
+    Original,
+    Uppercase,
+    TitleCase,
+    Lowercase,
+}
 
 public enum CardTextKind
 {

@@ -33,7 +33,8 @@ Mỗi dòng trên thẻ có thiết lập cơ bản tương tự Word:
 
 - Phông chữ: `Times New Roman`, `Arial` hoặc `Tahoma`.
 - Cỡ chữ từ 6pt đến 24pt.
-- Đậm, In hoa và Nghiêng; bỏ chọn Nghiêng tương ứng chữ đứng.
+- Kiểu chữ: `Giữ nguyên`, `IN HOA`, `Viết Hoa Đầu Từ` hoặc `chữ thường`.
+- Đậm và Nghiêng; bỏ chọn Nghiêng tương ứng chữ đứng.
 - Nút **Khôi phục đúng quy cách** đưa toàn bộ kiểu chữ về preset chính thức.
 
 Thiết lập chỉ lưu trong `localStorage` của trình duyệt với key
@@ -44,13 +45,13 @@ thiếu hoặc có giá trị không hợp lệ. Preview A4 và PDF dùng cùng 
 
 Preset đúng quy cách:
 
-| Dòng | Phông | Cỡ | Đậm | In hoa | Nghiêng |
+| Dòng | Phông | Cỡ | Đậm | Kiểu chữ | Nghiêng |
 | --- | --- | ---: | :---: | :---: | :---: |
-| Cơ quan quản lý cấp trên | Times New Roman | 10pt | Không | Có | Không |
-| Tên cơ sở đào tạo | Times New Roman | 10pt | Không | Có | Không |
-| HỌC VIÊN TẬP LÁI XE | Times New Roman | 13pt | Có | Có | Không |
-| Họ tên học viên | Times New Roman | 14pt | Có | Có | Không |
-| Hạng học | Times New Roman | 14pt | Có | Có | Không |
+| Cơ quan quản lý cấp trên | Times New Roman | 10pt | Không | IN HOA | Không |
+| Tên cơ sở đào tạo | Times New Roman | 10pt | Không | IN HOA | Không |
+| HỌC VIÊN TẬP LÁI XE | Times New Roman | 13pt | Có | IN HOA | Không |
+| Họ tên học viên | Times New Roman | 14pt | Có | IN HOA | Không |
+| Hạng học | Times New Roman | 14pt | Có | IN HOA | Không |
 
 ## API
 

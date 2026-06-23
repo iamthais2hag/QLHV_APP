@@ -93,7 +93,7 @@ public sealed class HocVienCardLayoutTests
         Assert.Equal(12d, lines[CardTextKind.OrganizationLine1].PreferredFontSizePt);
         Assert.True(lines[CardTextKind.OrganizationLine1].Bold);
         Assert.True(lines[CardTextKind.OrganizationLine1].Italic);
-        Assert.False(lines[CardTextKind.OrganizationLine1].Uppercase);
+        Assert.Equal(HocVienCardTextCase.Original, lines[CardTextKind.OrganizationLine1].TextCase);
         Assert.Equal("Cơ quan quản lý", content.OrganizationLine1);
         Assert.Equal("Tập lái xe hạng: Am", content.TrainingRank);
         Assert.False(lines[CardTextKind.TrainingRank].Bold);
@@ -116,6 +116,17 @@ public sealed class HocVienCardLayoutTests
         Assert.Equal(HocVienCardTextStyleRequest.MaximumFontSizePt, normalized.FontSizePt);
         Assert.Equal("Times New Roman", options.CardTitle.FontFamily);
         Assert.Equal(HocVienCardTextStyleRequest.MaximumFontSizePt, options.CardTitle.FontSizePt);
+    }
+
+    [Fact]
+    public void Title_case_formats_vietnamese_training_rank_as_requested()
+    {
+        Assert.Equal(
+            "Tập Lái Xe Hạng: Am",
+            HocVienCardTemplate.FormatTrainingRank(
+                "Hạng Am",
+                null,
+                HocVienCardTextCase.TitleCase));
     }
 
     [Theory]

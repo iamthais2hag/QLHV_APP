@@ -60,7 +60,9 @@ public sealed class HocVienCardPrintServiceTests
         Assert.Equal("Arial", pdf.LastTitleOptions?.Typography?.OrganizationLine2.FontFamily);
         Assert.Equal(11d, pdf.LastTitleOptions?.Typography?.OrganizationLine2.FontSizePt);
         Assert.True(pdf.LastTitleOptions?.Typography?.OrganizationLine2.Bold);
-        Assert.False(pdf.LastTitleOptions?.Typography?.OrganizationLine2.Uppercase);
+        Assert.Equal(
+            HocVienCardTextCase.Original,
+            pdf.LastTitleOptions?.Typography?.OrganizationLine2.TextCase);
         Assert.True(pdf.LastTitleOptions?.Typography?.OrganizationLine2.Italic);
     }
 

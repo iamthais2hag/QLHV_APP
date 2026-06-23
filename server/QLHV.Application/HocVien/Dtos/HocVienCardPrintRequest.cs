@@ -99,6 +99,8 @@ public sealed class HocVienCardTextStyleRequest
 
     public bool? Uppercase { get; init; }
 
+    public string? TextCase { get; init; }
+
     public bool? Italic { get; init; }
 
     public HocVienCardTextStyleRequest Normalized()
@@ -115,7 +117,27 @@ public sealed class HocVienCardTextStyleRequest
             FontSizePt = fontSize,
             Bold = Bold,
             Uppercase = Uppercase,
+            TextCase = NormalizeTextCase(TextCase, Uppercase),
             Italic = Italic,
+        };
+    }
+
+    private static string? NormalizeTextCase(string? value, bool? legacyUppercase)
+    {
+        var normalized = value?.Trim().ToLowerInvariant() switch
+        {
+            "original" => "original",
+            "uppercase" => "uppercase",
+            "titlecase" => "titleCase",
+            "lowercase" => "lowercase",
+            _ => null,
+        };
+
+        return normalized ?? legacyUppercase switch
+        {
+            true => "uppercase",
+            false => "original",
+            null => null,
         };
     }
 }

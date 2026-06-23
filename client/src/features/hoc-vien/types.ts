@@ -34,12 +34,13 @@ export type HocVienPrintMode = 'selected' | 'single' | 'course' | 'teacherInCour
 export type HocVienMissingPhotoMode = 'placeholder' | 'skip';
 export type HocVienPrintSortBy = 'current' | 'hoTen' | 'maDK';
 export type HocVienCardFontFamily = 'Times New Roman' | 'Arial' | 'Tahoma';
+export type HocVienCardTextCase = 'original' | 'uppercase' | 'titleCase' | 'lowercase';
 
 export interface HocVienCardTextStyleSettings {
   fontFamily: HocVienCardFontFamily;
   fontSizePt: number;
   bold: boolean;
-  uppercase: boolean;
+  textCase: HocVienCardTextCase;
   italic: boolean;
 }
 
