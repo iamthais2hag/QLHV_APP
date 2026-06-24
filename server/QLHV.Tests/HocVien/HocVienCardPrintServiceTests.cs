@@ -42,6 +42,8 @@ public sealed class HocVienCardPrintServiceTests
             HocVienId = 1,
             TitleLine1 = "  Cơ quan quản lý  ",
             TitleLine2 = "  Cơ sở đào tạo  ",
+            CardTitle = "  Giáo viên dạy lái xe  ",
+            TrainingRankLabel = "  Đào tạo hạng  ",
             Typography = new HocVienCardTypographyRequest
             {
                 OrganizationLine2 = new HocVienCardTextStyleRequest
@@ -57,6 +59,8 @@ public sealed class HocVienCardPrintServiceTests
 
         Assert.Equal("Cơ quan quản lý", pdf.LastTitleOptions?.TitleLine1);
         Assert.Equal("Cơ sở đào tạo", pdf.LastTitleOptions?.TitleLine2);
+        Assert.Equal("Giáo viên dạy lái xe", pdf.LastTitleOptions?.CardTitle);
+        Assert.Equal("Đào tạo hạng", pdf.LastTitleOptions?.TrainingRankLabel);
         Assert.Equal("Arial", pdf.LastTitleOptions?.Typography?.OrganizationLine2.FontFamily);
         Assert.Equal(11d, pdf.LastTitleOptions?.Typography?.OrganizationLine2.FontSizePt);
         Assert.True(pdf.LastTitleOptions?.Typography?.OrganizationLine2.Bold);
@@ -138,10 +142,12 @@ public sealed class HocVienCardPrintServiceTests
             HocVienId = 1,
             TitleLine1 = "  Cơ quan quản lý  ",
             TitleLine2 = "   ",
+            CardTitle = "  Giáo viên dạy lái xe  ",
         });
 
         Assert.Equal("CƠ QUAN QUẢN LÝ", result.OrganizationLine1);
         Assert.Equal(HocVienCardTemplate.Default.OrganizationLine2, result.OrganizationLine2);
+        Assert.Equal("GIÁO VIÊN DẠY LÁI XE", result.CardTitle);
     }
 
     [Fact]

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import {
   getHocVienHangHocLookups,
   getHocVienKhoaLookups,
@@ -29,19 +29,23 @@ const PAGE_SIZE = 20;
 const TITLE_MAX_LENGTH = 100;
 const TITLE_STORAGE_KEY = 'qlhv.hoc-vien-card-titles.v1';
 const FONT_FAMILIES: HocVienCardFontFamily[] = ['Times New Roman', 'Arial', 'Tahoma'];
-const DEFAULT_TITLES = {
+const DEFAULT_CONTENT = {
   titleLine1: 'SỞ XÂY DỰNG TỈNH GIA LAI',
   titleLine2: 'TRUNG TÂM ĐÀO TẠO LÁI XE THÀNH CÔNG',
+  cardTitle: 'HỌC VIÊN TẬP LÁI XE',
+  trainingRankLabel: 'Tập Lái Xe Hạng',
 };
 
 type Status = 'idle' | 'loading' | 'success' | 'error';
 
-interface CardTitles {
+interface CardContentSettings {
   titleLine1: string;
   titleLine2: string;
+  cardTitle: string;
+  trainingRankLabel: string;
 }
 
-interface CardPrintSettings extends CardTitles {
+interface CardPrintSettings extends CardContentSettings {
   typography: HocVienCardTypographySettings;
 }
 
@@ -86,7 +90,7 @@ function officialTextStyle(fontSizePt: number, bold: boolean): HocVienCardTextSt
 }
 
 function createOfficialSettings(): CardPrintSettings {
-  return { ...DEFAULT_TITLES, typography: createOfficialTypography() };
+  return { ...DEFAULT_CONTENT, typography: createOfficialTypography() };
 }
 
 function normalizeTitle(value: string, fallback: string): string {
@@ -151,8 +155,13 @@ function normalizeTypography(
 
 function normalizeSettings(value: StoredCardPrintSettings): CardPrintSettings {
   return {
-    titleLine1: normalizeTitle(value.titleLine1 ?? '', DEFAULT_TITLES.titleLine1),
-    titleLine2: normalizeTitle(value.titleLine2 ?? '', DEFAULT_TITLES.titleLine2),
+    titleLine1: normalizeTitle(value.titleLine1 ?? '', DEFAULT_CONTENT.titleLine1),
+    titleLine2: normalizeTitle(value.titleLine2 ?? '', DEFAULT_CONTENT.titleLine2),
+    cardTitle: normalizeTitle(value.cardTitle ?? '', DEFAULT_CONTENT.cardTitle),
+    trainingRankLabel: normalizeTitle(
+      value.trainingRankLabel ?? '',
+      DEFAULT_CONTENT.trainingRankLabel,
+    ),
     typography: normalizeTypography(value.typography),
   };
 }
@@ -167,12 +176,17 @@ function loadSavedSettings(): CardPrintSettings {
   }
 }
 
-function formatTrainingRank(hangGplxHoc: string | null, maHangDT: string | null): string {
+function formatTrainingRank(
+  hangGplxHoc: string | null,
+  maHangDT: string | null,
+  trainingRankLabel: string,
+): string {
   let value = (hangGplxHoc || maHangDT || '').trim();
   while (/^(hạng|hang)\s+/i.test(value)) {
     value = value.replace(/^(hạng|hang)\s+/i, '').trimStart();
   }
-  return value ? `Tập lái xe hạng: ${value}` : '';
+  const label = trainingRankLabel.trim().replace(/:\s*$/, '') || DEFAULT_CONTENT.trainingRankLabel;
+  return value ? `${label}: ${value}` : '';
 }
 
 function toPreviewTextStyle(style: HocVienCardTextStyleSettings): CSSProperties {
@@ -254,60 +268,57 @@ function CardPhoto({ item }: { item: HocVienCardPrintPreviewItem }) {
 
 function TypographyControlRow({
   label,
+  contentControl,
   value,
   onChange,
 }: {
   label: string;
+  contentControl: ReactNode;
   value: HocVienCardTextStyleSettings;
   onChange: (value: HocVienCardTextStyleSettings) => void;
 }) {
   return (
     <div className="card-typography-row">
       <strong>{label}</strong>
-      <label>
-        <span>Phông chữ</span>
-        <select
-          className="field__input"
-          value={value.fontFamily}
-          onChange={(event) => onChange({
-            ...value,
-            fontFamily: event.target.value as HocVienCardFontFamily,
-          })}
-        >
-          {FONT_FAMILIES.map((font) => <option value={font} key={font}>{font}</option>)}
-        </select>
-      </label>
-      <label>
-        <span>Cỡ chữ (pt)</span>
-        <input
-          className="field__input"
-          type="number"
-          min="6"
-          max="24"
-          step="0.5"
-          value={value.fontSizePt}
-          onChange={(event) => {
-            const fontSizePt = Number(event.target.value);
-            if (Number.isFinite(fontSizePt)) onChange({ ...value, fontSizePt });
-          }}
-        />
-      </label>
-      <label>
-        <span>Kiểu chữ</span>
-        <select
-          className="field__input"
-          value={value.textCase}
-          onChange={(event) => onChange({
-            ...value,
-            textCase: event.target.value as HocVienCardTextCase,
-          })}
-        >
-          <option value="original">Giữ nguyên</option>
-          <option value="uppercase">IN HOA</option>
-          <option value="titleCase">Viết Hoa Đầu Từ</option>
-          <option value="lowercase">chữ thường</option>
-        </select>
-      </label>
+      <div className="card-typography-row__content">{contentControl}</div>
+      <select
+        className="field__input"
+        aria-label={`Phông chữ ${label}`}
+        value={value.fontFamily}
+        onChange={(event) => onChange({
+          ...value,
+          fontFamily: event.target.value as HocVienCardFontFamily,
+        })}
+      >
+        {FONT_FAMILIES.map((font) => <option value={font} key={font}>{font}</option>)}
+      </select>
+      <input
+        className="field__input"
+        aria-label={`Cỡ chữ ${label}`}
+        type="number"
+        min="6"
+        max="24"
+        step="0.5"
+        value={value.fontSizePt}
+        onChange={(event) => {
+          const fontSizePt = Number(event.target.value);
+          if (Number.isFinite(fontSizePt)) onChange({ ...value, fontSizePt });
+        }}
+      />
+      <select
+        className="field__input"
+        aria-label={`Kiểu chữ ${label}`}
+        value={value.textCase}
+        onChange={(event) => onChange({
+          ...value,
+          textCase: event.target.value as HocVienCardTextCase,
+        })}
+      >
+        <option value="original">Giữ nguyên</option>
+        <option value="uppercase">IN HOA</option>
+        <option value="titleCase">Viết Hoa Đầu Từ</option>
+        <option value="lowercase">chữ thường</option>
+      </select>
       <label className="card-typography-row__toggle">
         <input
           type="checkbox"
@@ -331,9 +342,11 @@ function TypographyControlRow({
 function CardSheetPreview({
   preview,
   typography,
+  trainingRankLabel,
 }: {
   preview: HocVienCardPrintPreview;
   typography: HocVienCardTypographySettings;
+  trainingRankLabel: string;
 }) {
   const slots = Array.from(
     { length: 12 },
@@ -386,7 +399,11 @@ function CardSheetPreview({
                       style={toPreviewTextStyle(typography.trainingRank)}
                     >
                       {applyTextCase(
-                        formatTrainingRank(item.hangGplxHoc, item.maHangDT),
+                        formatTrainingRank(
+                          item.hangGplxHoc,
+                          item.maHangDT,
+                          trainingRankLabel,
+                        ),
                         typography.trainingRank.textCase,
                       )}
                     </div>
@@ -602,12 +619,14 @@ export default function HocVienCardPrintPage() {
     setSettingsMessage('Đã lưu thiết lập trên trình duyệt này.');
   }
 
-  function handleRestoreOfficialTypography() {
-    setSettingsInputs((current) => ({
-      ...current,
-      typography: createOfficialTypography(),
-    }));
-    setSettingsMessage('Đã khôi phục kiểu chữ đúng quy cách. Nhấn Lưu thiết lập để áp dụng.');
+  function handleRestoreOfficialSettings() {
+    setSettingsInputs(createOfficialSettings());
+    setSettingsMessage('Đã khôi phục nội dung và kiểu chữ mặc định. Nhấn Lưu để áp dụng.');
+  }
+
+  function updateContent(key: keyof CardContentSettings, value: string) {
+    setSettingsInputs((current) => ({ ...current, [key]: value }));
+    setSettingsMessage('');
   }
 
   function updateTypography(
@@ -732,84 +751,115 @@ export default function HocVienCardPrintPage() {
 
   return (
     <div className="card-print-page">
-      <section className="panel card-title-settings">
-        <div className="card-title-settings__heading">
+      <details className="panel card-title-settings">
+        <summary className="card-title-settings__summary">
           <div>
-            <strong>Thiết lập nội dung và kiểu chữ thẻ</strong>
-            <p>Định dạng theo từng dòng, lưu trên trình duyệt và không ghi cơ sở dữ liệu.</p>
+            <strong>Cấu hình thẻ học viên</strong>
+            <p>Nội dung và kiểu chữ từng dòng, lưu riêng trên trình duyệt này.</p>
           </div>
-          <div className="card-title-settings__actions">
+          <span className="card-title-settings__summary-action">
+            <span className="card-title-settings__open-label">Mở cấu hình</span>
+            <span className="card-title-settings__close-label">Thu gọn</span>
+          </span>
+        </summary>
+        <div className="card-title-settings__body">
+          <div className="card-title-settings__toolbar">
+            <p>Họ và tên, hạng học vẫn lấy từ dữ liệu học viên; các phần chữ còn lại có thể sửa.</p>
+            <div className="card-title-settings__actions">
             <button
               type="button"
               className="btn btn--ghost"
-              onClick={handleRestoreOfficialTypography}
+              onClick={handleRestoreOfficialSettings}
             >
-              Khôi phục đúng quy cách
+              Khôi phục mặc định
             </button>
             <button type="button" className="btn btn--primary" onClick={handleSaveSettings}>
-              Lưu thiết lập
+              Lưu cấu hình
             </button>
+            </div>
           </div>
-        </div>
-        <div className="card-title-settings__fields">
-          <label className="field">
-            <span className="field__label">Tiêu đề 1 - Cơ quan quản lý cấp trên trực tiếp</span>
-            <input
-              className="field__input"
-              maxLength={TITLE_MAX_LENGTH}
-              value={settingsInputs.titleLine1}
-              onChange={(event) => {
-                setSettingsInputs((current) => ({ ...current, titleLine1: event.target.value }));
-                setSettingsMessage('');
-              }}
+          <div className="card-typography-settings">
+            <div className="card-typography-settings__heading">
+              <strong>Nội dung và kiểu chữ từng dòng</strong>
+              <span>Chọn Giữ nguyên để dùng đúng hoa/thường đã nhập.</span>
+            </div>
+            <div className="card-typography-settings__columns" aria-hidden="true">
+              <span>Dòng</span>
+              <span>Nội dung / nguồn dữ liệu</span>
+              <span>Phông chữ</span>
+              <span>Cỡ (pt)</span>
+              <span>Kiểu chữ</span>
+              <span>Đậm</span>
+              <span>Nghiêng</span>
+            </div>
+            <TypographyControlRow
+              label="Tiêu đề 1"
+              contentControl={(
+                <input
+                  className="field__input"
+                  aria-label="Nội dung Tiêu đề 1"
+                  maxLength={TITLE_MAX_LENGTH}
+                  value={settingsInputs.titleLine1}
+                  onChange={(event) => updateContent('titleLine1', event.target.value)}
+                />
+              )}
+              value={settingsInputs.typography.organizationLine1}
+              onChange={(value) => updateTypography('organizationLine1', value)}
             />
-          </label>
-          <label className="field">
-            <span className="field__label">Tiêu đề 2 - Tên cơ sở đào tạo</span>
-            <input
-              className="field__input"
-              maxLength={TITLE_MAX_LENGTH}
-              value={settingsInputs.titleLine2}
-              onChange={(event) => {
-                setSettingsInputs((current) => ({ ...current, titleLine2: event.target.value }));
-                setSettingsMessage('');
-              }}
+            <TypographyControlRow
+              label="Tiêu đề 2"
+              contentControl={(
+                <input
+                  className="field__input"
+                  aria-label="Nội dung Tiêu đề 2"
+                  maxLength={TITLE_MAX_LENGTH}
+                  value={settingsInputs.titleLine2}
+                  onChange={(event) => updateContent('titleLine2', event.target.value)}
+                />
+              )}
+              value={settingsInputs.typography.organizationLine2}
+              onChange={(value) => updateTypography('organizationLine2', value)}
             />
-          </label>
-        </div>
-        <div className="card-typography-settings">
-          <div className="card-typography-settings__heading">
-            <strong>Kiểu chữ theo từng dòng</strong>
-            <span>Bỏ chọn Nghiêng để dùng chữ đứng.</span>
+            <TypographyControlRow
+              label="GV/HV"
+              contentControl={(
+                <input
+                  className="field__input"
+                  aria-label="Nội dung GV/HV"
+                  maxLength={TITLE_MAX_LENGTH}
+                  value={settingsInputs.cardTitle}
+                  onChange={(event) => updateContent('cardTitle', event.target.value)}
+                />
+              )}
+              value={settingsInputs.typography.cardTitle}
+              onChange={(value) => updateTypography('cardTitle', value)}
+            />
+            <TypographyControlRow
+              label="Họ và tên"
+              contentControl={(
+                <span className="card-typography-row__data-source">Lấy từ dữ liệu học viên</span>
+              )}
+              value={settingsInputs.typography.studentName}
+              onChange={(value) => updateTypography('studentName', value)}
+            />
+            <TypographyControlRow
+              label="Hạng học"
+              contentControl={(
+                <input
+                  className="field__input"
+                  aria-label="Nội dung trước hạng học"
+                  maxLength={TITLE_MAX_LENGTH}
+                  value={settingsInputs.trainingRankLabel}
+                  onChange={(event) => updateContent('trainingRankLabel', event.target.value)}
+                />
+              )}
+              value={settingsInputs.typography.trainingRank}
+              onChange={(value) => updateTypography('trainingRank', value)}
+            />
           </div>
-          <TypographyControlRow
-            label="Tiêu đề 1"
-            value={settingsInputs.typography.organizationLine1}
-            onChange={(value) => updateTypography('organizationLine1', value)}
-          />
-          <TypographyControlRow
-            label="Tiêu đề 2"
-            value={settingsInputs.typography.organizationLine2}
-            onChange={(value) => updateTypography('organizationLine2', value)}
-          />
-          <TypographyControlRow
-            label="HỌC VIÊN TẬP LÁI XE"
-            value={settingsInputs.typography.cardTitle}
-            onChange={(value) => updateTypography('cardTitle', value)}
-          />
-          <TypographyControlRow
-            label="Họ tên học viên"
-            value={settingsInputs.typography.studentName}
-            onChange={(value) => updateTypography('studentName', value)}
-          />
-          <TypographyControlRow
-            label="Hạng học"
-            value={settingsInputs.typography.trainingRank}
-            onChange={(value) => updateTypography('trainingRank', value)}
-          />
+          {settingsMessage && <div className="card-title-settings__message">{settingsMessage}</div>}
         </div>
-        {settingsMessage && <div className="card-title-settings__message">{settingsMessage}</div>}
-      </section>
+      </details>
 
       <div className="toolbar">
         <div className="toolbar__row">
@@ -987,6 +1037,9 @@ export default function HocVienCardPrintPage() {
             <CardSheetPreview
               preview={printPreview}
               typography={printRequest.typography ?? savedSettings.typography}
+              trainingRankLabel={
+                printRequest.trainingRankLabel ?? savedSettings.trainingRankLabel
+              }
             />
             {pdfStatus === 'loading' && <section className="pdf-preview-panel"><div className="pdf-preview-panel__status"><div className="spinner" /><div>Đang tạo PDF để xem trước...</div></div></section>}
             {pdfStatus === 'error' && <div className="pdf-preview-panel__error" role="alert">{pdfError}</div>}

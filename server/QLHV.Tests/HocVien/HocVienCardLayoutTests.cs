@@ -126,7 +126,40 @@ public sealed class HocVienCardLayoutTests
             HocVienCardTemplate.FormatTrainingRank(
                 "Hạng Am",
                 null,
-                HocVienCardTextCase.TitleCase));
+                HocVienCardTextCase.TitleCase,
+                "Tập Lái Xe Hạng"));
+    }
+
+    [Fact]
+    public void Card_title_and_training_rank_label_can_be_customized_without_replacing_student_data()
+    {
+        var typography = HocVienCardTypographyOptions.Official with
+        {
+            CardTitle = HocVienCardTypographyOptions.Official.CardTitle with
+            {
+                TextCase = HocVienCardTextCase.Original,
+            },
+            TrainingRank = HocVienCardTypographyOptions.Official.TrainingRank with
+            {
+                TextCase = HocVienCardTextCase.Original,
+            },
+        };
+        var options = new HocVienCardTitleOptions(
+            null,
+            null,
+            typography,
+            "Giáo viên dạy lái xe",
+            "Đào tạo hạng:");
+
+        var content = HocVienCardTemplate.Default.CreateContent(new HocVienListItemDto
+        {
+            HoVaTen = "Nguyễn Đức Đạt",
+            HangGplxHoc = "Hạng Am",
+        }, options);
+
+        Assert.Equal("Giáo viên dạy lái xe", content.Title);
+        Assert.Equal("NGUYỄN ĐỨC ĐẠT", content.StudentName);
+        Assert.Equal("Đào tạo hạng: Am", content.TrainingRank);
     }
 
     [Theory]
