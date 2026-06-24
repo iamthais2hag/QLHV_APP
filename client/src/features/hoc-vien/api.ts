@@ -78,6 +78,10 @@ export function getHocVienPhotoPreviewUrl(hocVienId: number): string {
   return `${API_BASE}/hoc-vien/${hocVienId}/photo/preview`;
 }
 
+export function getHocVienCardLogoUrl(): string {
+  return `${API_BASE}/hoc-vien/the-hoc-vien/logo`;
+}
+
 export async function printHocVienCardsA4(
   request: HocVienPrintCardsRequest,
   signal?: AbortSignal,

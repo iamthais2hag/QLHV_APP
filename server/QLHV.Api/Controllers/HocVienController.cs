@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using QLHV.Application.HocVien;
 using QLHV.Application.HocVien.Dtos;
+using QLHV.Application.HocVien.Printing;
 using QLHV.Shared.Paging;
 
 namespace QLHV.Api.Controllers;
@@ -98,6 +99,15 @@ public sealed class HocVienController : ControllerBase
         {
             return StatusCode(StatusCodes.Status415UnsupportedMediaType, new { message = ex.Message });
         }
+    }
+
+    [HttpGet("the-hoc-vien/logo")]
+    [Produces("image/png")]
+    [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK)]
+    public IActionResult CardLogo()
+    {
+        Response.Headers.CacheControl = "public, max-age=86400";
+        return File(HocVienCardLogo.Content.ToArray(), "image/png");
     }
 
     /// <summary>Lookup hang hoc distinct tu App_HocVien.</summary>

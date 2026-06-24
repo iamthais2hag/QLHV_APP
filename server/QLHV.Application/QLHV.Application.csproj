@@ -12,6 +12,10 @@
     <PackageReference Include="PDFsharp" Version="6.2.4" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="HocVien\Printing\Assets\LOGO-THANH-CONG.png" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
