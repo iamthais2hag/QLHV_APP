@@ -62,6 +62,8 @@ export interface HocVienPrintCardsRequest {
   sortBy?: HocVienPrintSortBy;
   titleLine1?: string;
   titleLine2?: string;
+  cardTitle?: string;
+  trainingRankLabel?: string;
   typography?: HocVienCardTypographySettings;
 }
 

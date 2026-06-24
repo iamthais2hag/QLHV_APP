@@ -22,6 +22,10 @@ public sealed class HocVienCardPrintRequest
 
     public string? TitleLine2 { get; init; }
 
+    public string? CardTitle { get; init; }
+
+    public string? TrainingRankLabel { get; init; }
+
     public HocVienCardTypographyRequest? Typography { get; init; }
 
     public HocVienCardPrintRequest Normalized() => new()
@@ -40,6 +44,8 @@ public sealed class HocVienCardPrintRequest
         SortBy = string.IsNullOrWhiteSpace(SortBy) ? "current" : SortBy.Trim(),
         TitleLine1 = NormalizeTitle(TitleLine1),
         TitleLine2 = NormalizeTitle(TitleLine2),
+        CardTitle = NormalizeTitle(CardTitle),
+        TrainingRankLabel = NormalizeTitle(TrainingRankLabel),
         Typography = Typography?.Normalized(),
     };
 

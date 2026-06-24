@@ -17,17 +17,25 @@ Chức năng được đặt tại menu **In thẻ học viên**, route
 `/in-the-hoc-vien`. Màn **Học viên** chỉ giữ một liên kết điều hướng nhỏ và tiếp
 tục tập trung vào tra cứu, xuất Excel, xem ảnh và đối soát ảnh.
 
-## Thiết lập nội dung và kiểu chữ thẻ
+## Cấu hình thẻ học viên
 
-Trang **In thẻ học viên** cho phép nhập và lưu:
+Trang **In thẻ học viên** hiển thị một ô **Cấu hình thẻ học viên** thu gọn. Bấm
+vào ô này để mở bảng chỉnh nội dung và kiểu chữ từng dòng:
 
-- **Tiêu đề 1 - Cơ quan quản lý cấp trên trực tiếp**.
-- **Tiêu đề 2 - Tên cơ sở đào tạo**.
+- **Tiêu đề 1**: nhập nội dung cơ quan quản lý và chỉnh kiểu chữ.
+- **Tiêu đề 2**: nhập nội dung cơ sở đào tạo và chỉnh kiểu chữ.
+- **GV/HV**: nhập nội dung như `HỌC VIÊN TẬP LÁI XE`; có thể đổi để tái sử dụng
+  mẫu cho giáo viên.
+- **Họ và tên**: luôn lấy từ dữ liệu học viên, chỉ cho chỉnh kiểu chữ.
+- **Hạng học**: nhập phần nhãn đứng trước hạng, ví dụ `Tập Lái Xe Hạng`; mã/tên
+  hạng phía sau vẫn lấy từ dữ liệu học viên.
 
-Giá trị mặc định là:
+Nội dung mặc định là:
 
 1. `SỞ XÂY DỰNG TỈNH GIA LAI`
 2. `TRUNG TÂM ĐÀO TẠO LÁI XE THÀNH CÔNG`
+3. `HỌC VIÊN TẬP LÁI XE`
+4. `Tập Lái Xe Hạng`
 
 Mỗi dòng trên thẻ có thiết lập cơ bản tương tự Word:
 
@@ -35,13 +43,14 @@ Mỗi dòng trên thẻ có thiết lập cơ bản tương tự Word:
 - Cỡ chữ từ 6pt đến 24pt.
 - Kiểu chữ: `Giữ nguyên`, `IN HOA`, `Viết Hoa Đầu Từ` hoặc `chữ thường`.
 - Đậm và Nghiêng; bỏ chọn Nghiêng tương ứng chữ đứng.
-- Nút **Khôi phục đúng quy cách** đưa toàn bộ kiểu chữ về preset chính thức.
+- Nút **Khôi phục mặc định** đưa cả nội dung và kiểu chữ về preset chính thức.
 
 Thiết lập chỉ lưu trong `localStorage` của trình duyệt với key
 `qlhv.hoc-vien-card-titles.v1`, không ghi database. Frontend gửi `titleLine1`,
-`titleLine2` và `typography` trong request preview/PDF. Backend trim tiêu đề,
-giới hạn 100 ký tự, whitelist font, clamp cỡ chữ và dùng preset chính thức khi
-thiếu hoặc có giá trị không hợp lệ. Preview A4 và PDF dùng cùng cấu hình.
+`titleLine2`, `cardTitle`, `trainingRankLabel` và `typography` trong request
+preview/PDF. Backend trim nội dung, giới hạn 100 ký tự, whitelist font, clamp cỡ
+chữ và dùng preset chính thức khi thiếu hoặc có giá trị không hợp lệ. Preview A4
+và PDF dùng cùng cấu hình.
 
 Preset đúng quy cách:
 
@@ -50,7 +59,7 @@ Preset đúng quy cách:
 | Cơ quan quản lý cấp trên | Times New Roman | 10pt | Không | IN HOA | Không |
 | Tên cơ sở đào tạo | Times New Roman | 10pt | Không | IN HOA | Không |
 | HỌC VIÊN TẬP LÁI XE | Times New Roman | 13pt | Có | IN HOA | Không |
-| Họ tên học viên | Times New Roman | 14pt | Có | IN HOA | Không |
+| Họ và tên | Times New Roman | 14pt | Có | IN HOA | Không |
 | Hạng học | Times New Roman | 14pt | Có | IN HOA | Không |
 
 ## API
@@ -141,9 +150,10 @@ Header gồm hai dòng căn giữa:
 2. Họ tên học viên viết hoa
 3. `TẬP LÁI XE HẠNG: {mã hạng}`
 
-Dòng hạng dùng `HangGPLXHoc`, bỏ tiền tố lặp `Hạng ` hoặc `Hang ` nếu có, rồi
-render chữ hoa và đậm. Ví dụ `Hạng Am` thành `TẬP LÁI XE HẠNG: AM`; nếu tên hạng
-trống thì dùng `MaHangDT` làm fallback.
+Dòng hạng dùng nhãn `trainingRankLabel` đã lưu và giá trị `HangGPLXHoc`, bỏ tiền
+tố lặp `Hạng ` hoặc `Hang ` nếu có. Ví dụ nhãn `Tập Lái Xe Hạng` kết hợp với
+`Hạng Am` thành `TẬP LÁI XE HẠNG: AM` theo preset; nếu tên hạng trống thì dùng
+`MaHangDT` làm fallback.
 
 Mã đăng ký, tên khóa và mã khóa vẫn có thể xuất hiện trong bảng đối chiếu của
 modal nhưng **không được in trên thẻ và không xuất hiện trong preview hình thẻ**.

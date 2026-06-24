@@ -6,6 +6,7 @@ namespace QLHV.Application.HocVien.Printing;
 public sealed class HocVienCardTemplate
 {
     private const double TextPaddingMm = 1.5d;
+    private const string DefaultTrainingRankLabel = "Tập lái xe hạng";
 
     public static HocVienCardTemplate Default { get; } = new();
 
@@ -14,6 +15,8 @@ public sealed class HocVienCardTemplate
     public string OrganizationLine2 { get; init; } = "TRUNG TÂM ĐÀO TẠO LÁI XE THÀNH CÔNG";
 
     public string Title { get; init; } = "Học viên tập lái xe";
+
+    public string TrainingRankLabel { get; init; } = DefaultTrainingRankLabel;
 
     public string FontFamily { get; init; } = "Times New Roman";
 
@@ -102,7 +105,9 @@ public sealed class HocVienCardTemplate
     public string ResolveCardTitle(HocVienCardTitleOptions? options = null)
     {
         var style = ResolveTextLines(options).Single(line => line.Kind == CardTextKind.Title);
-        return ApplyTextCase(Title.Trim(), style.TextCase);
+        return ApplyTextCase(
+            ResolveTitle(options?.CardTitle, Title),
+            style.TextCase);
     }
 
     public HocVienCardContent CreateContent(
@@ -115,18 +120,22 @@ public sealed class HocVienCardTemplate
         return new HocVienCardContent(
             titles.TitleLine1,
             titles.TitleLine2,
-            ApplyTextCase(Title.Trim(), styles[CardTextKind.Title].TextCase),
+            ApplyTextCase(
+                ResolveTitle(titleOptions?.CardTitle, Title),
+                styles[CardTextKind.Title].TextCase),
             ApplyTextCase(hocVien.HoVaTen.Trim(), styles[CardTextKind.StudentName].TextCase),
             FormatTrainingRank(
                 hocVien.HangGplxHoc,
                 hocVien.MaHangDT,
-                styles[CardTextKind.TrainingRank].TextCase));
+                styles[CardTextKind.TrainingRank].TextCase,
+                titleOptions?.TrainingRankLabel));
     }
 
     public static string FormatTrainingRank(
         string? hangGplxHoc,
         string? maHangDt,
-        HocVienCardTextCase textCase = HocVienCardTextCase.Uppercase)
+        HocVienCardTextCase textCase = HocVienCardTextCase.Uppercase,
+        string? trainingRankLabel = null)
     {
         var value = FirstValue(hangGplxHoc, maHangDt);
         while (value.Length > 0)
@@ -146,10 +155,20 @@ public sealed class HocVienCardTemplate
             break;
         }
 
+        var label = NormalizeTrainingRankLabel(trainingRankLabel);
         var trainingRank = string.IsNullOrWhiteSpace(value)
             ? string.Empty
-            : $"Tập lái xe hạng: {value}";
+            : $"{label}: {value}";
         return ApplyTextCase(trainingRank, textCase);
+    }
+
+    private static string NormalizeTrainingRankLabel(string? value)
+    {
+        var normalized = ResolveTitle(value, DefaultTrainingRankLabel)
+            .TrimEnd()
+            .TrimEnd(':')
+            .TrimEnd();
+        return normalized.Length == 0 ? DefaultTrainingRankLabel : normalized;
     }
 
     private static string ResolveTitle(string? value, string fallback)
@@ -197,7 +216,9 @@ public sealed class HocVienCardTemplate
 public sealed record HocVienCardTitleOptions(
     string? TitleLine1,
     string? TitleLine2,
-    HocVienCardTypographyOptions? Typography = null);
+    HocVienCardTypographyOptions? Typography = null,
+    string? CardTitle = null,
+    string? TrainingRankLabel = null);
 
 public sealed record HocVienCardTextStyleOptions(
     string FontFamily,
