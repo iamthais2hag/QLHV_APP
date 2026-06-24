@@ -29,12 +29,25 @@ public sealed class HocVienCardLayoutTests
         var template = HocVienCardTemplate.Default;
 
         Assert.Equal(new CardElementRect(0d, 0d, 85d, 10d), template.HeaderRect);
+        Assert.Equal(new CardElementRect(0.3d, 0.3d, 9.4d, 9.4d), template.HeaderLogoRect);
         Assert.Equal(new CardElementRect(0d, 10d, 30d, 40d), template.PhotoRect);
         Assert.Equal(new CardElementRect(30d, 10d, 55d, 40d), template.BodyTextRect);
+        Assert.Equal(new CardElementRect(44.5d, 17d, 26d, 26d), template.BodyWatermarkRect);
         Assert.Equal(HocVienCardLayout.CardHeightMm,
             template.HeaderRect.HeightMm + template.BodyTextRect.HeightMm);
         Assert.Equal(HocVienCardLayout.CardWidthMm,
             template.PhotoRect.WidthMm + template.BodyTextRect.WidthMm);
+        Assert.True(template.HeaderLogoRect.XMm + template.HeaderLogoRect.WidthMm <= 10d);
+        Assert.Equal(
+            0.3d,
+            template.HeaderRect.HeightMm
+                - template.HeaderLogoRect.YMm
+                - template.HeaderLogoRect.HeightMm,
+            precision: 8);
+        Assert.True(template.BodyWatermarkRect.XMm >= template.BodyTextRect.XMm);
+        Assert.True(
+            template.BodyWatermarkRect.XMm + template.BodyWatermarkRect.WidthMm
+            <= template.BodyTextRect.XMm + template.BodyTextRect.WidthMm);
     }
 
     [Fact]
@@ -53,6 +66,43 @@ public sealed class HocVienCardLayoutTests
         Assert.True(lines[CardTextKind.StudentName].Bold);
         Assert.Equal(14d, lines[CardTextKind.TrainingRank].PreferredFontSizePt);
         Assert.True(lines[CardTextKind.TrainingRank].Bold);
+    }
+
+    [Fact]
+    public void Logo_settings_are_clamped_and_resolved_inside_existing_card_cells()
+    {
+        var normalized = new HocVienCardPrintRequest
+        {
+            Logo = new HocVienCardLogoSettingsRequest
+            {
+                Header = new HocVienCardLogoPlacementRequest
+                {
+                    Enabled = false,
+                    SizeMm = 99d,
+                },
+                Watermark = new HocVienCardLogoPlacementRequest
+                {
+                    Enabled = true,
+                    SizeMm = 1d,
+                },
+            },
+        }.Normalized();
+        var options = HocVienCardLogoOptions.FromRequest(normalized.Logo);
+
+        Assert.False(options.Header.Enabled);
+        Assert.Equal(9.4d, options.Header.SizeMm);
+        Assert.True(options.Watermark.Enabled);
+        Assert.Equal(8d, options.Watermark.SizeMm);
+
+        var custom = new HocVienCardLogoOptions(
+            new(true, 5d),
+            new(true, 38d));
+        Assert.Equal(
+            new CardElementRect(0.3d, 2.5d, 5d, 5d),
+            HocVienCardTemplate.Default.ResolveHeaderLogoRect(custom));
+        Assert.Equal(
+            new CardElementRect(38.5d, 11d, 38d, 38d),
+            HocVienCardTemplate.Default.ResolveBodyWatermarkRect(custom));
     }
 
     [Fact]

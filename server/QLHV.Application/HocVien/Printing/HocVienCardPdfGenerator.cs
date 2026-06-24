@@ -33,6 +33,8 @@ public sealed class HocVienCardPdfGenerator : IHocVienCardPdfGenerator
         var textLines = _template.ResolveTextLines(titleOptions);
         var rows = hocViens.ToArray();
         var pageCount = HocVienCardLayout.GetPageCount(rows.Length);
+        using var logoStream = HocVienCardLogo.OpenRead();
+        using var logo = XImage.FromStream(logoStream);
 
         for (var pageIndex = 0; pageIndex < pageCount; pageIndex++)
         {
@@ -50,7 +52,7 @@ public sealed class HocVienCardPdfGenerator : IHocVienCardPdfGenerator
                 var slot = HocVienCardLayout.GetSlot(studentIndex - start);
                 HocVienPhotoPreviewDto? photo = null;
                 photosByHocVienId?.TryGetValue(student.HocVienId, out photo);
-                DrawCard(graphics, fonts, slot, student, photo, titleOptions, textLines);
+                DrawCard(graphics, fonts, logo, slot, student, photo, titleOptions, textLines);
             }
         }
 
@@ -62,6 +64,7 @@ public sealed class HocVienCardPdfGenerator : IHocVienCardPdfGenerator
     private void DrawCard(
         XGraphics graphics,
         FontCache fonts,
+        XImage logo,
         CardSlot slot,
         HocVienListItemDto student,
         HocVienPhotoPreviewDto? photo,
@@ -77,6 +80,32 @@ public sealed class HocVienCardPdfGenerator : IHocVienCardPdfGenerator
         if (!TryDrawPhoto(graphics, photoRect, photo))
         {
             DrawPhotoPlaceholder(graphics, fonts, photoRect);
+        }
+
+        var logoOptions = titleOptions?.Logo ?? HocVienCardLogoOptions.Official;
+        if (logoOptions.Header.Enabled)
+        {
+            var headerLogo = _template.ResolveHeaderLogoRect(logoOptions);
+            var headerLogoRect = Rect(
+                slot.XMm + headerLogo.XMm,
+                slot.YMm + headerLogo.YMm,
+                headerLogo.WidthMm,
+                headerLogo.HeightMm);
+            DrawCircularLogo(graphics, logo, headerLogoRect);
+        }
+
+        if (logoOptions.Watermark.Enabled)
+        {
+            var watermark = _template.ResolveBodyWatermarkRect(logoOptions);
+            var watermarkRect = Rect(
+                slot.XMm + watermark.XMm,
+                slot.YMm + watermark.YMm,
+                watermark.WidthMm,
+                watermark.HeightMm);
+            DrawCircularLogo(graphics, logo, watermarkRect);
+            graphics.DrawEllipse(
+                new XSolidBrush(XColor.FromArgb(220, 255, 255, 255)),
+                watermarkRect);
         }
 
         var content = _template.CreateContent(student, titleOptions);
@@ -121,6 +150,26 @@ public sealed class HocVienCardPdfGenerator : IHocVienCardPdfGenerator
 
         var cardRect = Rect(slot.XMm, slot.YMm, slot.WidthMm, slot.HeightMm);
         graphics.DrawRectangle(new XPen(XColors.Black, 0.65d), cardRect);
+    }
+
+    private static void DrawCircularLogo(XGraphics graphics, XImage logo, XRect destination)
+    {
+        var state = graphics.Save();
+        var clip = new XGraphicsPath();
+        clip.AddEllipse(destination);
+        graphics.IntersectClip(clip);
+
+        var cropMargin = Math.Min(logo.PointWidth, logo.PointHeight) * 0.015d;
+        graphics.DrawImage(
+            logo,
+            destination,
+            new XRect(
+                cropMargin,
+                cropMargin,
+                logo.PointWidth - 2d * cropMargin,
+                logo.PointHeight - 2d * cropMargin),
+            XGraphicsUnit.Point);
+        graphics.Restore(state);
     }
 
     private static bool TryDrawPhoto(

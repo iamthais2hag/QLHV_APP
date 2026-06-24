@@ -44,6 +44,19 @@ public sealed class HocVienCardPrintServiceTests
             TitleLine2 = "  Cơ sở đào tạo  ",
             CardTitle = "  Giáo viên dạy lái xe  ",
             TrainingRankLabel = "  Đào tạo hạng  ",
+            Logo = new HocVienCardLogoSettingsRequest
+            {
+                Header = new HocVienCardLogoPlacementRequest
+                {
+                    Enabled = false,
+                    SizeMm = 5d,
+                },
+                Watermark = new HocVienCardLogoPlacementRequest
+                {
+                    Enabled = true,
+                    SizeMm = 32d,
+                },
+            },
             Typography = new HocVienCardTypographyRequest
             {
                 OrganizationLine2 = new HocVienCardTextStyleRequest
@@ -61,6 +74,10 @@ public sealed class HocVienCardPrintServiceTests
         Assert.Equal("Cơ sở đào tạo", pdf.LastTitleOptions?.TitleLine2);
         Assert.Equal("Giáo viên dạy lái xe", pdf.LastTitleOptions?.CardTitle);
         Assert.Equal("Đào tạo hạng", pdf.LastTitleOptions?.TrainingRankLabel);
+        Assert.False(pdf.LastTitleOptions?.Logo?.Header.Enabled);
+        Assert.Equal(5d, pdf.LastTitleOptions?.Logo?.Header.SizeMm);
+        Assert.True(pdf.LastTitleOptions?.Logo?.Watermark.Enabled);
+        Assert.Equal(32d, pdf.LastTitleOptions?.Logo?.Watermark.SizeMm);
         Assert.Equal("Arial", pdf.LastTitleOptions?.Typography?.OrganizationLine2.FontFamily);
         Assert.Equal(11d, pdf.LastTitleOptions?.Typography?.OrganizationLine2.FontSizePt);
         Assert.True(pdf.LastTitleOptions?.Typography?.OrganizationLine2.Bold);

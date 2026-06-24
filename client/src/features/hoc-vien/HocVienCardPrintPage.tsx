@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
   getHocVienHangHocLookups,
+  getHocVienCardLogoUrl,
   getHocVienKhoaLookups,
   getHocVienPhotoPreviewUrl,
   previewHocVienCardsA4,
@@ -12,6 +13,8 @@ import type {
   HocVienCardPrintPreview,
   HocVienCardPrintPreviewItem,
   HocVienCardFontFamily,
+  HocVienCardLogoPlacementSettings,
+  HocVienCardLogoSettings,
   HocVienCardTextCase,
   HocVienCardTextStyleSettings,
   HocVienCardTypographySettings,
@@ -29,6 +32,10 @@ const PAGE_SIZE = 20;
 const TITLE_MAX_LENGTH = 100;
 const TITLE_STORAGE_KEY = 'qlhv.hoc-vien-card-titles.v1';
 const FONT_FAMILIES: HocVienCardFontFamily[] = ['Times New Roman', 'Arial', 'Tahoma'];
+const HEADER_LOGO_MIN_SIZE_MM = 3;
+const HEADER_LOGO_MAX_SIZE_MM = 9.4;
+const WATERMARK_MIN_SIZE_MM = 8;
+const WATERMARK_MAX_SIZE_MM = 38;
 const DEFAULT_CONTENT = {
   titleLine1: 'SỞ XÂY DỰNG TỈNH GIA LAI',
   titleLine2: 'TRUNG TÂM ĐÀO TẠO LÁI XE THÀNH CÔNG',
@@ -47,6 +54,7 @@ interface CardContentSettings {
 
 interface CardPrintSettings extends CardContentSettings {
   typography: HocVienCardTypographySettings;
+  logo: HocVienCardLogoSettings;
 }
 
 type TypographyLineKey = keyof HocVienCardTypographySettings;
@@ -59,8 +67,14 @@ type StoredTypography = {
   [Key in TypographyLineKey]?: StoredTextStyle;
 };
 
-type StoredCardPrintSettings = Partial<Omit<CardPrintSettings, 'typography'>> & {
+type StoredLogoSettings = {
+  header?: Partial<HocVienCardLogoPlacementSettings>;
+  watermark?: Partial<HocVienCardLogoPlacementSettings>;
+};
+
+type StoredCardPrintSettings = Partial<Omit<CardPrintSettings, 'typography' | 'logo'>> & {
   typography?: StoredTypography;
+  logo?: StoredLogoSettings;
 };
 
 interface PdfPreviewState {
@@ -79,6 +93,13 @@ function createOfficialTypography(): HocVienCardTypographySettings {
   };
 }
 
+function createOfficialLogoSettings(): HocVienCardLogoSettings {
+  return {
+    header: { enabled: true, sizeMm: 9.4 },
+    watermark: { enabled: true, sizeMm: 26 },
+  };
+}
+
 function officialTextStyle(fontSizePt: number, bold: boolean): HocVienCardTextStyleSettings {
   return {
     fontFamily: 'Times New Roman',
@@ -90,7 +111,11 @@ function officialTextStyle(fontSizePt: number, bold: boolean): HocVienCardTextSt
 }
 
 function createOfficialSettings(): CardPrintSettings {
-  return { ...DEFAULT_CONTENT, typography: createOfficialTypography() };
+  return {
+    ...DEFAULT_CONTENT,
+    typography: createOfficialTypography(),
+    logo: createOfficialLogoSettings(),
+  };
 }
 
 function normalizeTitle(value: string, fallback: string): string {
@@ -153,6 +178,39 @@ function normalizeTypography(
   };
 }
 
+function normalizeLogoPlacement(
+  value: Partial<HocVienCardLogoPlacementSettings> | undefined,
+  fallback: HocVienCardLogoPlacementSettings,
+  minimumSizeMm: number,
+  maximumSizeMm: number,
+): HocVienCardLogoPlacementSettings {
+  const requestedSize = Number(value?.sizeMm);
+  return {
+    enabled: typeof value?.enabled === 'boolean' ? value.enabled : fallback.enabled,
+    sizeMm: Number.isFinite(requestedSize)
+      ? Math.min(maximumSizeMm, Math.max(minimumSizeMm, requestedSize))
+      : fallback.sizeMm,
+  };
+}
+
+function normalizeLogoSettings(value?: StoredLogoSettings): HocVienCardLogoSettings {
+  const official = createOfficialLogoSettings();
+  return {
+    header: normalizeLogoPlacement(
+      value?.header,
+      official.header,
+      HEADER_LOGO_MIN_SIZE_MM,
+      HEADER_LOGO_MAX_SIZE_MM,
+    ),
+    watermark: normalizeLogoPlacement(
+      value?.watermark,
+      official.watermark,
+      WATERMARK_MIN_SIZE_MM,
+      WATERMARK_MAX_SIZE_MM,
+    ),
+  };
+}
+
 function normalizeSettings(value: StoredCardPrintSettings): CardPrintSettings {
   return {
     titleLine1: normalizeTitle(value.titleLine1 ?? '', DEFAULT_CONTENT.titleLine1),
@@ -163,6 +221,7 @@ function normalizeSettings(value: StoredCardPrintSettings): CardPrintSettings {
       DEFAULT_CONTENT.trainingRankLabel,
     ),
     typography: normalizeTypography(value.typography),
+    logo: normalizeLogoSettings(value.logo),
   };
 }
 
@@ -343,15 +402,24 @@ function CardSheetPreview({
   preview,
   typography,
   trainingRankLabel,
+  logo,
 }: {
   preview: HocVienCardPrintPreview;
   typography: HocVienCardTypographySettings;
   trainingRankLabel: string;
+  logo: HocVienCardLogoSettings;
 }) {
   const slots = Array.from(
     { length: 12 },
     (_, index) => preview.items.slice(0, 12)[index] ?? null,
   );
+  const headerLogoTopPercent = ((10 - logo.header.sizeMm) / 2 / 10) * 100;
+  const headerLogoWidthPercent = (logo.header.sizeMm / 85) * 100;
+  const headerLogoHeightPercent = (logo.header.sizeMm / 10) * 100;
+  const headerTextPaddingPercent = logo.header.enabled
+    ? ((0.3 + logo.header.sizeMm + 0.3) / 85) * 100
+    : 2;
+  const watermarkWidthPercent = (logo.watermark.sizeMm / 55) * 100;
 
   return (
     <section className="card-sheet-preview" aria-label="Xem trước trang A4 đầu tiên">
@@ -365,13 +433,32 @@ function CardSheetPreview({
             {slots.map((item, index) => item ? (
               <article className="card-preview" key={item.hocVienId}>
                 <header className="card-preview__header">
-                  <div style={toPreviewTextStyle(typography.organizationLine1)}>
+                  {logo.header.enabled && (
+                    <span
+                      className="card-preview__header-logo"
+                      aria-hidden="true"
+                      style={{
+                        top: `${headerLogoTopPercent}%`,
+                        width: `${headerLogoWidthPercent}%`,
+                        height: `${headerLogoHeightPercent}%`,
+                      }}
+                    >
+                      <img src={getHocVienCardLogoUrl()} alt="" />
+                    </span>
+                  )}
+                  <div style={{
+                    ...toPreviewTextStyle(typography.organizationLine1),
+                    paddingLeft: `${headerTextPaddingPercent}%`,
+                  }}>
                     {applyTextCase(
                       preview.organizationLine1,
                       typography.organizationLine1.textCase,
                     )}
                   </div>
-                  <div style={toPreviewTextStyle(typography.organizationLine2)}>
+                  <div style={{
+                    ...toPreviewTextStyle(typography.organizationLine2),
+                    paddingLeft: `${headerTextPaddingPercent}%`,
+                  }}>
                     {applyTextCase(
                       preview.organizationLine2,
                       typography.organizationLine2.textCase,
@@ -381,6 +468,15 @@ function CardSheetPreview({
                 <div className="card-preview__body">
                   <div className="card-preview__photo"><CardPhoto item={item} /></div>
                   <div className="card-preview__content">
+                    {logo.watermark.enabled && (
+                      <span
+                        className="card-preview__watermark"
+                        aria-hidden="true"
+                        style={{ width: `${watermarkWidthPercent}%` }}
+                      >
+                        <img src={getHocVienCardLogoUrl()} alt="" />
+                      </span>
+                    )}
                     <div
                       className="card-preview__title"
                       style={toPreviewTextStyle(typography.cardTitle)}
@@ -640,6 +736,17 @@ export default function HocVienCardPrintPage() {
     setSettingsMessage('');
   }
 
+  function updateLogoPlacement(
+    key: keyof HocVienCardLogoSettings,
+    value: HocVienCardLogoPlacementSettings,
+  ) {
+    setSettingsInputs((current) => ({
+      ...current,
+      logo: { ...(current.logo ?? createOfficialLogoSettings()), [key]: value },
+    }));
+    setSettingsMessage('');
+  }
+
   function withSettings(request: HocVienPrintCardsRequest): HocVienPrintCardsRequest {
     return { ...request, ...savedSettings };
   }
@@ -748,6 +855,7 @@ export default function HocVienCardPrintPage() {
   const pageIds = rows.map((row) => row.hocVienId).filter((id) => id > 0);
   const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
   const startIndex = (page - 1) * PAGE_SIZE;
+  const currentLogoSettings = settingsInputs.logo ?? createOfficialLogoSettings();
 
   return (
     <div className="card-print-page">
@@ -856,6 +964,78 @@ export default function HocVienCardPrintPage() {
               value={settingsInputs.typography.trainingRank}
               onChange={(value) => updateTypography('trainingRank', value)}
             />
+          </div>
+          <div className="card-logo-settings">
+            <div className="card-logo-settings__heading">
+              <strong>Thiết lập logo</strong>
+              <span>Bật/tắt và chỉnh kích thước riêng cho từng vị trí.</span>
+            </div>
+            <div className="card-logo-settings__row">
+              <strong>Logo khung tiêu đề</strong>
+              <label className="card-logo-settings__toggle">
+                <input
+                  type="checkbox"
+                  checked={currentLogoSettings.header.enabled}
+                  onChange={(event) => updateLogoPlacement('header', {
+                    ...currentLogoSettings.header,
+                    enabled: event.target.checked,
+                  })}
+                />
+                Hiển thị
+              </label>
+              <label className="card-logo-settings__size">
+                <span>Kích thước (mm)</span>
+                <input
+                  className="field__input"
+                  type="number"
+                  min={HEADER_LOGO_MIN_SIZE_MM}
+                  max={HEADER_LOGO_MAX_SIZE_MM}
+                  step="0.1"
+                  disabled={!currentLogoSettings.header.enabled}
+                  value={currentLogoSettings.header.sizeMm}
+                  onChange={(event) => updateLogoPlacement('header', {
+                    ...currentLogoSettings.header,
+                    sizeMm: Number(event.target.value),
+                  })}
+                />
+              </label>
+              <span className="card-logo-settings__hint">
+                Từ {HEADER_LOGO_MIN_SIZE_MM} đến {HEADER_LOGO_MAX_SIZE_MM}mm
+              </span>
+            </div>
+            <div className="card-logo-settings__row">
+              <strong>Logo mờ ô bảng tên</strong>
+              <label className="card-logo-settings__toggle">
+                <input
+                  type="checkbox"
+                  checked={currentLogoSettings.watermark.enabled}
+                  onChange={(event) => updateLogoPlacement('watermark', {
+                    ...currentLogoSettings.watermark,
+                    enabled: event.target.checked,
+                  })}
+                />
+                Hiển thị
+              </label>
+              <label className="card-logo-settings__size">
+                <span>Kích thước (mm)</span>
+                <input
+                  className="field__input"
+                  type="number"
+                  min={WATERMARK_MIN_SIZE_MM}
+                  max={WATERMARK_MAX_SIZE_MM}
+                  step="0.5"
+                  disabled={!currentLogoSettings.watermark.enabled}
+                  value={currentLogoSettings.watermark.sizeMm}
+                  onChange={(event) => updateLogoPlacement('watermark', {
+                    ...currentLogoSettings.watermark,
+                    sizeMm: Number(event.target.value),
+                  })}
+                />
+              </label>
+              <span className="card-logo-settings__hint">
+                Từ {WATERMARK_MIN_SIZE_MM} đến {WATERMARK_MAX_SIZE_MM}mm
+              </span>
+            </div>
           </div>
           {settingsMessage && <div className="card-title-settings__message">{settingsMessage}</div>}
         </div>
@@ -1040,6 +1220,7 @@ export default function HocVienCardPrintPage() {
               trainingRankLabel={
                 printRequest.trainingRankLabel ?? savedSettings.trainingRankLabel
               }
+              logo={printRequest.logo ?? savedSettings.logo ?? createOfficialLogoSettings()}
             />
             {pdfStatus === 'loading' && <section className="pdf-preview-panel"><div className="pdf-preview-panel__status"><div className="spinner" /><div>Đang tạo PDF để xem trước...</div></div></section>}
             {pdfStatus === 'error' && <div className="pdf-preview-panel__error" role="alert">{pdfError}</div>}

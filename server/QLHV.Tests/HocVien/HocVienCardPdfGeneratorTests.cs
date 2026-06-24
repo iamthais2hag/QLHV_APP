@@ -11,8 +11,12 @@ public sealed class HocVienCardPdfGeneratorTests
     public void Pdf_generator_creates_valid_a4_landscape_pdf_with_missing_photo_placeholder()
     {
         var bytes = CreateGenerator().CreatePdf([CreateHocVien(1)]);
+        var rawPdf = System.Text.Encoding.Latin1.GetString(bytes);
 
         Assert.StartsWith("%PDF-", System.Text.Encoding.ASCII.GetString(bytes, 0, 5));
+        Assert.True(HocVienCardLogo.Content.Length > 0);
+        Assert.Equal(0x89, HocVienCardLogo.Content.Span[0]);
+        Assert.Contains("/Subtype/Image", rawPdf, StringComparison.Ordinal);
 
         using var document = PdfReader.Open(new MemoryStream(bytes), PdfDocumentOpenMode.Import);
         Assert.Equal(1, document.PageCount);
@@ -28,6 +32,23 @@ public sealed class HocVienCardPdfGeneratorTests
 
         using var document = PdfReader.Open(new MemoryStream(bytes), PdfDocumentOpenMode.Import);
         Assert.Equal(2, document.PageCount);
+    }
+
+    [Fact]
+    public void Pdf_generator_can_disable_header_logo_and_watermark_independently_from_layout()
+    {
+        var logo = new HocVienCardLogoOptions(
+            new(false, 9.4d),
+            new(false, 26d));
+        var bytes = CreateGenerator().CreatePdf(
+            [CreateHocVien(1)],
+            titleOptions: new HocVienCardTitleOptions(null, null, Logo: logo));
+        var rawPdf = System.Text.Encoding.Latin1.GetString(bytes);
+
+        Assert.DoesNotContain("/Subtype/Image", rawPdf, StringComparison.Ordinal);
+        using var document = PdfReader.Open(new MemoryStream(bytes), PdfDocumentOpenMode.Import);
+        Assert.InRange(document.Pages[0].Width.Point, 841.8d, 842d);
+        Assert.InRange(document.Pages[0].Height.Point, 595.1d, 595.4d);
     }
 
     [Fact]

@@ -52,6 +52,16 @@ export interface HocVienCardTypographySettings {
   trainingRank: HocVienCardTextStyleSettings;
 }
 
+export interface HocVienCardLogoPlacementSettings {
+  enabled: boolean;
+  sizeMm: number;
+}
+
+export interface HocVienCardLogoSettings {
+  header: HocVienCardLogoPlacementSettings;
+  watermark: HocVienCardLogoPlacementSettings;
+}
+
 export interface HocVienPrintCardsRequest {
   mode: HocVienPrintMode;
   hocVienId?: number;
@@ -65,6 +75,7 @@ export interface HocVienPrintCardsRequest {
   cardTitle?: string;
   trainingRankLabel?: string;
   typography?: HocVienCardTypographySettings;
+  logo?: HocVienCardLogoSettings;
 }
 
 export interface HocVienCardPrintPreviewItem {

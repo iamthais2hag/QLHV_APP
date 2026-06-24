@@ -26,6 +26,12 @@ public sealed class HocVienCardTemplate
         HocVienCardLayout.CardWidthMm,
         HocVienCardLayout.HeaderHeightMm);
 
+    public CardElementRect HeaderLogoRect { get; init; } = new(
+        0.3d,
+        0.3d,
+        9.4d,
+        9.4d);
+
     public CardElementRect PhotoRect { get; init; } = new(
         0d,
         HocVienCardLayout.HeaderHeightMm,
@@ -38,6 +44,29 @@ public sealed class HocVienCardTemplate
         HocVienCardLayout.TextCellWidthMm,
         HocVienCardLayout.BodyHeightMm);
 
+    public CardElementRect BodyWatermarkRect { get; init; } = new(
+        44.5d,
+        17d,
+        26d,
+        26d);
+
+    public CardElementRect ResolveHeaderLogoRect(HocVienCardLogoOptions? options = null)
+    {
+        var sizeMm = options?.Header.SizeMm ?? HeaderLogoRect.WidthMm;
+        var yMm = (HeaderRect.HeightMm - sizeMm) / 2d;
+        return new CardElementRect(HeaderLogoRect.XMm, yMm, sizeMm, sizeMm);
+    }
+
+    public CardElementRect ResolveBodyWatermarkRect(HocVienCardLogoOptions? options = null)
+    {
+        var sizeMm = options?.Watermark.SizeMm ?? BodyWatermarkRect.WidthMm;
+        return new CardElementRect(
+            BodyTextRect.XMm + (BodyTextRect.WidthMm - sizeMm) / 2d,
+            BodyTextRect.YMm + (BodyTextRect.HeightMm - sizeMm) / 2d,
+            sizeMm,
+            sizeMm);
+    }
+
     public IReadOnlyList<string> MissingPhotoPlaceholderLines { get; init; } =
     [
         "Ảnh màu",
@@ -49,13 +78,13 @@ public sealed class HocVienCardTemplate
     [
         new(
             CardTextKind.OrganizationLine1,
-            new(TextPaddingMm, 0d, HocVienCardLayout.CardWidthMm - 2d * TextPaddingMm, 5d),
+            new(10d, 0d, HocVienCardLayout.CardWidthMm - 10d - TextPaddingMm, 5d),
             10d,
             8.5d,
             false),
         new(
             CardTextKind.OrganizationLine2,
-            new(TextPaddingMm, 5d, HocVienCardLayout.CardWidthMm - 2d * TextPaddingMm, 5d),
+            new(10d, 5d, HocVienCardLayout.CardWidthMm - 10d - TextPaddingMm, 5d),
             10d,
             8.5d,
             false),
@@ -85,7 +114,23 @@ public sealed class HocVienCardTemplate
     public IReadOnlyList<CardTextLine> ResolveTextLines(HocVienCardTitleOptions? options = null)
     {
         var typography = options?.Typography ?? HocVienCardTypographyOptions.Official;
+        var logo = options?.Logo ?? HocVienCardLogoOptions.Official;
+        var headerLogoRect = ResolveHeaderLogoRect(logo);
+        var headerTextX = logo.Header.Enabled
+            ? headerLogoRect.XMm + headerLogoRect.WidthMm + 0.3d
+            : TextPaddingMm;
         return TextLines
+            .Select(line => line.Kind is CardTextKind.OrganizationLine1
+                or CardTextKind.OrganizationLine2
+                ? line with
+                {
+                    Bounds = new CardElementRect(
+                        headerTextX,
+                        line.Bounds.YMm,
+                        HocVienCardLayout.CardWidthMm - headerTextX - TextPaddingMm,
+                        line.Bounds.HeightMm),
+                }
+                : line)
             .Select(line => ApplyStyle(line, typography.Get(line.Kind)))
             .ToArray();
     }
@@ -218,7 +263,31 @@ public sealed record HocVienCardTitleOptions(
     string? TitleLine2,
     HocVienCardTypographyOptions? Typography = null,
     string? CardTitle = null,
-    string? TrainingRankLabel = null);
+    string? TrainingRankLabel = null,
+    HocVienCardLogoOptions? Logo = null);
+
+public sealed record HocVienCardLogoPlacementOptions(bool Enabled, double SizeMm);
+
+public sealed record HocVienCardLogoOptions(
+    HocVienCardLogoPlacementOptions Header,
+    HocVienCardLogoPlacementOptions Watermark)
+{
+    public static HocVienCardLogoOptions Official { get; } = new(
+        new(true, 9.4d),
+        new(true, 26d));
+
+    public static HocVienCardLogoOptions FromRequest(HocVienCardLogoSettingsRequest? request)
+    {
+        var official = Official;
+        return new HocVienCardLogoOptions(
+            new HocVienCardLogoPlacementOptions(
+                request?.Header?.Enabled ?? official.Header.Enabled,
+                request?.Header?.SizeMm ?? official.Header.SizeMm),
+            new HocVienCardLogoPlacementOptions(
+                request?.Watermark?.Enabled ?? official.Watermark.Enabled,
+                request?.Watermark?.SizeMm ?? official.Watermark.SizeMm));
+    }
+}
 
 public sealed record HocVienCardTextStyleOptions(
     string FontFamily,

@@ -28,6 +28,8 @@ public sealed class HocVienCardPrintRequest
 
     public HocVienCardTypographyRequest? Typography { get; init; }
 
+    public HocVienCardLogoSettingsRequest? Logo { get; init; }
+
     public HocVienCardPrintRequest Normalized() => new()
     {
         Mode = string.IsNullOrWhiteSpace(Mode) ? null : Mode.Trim(),
@@ -47,6 +49,7 @@ public sealed class HocVienCardPrintRequest
         CardTitle = NormalizeTitle(CardTitle),
         TrainingRankLabel = NormalizeTitle(TrainingRankLabel),
         Typography = Typography?.Normalized(),
+        Logo = Logo?.Normalized(),
     };
 
     private static string? NormalizeTitle(string? value)
@@ -61,6 +64,51 @@ public sealed class HocVienCardPrintRequest
             ? trimmed
             : trimmed[..MaxTitleLength];
     }
+}
+
+public sealed class HocVienCardLogoSettingsRequest
+{
+    public const double MinimumHeaderSizeMm = 3d;
+    public const double MaximumHeaderSizeMm = 9.4d;
+    public const double MinimumWatermarkSizeMm = 8d;
+    public const double MaximumWatermarkSizeMm = 38d;
+
+    public HocVienCardLogoPlacementRequest? Header { get; init; }
+
+    public HocVienCardLogoPlacementRequest? Watermark { get; init; }
+
+    public HocVienCardLogoSettingsRequest Normalized() => new()
+    {
+        Header = NormalizePlacement(Header, MinimumHeaderSizeMm, MaximumHeaderSizeMm),
+        Watermark = NormalizePlacement(Watermark, MinimumWatermarkSizeMm, MaximumWatermarkSizeMm),
+    };
+
+    private static HocVienCardLogoPlacementRequest? NormalizePlacement(
+        HocVienCardLogoPlacementRequest? value,
+        double minimumSizeMm,
+        double maximumSizeMm)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        double? sizeMm = value.SizeMm is { } size && double.IsFinite(size)
+            ? Math.Clamp(size, minimumSizeMm, maximumSizeMm)
+            : null;
+        return new HocVienCardLogoPlacementRequest
+        {
+            Enabled = value.Enabled,
+            SizeMm = sizeMm,
+        };
+    }
+}
+
+public sealed class HocVienCardLogoPlacementRequest
+{
+    public bool? Enabled { get; init; }
+
+    public double? SizeMm { get; init; }
 }
 
 public sealed class HocVienCardTypographyRequest

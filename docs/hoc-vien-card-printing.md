@@ -29,6 +29,8 @@ vào ô này để mở bảng chỉnh nội dung và kiểu chữ từng dòng:
 - **Họ và tên**: luôn lấy từ dữ liệu học viên, chỉ cho chỉnh kiểu chữ.
 - **Hạng học**: nhập phần nhãn đứng trước hạng, ví dụ `Tập Lái Xe Hạng`; mã/tên
   hạng phía sau vẫn lấy từ dữ liệu học viên.
+- **Logo khung tiêu đề**: bật/tắt độc lập và chỉnh kích thước từ 3mm đến 9,4mm.
+- **Logo mờ ô bảng tên**: bật/tắt độc lập và chỉnh kích thước từ 8mm đến 38mm.
 
 Nội dung mặc định là:
 
@@ -48,7 +50,8 @@ Mỗi dòng trên thẻ có thiết lập cơ bản tương tự Word:
 Thiết lập chỉ lưu trong `localStorage` của trình duyệt với key
 `qlhv.hoc-vien-card-titles.v1`, không ghi database. Frontend gửi `titleLine1`,
 `titleLine2`, `cardTitle`, `trainingRankLabel` và `typography` trong request
-preview/PDF. Backend trim nội dung, giới hạn 100 ký tự, whitelist font, clamp cỡ
+preview/PDF; cấu hình `logo` đi cùng request và lưu chung trong `localStorage`.
+Backend trim nội dung, giới hạn 100 ký tự, whitelist font, clamp cỡ
 chữ và dùng preset chính thức khi thiếu hoặc có giá trị không hợp lệ. Preview A4
 và PDF dùng cùng cấu hình.
 
@@ -128,14 +131,22 @@ phụ thuộc Hạng học đã chọn.
 - Lề trái/phải: 20,5mm.
 - Lề trên/dưới: 4,25mm.
 - Header: 85mm x 10mm, chạy toàn chiều ngang thẻ.
+- Logo cơ sở đào tạo: khoảng 9,4mm x 9,4mm ở góc trái header, cách viền trên,
+  dưới và trái khoảng 0,3mm; logo giữ tỷ lệ vuông để không bị méo.
 - Body: 85mm x 40mm, nằm ngay dưới header.
 - Ô ảnh bên trái: 30mm x 40mm.
 - Ô nội dung bên phải: 55mm x 40mm.
+- Watermark logo: 26mm x 26mm, căn giữa ô nội dung và được làm mờ phía sau chữ.
 - Có khung đen mảnh quanh thẻ, đường ngang dưới header và đường dọc phân cách
   ảnh với nội dung.
 
 Mọi chuyển đổi mm sang point được thực hiện qua `HocVienCardLayout.MmToPoint`.
 Frontend mô phỏng cùng tỷ lệ A4 và lưới 3x4 để kiểm tra trang đầu trước khi tải.
+Logo được lưu một lần dưới dạng embedded resource trong backend. Preview web lấy
+logo qua endpoint chỉ đọc `GET /api/hoc-vien/the-hoc-vien/logo`; API không trả
+đường dẫn vật lý. Ảnh nguồn được cắt tròn khi render để loại phần nền caro bên
+ngoài logo. Cả logo header và watermark đều nằm trong các ô hiện có nên không
+thay đổi kích thước thẻ 85mm x 50mm.
 
 ## Nội dung thẻ chính thức
 
