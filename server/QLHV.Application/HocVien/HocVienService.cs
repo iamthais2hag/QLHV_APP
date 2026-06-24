@@ -107,7 +107,9 @@ public sealed class HocVienService : IHocVienService
         => new(
             request.TitleLine1,
             request.TitleLine2,
-            HocVienCardTypographyOptions.FromRequest(request.Typography));
+            HocVienCardTypographyOptions.FromRequest(request.Typography),
+            request.CardTitle,
+            request.TrainingRankLabel);
 
     public async Task<HocVienPhotoAuditResultDto> AuditPhotosAsync(
         HocVienPhotoAuditRequest request,

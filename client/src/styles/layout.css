@@ -1388,6 +1388,10 @@
   min-width: 0;
 }
 
+.card-typography-row__content .field__input {
+  width: 100%;
+}
+
 .card-typography-row .field__input {
   min-width: 0;
   height: 34px;
