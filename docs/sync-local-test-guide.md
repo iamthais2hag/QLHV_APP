@@ -124,6 +124,9 @@ Do not run dry-run until both configured flags are `true` and `enableTargetWrite
 
 ## Run dry-run first
 
+Use [`sync-v2-dry-run-checklist.md`](./sync-v2-dry-run-checklist.md) before the first dry-run to verify test
+database names, schema readiness, `EnableTargetWrites=false`, and the values that must be captured after dry-run.
+
 Start the API locally, then call:
 
 ```http
