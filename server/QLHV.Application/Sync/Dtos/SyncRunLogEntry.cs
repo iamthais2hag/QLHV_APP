@@ -2,7 +2,6 @@ namespace QLHV.Application.Sync.Dtos;
 
 /// <summary>
 /// Bản ghi nhật ký một lần chạy đồng bộ, ánh xạ tới dbo.App_DongBoLog.
-/// PHASE B3A: cấu trúc dữ liệu để chuẩn bị ghi log; CHƯA thực thi ghi.
 /// Không chứa chuỗi kết nối/mật khẩu trong bất kỳ trường nào.
 /// </summary>
 public sealed class SyncRunLogEntry

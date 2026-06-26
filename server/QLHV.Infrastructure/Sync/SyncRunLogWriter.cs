@@ -2,8 +2,10 @@ using Dapper;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
 using QLHV.Application.Sync;
+using QLHV.Application.Sync.Configuration;
 using QLHV.Application.Sync.Connections;
 using QLHV.Application.Sync.Dtos;
+using AppSyncOptions = QLHV.Application.Sync.SyncOptions;
 
 namespace QLHV.Infrastructure.Sync;
 
@@ -26,18 +28,27 @@ VALUES
 ";
 
     private readonly IConnectionSettingsProvider _connections;
-    private readonly SyncOptions _options;
+    private readonly AppSyncOptions _options;
+    private readonly SyncExecutionOptions _execution;
 
     public SyncRunLogWriter(
         IConnectionSettingsProvider connections,
-        IOptions<SyncOptions> options)
+        IOptions<AppSyncOptions> options,
+        IOptions<SyncExecutionOptions> execution)
     {
         _connections = connections;
         _options = options.Value;
+        _execution = execution.Value;
     }
 
     public async Task<long> WriteAsync(SyncRunLogEntry entry, CancellationToken cancellationToken = default)
     {
+        if (!_execution.EnableTargetWrites)
+        {
+            throw new InvalidOperationException(
+                "Ghi nhat ky dong bo bi chan: SyncExecution.EnableTargetWrites = false.");
+        }
+
         var target = await _connections.GetQlhvAppConnectionAsync(cancellationToken);
         if (!target.IsUsable || string.IsNullOrWhiteSpace(target.ConnectionString))
         {

@@ -1,22 +1,27 @@
-# Dong bo V2 sang QLHV_APP - Phase A design
+# Dong bo V2 sang QLHV_APP - current design through Phase B3Q
 
-Phase A builds the safe foundation only. It does not run sync, does not schedule Hangfire jobs, does not execute SQL scripts, and does not write to SQL Server.
+Task 5 has progressed beyond the original Phase A foundation. The current code includes the guarded
+HocVien write path from Phase B3B and the no-database safety tests from Phase B3C. Target writes remain
+disabled by default, and Phase B4 Hangfire scheduling has not been implemented.
 
 ## Scope
 
 - Source: `CSDT_V2`, read-only.
 - Target: `QLHV_APP`.
 - First entity: `HocVien`.
-- API: `POST /api/dong-bo-v2/hoc-vien/dry-run`.
-- Runtime behavior: return a safe dry-run plan, connection status, non-secret issues, and planned field mapping.
+- APIs: configuration check, dry-run, and guarded manual execute for HocVien.
+- Dry-run behavior: resolve safe connection status, connect read-only to `CSDT_V2`, run `COUNT`, and return
+  non-secret issues plus the confirmed field mapping. It does not write the target or sync log.
+- Execute behavior: read source rows and write `App_HocVien`/`App_DongBoLog` only after all execution guards pass.
 
-Out of scope for Phase A:
+Current boundaries:
 
-- Opening live SQL connections for sync execution.
-- `SqlBulkCopy`, merge/upsert, transactions, rollback execution.
-- Scheduling recurring Hangfire jobs.
+- No production execution is approved.
+- No recurring Hangfire job is registered or scheduled; scheduling belongs to Phase B4 or later.
 - Admin UI implementation.
 - Writing encrypted connection settings to the database.
+- Authorization for the execute endpoint has not been implemented because the application does not yet have
+  an authentication/role pipeline. The endpoint must not be exposed for real environments until authorization exists.
 
 ## Secure Connection Settings
 
@@ -49,23 +54,27 @@ Audit log records must not include passwords, tokens, or full connection strings
 
 Application layer:
 
-- `IHocVienSyncService` exposes `DryRunHocVienAsync`.
-- `HocVienSyncService` builds the dry-run result only.
+- `IHocVienSyncService` exposes config-check, dry-run, and guarded manual execute operations.
+- `HocVienSyncService` validates execution guards before reading pages or calling any writer.
 - `IConnectionSettingsProvider` defines secure connection resolution without exposing secrets in API responses.
-- `IV2HocVienSourceRepository` and `IQlhvHocVienTargetRepository` define Phase B read/write contracts.
-- `HocVienSyncMapping` records the planned field mapping and uncertainty.
+- `IV2HocVienSourceRepository` is read-only; `IQlhvHocVienTargetRepository` owns guarded target upsert.
+- `HocVienSyncMapping` records the confirmed field mapping and remaining data questions.
 
 Infrastructure layer:
 
-- `ServerConnectionSettingsProvider` resolves the bootstrap `QLHV_APP` connection from server configuration and reserves `CSDT_V1`/`CSDT_V2` keys for the later Admin-managed storage.
-- `V2HocVienSourceRepository` and `QlhvHocVienTargetRepository` are Phase A stubs. They throw if called so accidental SQL access does not happen.
-- `HocVienSyncJob` is the Hangfire job entry point, but it only calls dry-run in Phase A.
+- `ServerConnectionSettingsProvider` currently resolves `QLHV_APP` and `CSDT_V2` from protected server configuration.
+- `V2HocVienSourceRepository` executes parameterized read-only `COUNT`/`SELECT` queries.
+- `QlhvHocVienTargetRepository` uses staging, `SqlBulkCopy`, and transactional `MERGE`; it rejects calls when
+  `EnableTargetWrites=false`.
+- `SyncRunLogWriter` writes a sanitized run summary and independently rejects calls when
+  `EnableTargetWrites=false`.
+- `HocVienSyncJob` remains a dry-run-only Hangfire entry point.
 - `SyncJobRegistration.ConfigureRecurringJobs()` intentionally schedules nothing.
-- `SyncRetryPolicyFactory` defines retry structure for Phase B. Phase A does not wrap or execute sync work with it.
+- `SyncRetryPolicyFactory` wraps source reads and target batches with Polly retry.
 
 API layer:
 
-- `DongBoV2Controller` exposes `POST /api/dong-bo-v2/hoc-vien/dry-run`.
+- `DongBoV2Controller` exposes `GET config-check`, `POST dry-run`, and guarded `POST execute` endpoints.
 - Response DTOs never include connection strings or passwords.
 
 ## Dry-Run Response
@@ -77,17 +86,21 @@ The dry-run endpoint returns:
 - `issues`: safe text explaining missing/placeholder settings.
 - `target`: safe status for `QLHV_APP`.
 - `source`: safe status for `CSDT_V2`.
-- `plannedSummary`: zero-count planned sync summary.
+- `sourceRecordCount`: read-only count from `CSDT_V2` when the source configuration is usable.
+- `plannedSummary`: no-write summary whose `TotalRead` reflects the source count.
 - `mapping`: planned V2-to-QLHV_APP field mapping.
 - `batchSize` and `timeoutSeconds`.
 
+Dry-run does:
+
+- Resolve both configured connections without returning their values.
+- Open a read-only connection to `CSDT_V2` and run `SELECT COUNT` through `V2HocVienSourceRepository`.
+
 Dry-run does not:
 
-- Open SQL connections.
-- Test SQL credentials.
-- Read V2 data.
+- Read source detail pages.
 - Write `QLHV_APP`.
-- Write Hangfire or sync logs.
+- Write `App_DongBoLog` or schedule Hangfire.
 
 ## Confirmed Mapping: HocVien
 
@@ -137,20 +150,20 @@ Before enabling real sync:
 - Implement transactional target upsert/merge with rollback on error.
 - Add explicit enable switch before scheduling any Hangfire recurring job.
 
-## Phase B3A: Target upsert foundation (CHƯA thực thi ghi)
+## Phase B3A: Historical target upsert foundation
 
-Phase B3A chuẩn bị nền tảng upsert vào `QLHV_APP.dbo.App_HocVien` nhưng **không ghi SQL Server**.
+Phase B3A originally prepared the target upsert without enabling SQL writes. The deferred write pieces described
+below were implemented later by the guarded Phase B3B path.
 
 Thành phần (Application):
 - `HocVienTargetWriteModel`: mô hình giá trị ghi vào App_HocVien (đã áp quy tắc dữ liệu).
 - `HocVienSyncMapper`: hàm thuần ánh xạ + kiểm tra (trim, bảo toàn gốc, cảnh báo CCCD ≠ 12 số).
 - `HocVienSyncPlanner`: dựng kế hoạch dry-run (Insert/Update/Skip) từ dòng nguồn + tập khóa đích — hàm thuần, không ghi.
 - DTO kế hoạch/cảnh báo: `HocVienSyncPlanDto`, `HocVienSyncPlanItemDto`, `HocVienDataWarningDto`.
-- `SyncRunLogEntry` + `ISyncRunLogWriter`: cấu trúc ghi `App_DongBoLog` — CHƯA thực thi ghi.
+- `SyncRunLogEntry` + `ISyncRunLogWriter`: contract prepared in B3A; the guarded writer is implemented in B3B.
 
 Thành phần (Infrastructure):
-- `QlhvHocVienTargetRepository`: CHỈ ĐỌC (`CountAsync`, `GetExistingKeysAsync`) dùng để phân loại
-  Insert/Update; `UpsertBatchAsync` ném lỗi (chưa hiện thực ghi).
+- `QlhvHocVienTargetRepository`: was read-only during B3A; B3B now implements guarded `UpsertBatchAsync`.
 - `HocVienTargetMergeSql`: cấu trúc SqlBulkCopy (staging `#Sync_HocVien_Staging`) + `MERGE` keyed on
   `MaDK`, UPDATE khi `V2RowHash` khác, INSERT khi chưa có, **không DELETE** (không xóa vật lý).
   Đây là SQL chuẩn bị, **không được thực thi** ở Phase B3A.
@@ -158,9 +171,9 @@ Thành phần (Infrastructure):
 
 Quy tắc dữ liệu áp dụng: xem [`hoc-vien-data-rules.md`](./hoc-vien-data-rules.md).
 
-### Hành vi dry-run (giữ an toàn)
-- Dry-run chỉ tính kế hoạch (đọc nguồn + đối chiếu khóa đích bằng SELECT). Không INSERT/UPDATE/DELETE,
-  không SqlBulkCopy, không ghi `App_DongBoLog`.
+### Hành vi dry-run hiện tại (giữ an toàn)
+- The current endpoint resolves configuration and runs only `COUNT` against `CSDT_V2`. It does not call
+  `HocVienSyncPlanner`, read target keys, INSERT/UPDATE/DELETE, use `SqlBulkCopy`, or write `App_DongBoLog`.
 - Khi kết nối còn placeholder: trả về trạng thái thiếu cấu hình an toàn, không lộ chuỗi kết nối.
 
 ### Cần xác nhận trước khi ghi thật (Phase B3B)
@@ -191,7 +204,7 @@ POST /api/dong-bo-v2/hoc-vien/execute
 The endpoint rejects unless:
 
 - `EnableTargetWrites=true` in protected server configuration.
-- The request body includes `ConfirmTargetWrites=true`.
+- The request body includes `Confirm=true`.
 - The request body includes `ConfirmationText="EXECUTE_DONG_BO_V2_HOC_VIEN"` when manual confirmation is required.
 - `QLHV_APP` and `CSDT_V2` connections are usable and not placeholders.
 
@@ -205,6 +218,7 @@ Default repository defense also rejects writes when `EnableTargetWrites=false`, 
 MaDK
 MaKhoa
 TenKhoa
+MaHangDT
 HangGPLXHoc
 HoTen
 NgaySinh formatted yyyy-MM-dd
@@ -259,6 +273,27 @@ The MERGE output is counted as safe summary data only: inserted, updated, skippe
 - `CreatedBy`
 
 `DetailJson` contains counts/status/error codes only. Do not put CCCD, GPLX raw values, passwords, tokens, usernames with passwords, or full connection strings into log fields.
+
+`SyncRunLogWriter` also checks `SyncExecution:EnableTargetWrites` before resolving the target connection.
+This defense prevents a direct writer call from creating `App_DongBoLog` rows while target writes are disabled.
+
+### Authorization status
+
+The current API does not have an authentication/role pipeline, so the execute endpoint has no role attribute yet.
+The enable switch and confirmation phrase prevent accidental execution but are not authorization. Do not expose or
+enable execute in production until server-side authentication and an approved role policy are implemented.
+
+## Phase B3C: Safety tests
+
+Phase B3C provides unit tests that require no SQL Server connection:
+
+- execute rejects when target writes are disabled;
+- execute rejects missing confirmation or a non-exact phrase;
+- dry-run performs no target/log writes;
+- mapping/data rules and `V2RowHash` stability are protected;
+- `SyncRunLogWriter` rejects before resolving a connection when target writes are disabled.
+
+SQL integration tests are opt-in through `QLHV_RUN_SQL_INTEGRATION_TESTS=true` and remain skipped by default.
 
 ### Hangfire
 

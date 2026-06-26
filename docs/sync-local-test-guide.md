@@ -1,7 +1,8 @@
 # Sync V2 HocVien local test guide
 
-This guide is for a controlled local test run of the guarded HocVien sync path.
-Do not use production databases. Do not commit real connection strings, usernames, passwords, tokens, or secrets.
+This guide is only for a controlled local/test run of the guarded HocVien sync path.
+Task 5 has not been approved to run against production. Never use production databases, and do not commit real
+connection strings, usernames, passwords, tokens, or secrets.
 
 ## Required test databases
 
@@ -9,7 +10,7 @@ Use disposable or restored backup test databases only:
 
 - `QLHV_APP_TEST`: target database with the QLHV_APP schema.
 - `CSDT_V2_TEST`: source database restored from a safe non-production backup.
-- Optional `HANGFIRE_TEST`: only for later phases. Phase B3C does not schedule Hangfire.
+- Optional `HANGFIRE_TEST`: reserved for Phase B4 or later. No Hangfire schedule exists yet.
 
 Normal build and unit tests do not require SQL Server.
 
@@ -27,13 +28,13 @@ Set them up with [`local-dev-hosts-guide.md`](./local-dev-hosts-guide.md). The h
 127.0.0.1 api.qlhv.local
 ```
 
-Before any dry-run, keep:
+Before any dry-run, verify both connections point to disposable local/test databases and keep:
 
 ```text
 SyncExecution:EnableTargetWrites=false
 ```
 
-Do not call the execute endpoint in Phase B3E.
+Do not call the execute endpoint as part of the normal dry-run workflow.
 
 ## Safe defaults
 
@@ -117,6 +118,7 @@ Expected safe response shape:
 ```
 
 `qlhvAppConfigured` and `csdtV2Configured` mean the backend sees non-placeholder local/test configuration.
+They do not prove that the configured database is non-production; the operator must verify that separately.
 The response must never contain server name, database name, username, password, or a connection string.
 Do not run dry-run until both configured flags are `true` and `enableTargetWrites` is still `false`.
 
@@ -142,16 +144,23 @@ curl.exe -X POST "http://api.qlhv.local:5000/api/dong-bo-v2/hoc-vien/dry-run"
 
 Expected safe behavior:
 
+- Opens a read-only connection to the configured `CSDT_V2` database and runs `SELECT COUNT`.
+- Must therefore be used only with `CSDT_V2_TEST` or another approved disposable local/test source.
 - No target writes.
 - No `App_DongBoLog` write.
 - No Hangfire job scheduling.
 - Response contains summary/configuration information only.
 - No connection strings or passwords are returned.
 
-## Manual execute body for later phases
+## Manual execute body for controlled local testing only
 
-Do not call execute in Phase B3D. This section is kept only for later local write phases.
-Only after dry-run is reviewed on local test databases, and only after intentionally enabling writes in protected local config:
+Execute is a real write path. It is not approved or authorized for production. The application currently has no
+authentication/role pipeline protecting this endpoint, so the enable switch and confirmation phrase must not be
+treated as user authorization.
+
+Do not call execute during a dry-run review. This reference is retained only for a separately approved test against
+disposable local databases. Only after that approval and review of the dry-run may writes be intentionally enabled
+in protected local configuration:
 
 ```powershell
 dotnet user-secrets set "SyncExecution:EnableTargetWrites" "true"
@@ -170,6 +179,7 @@ Content-Type: application/json
 ```
 
 Swagger should not run this accidentally because `confirm` defaults to `false` and the confirmation text must match exactly.
+This confirmation protects against accidental invocation; it does not make the endpoint suitable for production.
 
 After the test, immediately lock writes again:
 
@@ -203,9 +213,19 @@ After execute:
 - If an induced failure is tested, confirm the failing batch rolled back.
 - Reset `SyncExecution:EnableTargetWrites=false`.
 
+## Mapping questions requiring confirmation
+
+Before any broader test or production design review, confirm:
+
+- the actual `NguoiLX.GioiTinh` values and their display mapping;
+- the ratio of 12-digit CCCD values to legacy 9-digit CMND values in `NguoiLX.SoCMT`;
+- the business meaning of `TrangThai` in `NguoiLX`, `NguoiLX_HoSo`, and `KhoaHoc`;
+- how invalid/unparseable `NgaySinh` values should be reported;
+- join coverage for `DM_DVHC` addresses and `DM_HangDT` training categories.
+
 ## SQL integration tests
 
-SQL integration tests must be skipped by default. They may only run when all of the following are true:
+SQL integration tests use an opt-in test attribute and are skipped by default. They may only run when all of the following are true:
 
 - `QLHV_RUN_SQL_INTEGRATION_TESTS=true`.
 - Connections point to disposable local/test databases.
