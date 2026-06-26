@@ -54,7 +54,18 @@ Schema thật: `NguoiLX.TrangThai`, `NguoiLX_HoSo.TrangThai`, `KhoaHoc.TrangThai
 
 ---
 
-## 4. Quy tắc chung khi đồng bộ
+## 4. Hạng học (`MaHangDT`, `HangGPLXHoc`)
+
+**Quy tắc chốt:**
+- `MaHangDT` lấy từ `NguoiLX_HoSo.HangDaoTao`.
+- `HangGPLXHoc` lấy từ `DM_HangDT.TenHangDT` khi join được `DM_HangDT.MaHangDT = NguoiLX_HoSo.HangDaoTao`.
+- Không lấy hạng học từ `NguoiLX_HoSo.HangGPLX`; trường đó không phải nguồn chốt cho `App_HocVien.HangGPLXHoc`.
+- `MaHangDT` và `HangGPLXHoc` đều tham gia `V2RowHash` để phát hiện thay đổi.
+- Trước dry-run local, cần kiểm tra tỷ lệ join thiếu `DM_HangDT` trong dữ liệu test.
+
+---
+
+## 5. Quy tắc chung khi đồng bộ
 
 - **Bảo toàn giá trị gốc:** chỉ `TRIM`; không đổi hoa/thường, không bỏ dấu, không định dạng lại.
 - **Ngày sinh:** `NguoiLX.NgaySinh` là `varchar(8)` `yyyyMMdd`; chuyển sang `date` bằng
@@ -66,7 +77,7 @@ Schema thật: `NguoiLX.TrangThai`, `NguoiLX_HoSo.TrangThai`, `KhoaHoc.TrangThai
 
 ---
 
-## 5. Bảng quy đổi cần xác nhận (chưa chốt)
+## 6. Bảng quy đổi cần xác nhận (chưa chốt)
 
 | Trường | Cần xác nhận | Trạng thái |
 | --- | --- | --- |
@@ -76,12 +87,14 @@ Schema thật: `NguoiLX.TrangThai`, `NguoiLX_HoSo.TrangThai`, `KhoaHoc.TrangThai
 
 ---
 
-## 6. Câu hỏi chưa giải quyết
+## 7. Câu hỏi chưa giải quyết
 
 1. Tập giá trị thật của `GioiTinh char(1)` ở CSDT_V2?
 2. Tỷ lệ/thực trạng `SoCMT` (CCCD 12 số vs CMND 9 số) để định cỡ cảnh báo chất lượng?
 3. Ý nghĩa `TrangThai` bit ở `NguoiLX` / `NguoiLX_HoSo` / `KhoaHoc`; bản ghi nào là "đã hủy"?
 4. Có cần chuẩn hóa/cảnh báo thêm cho `NgaySinh` ngoài việc parse thất bại?
+5. Tỷ lệ join thiếu `DM_DVHC` và `DM_HangDT` trong dữ liệu test là bao nhiêu?
+6. Dữ liệu test có phát sinh nhiều dòng sau join cho cùng một `MaDK` hay không?
 
 ## Liên quan
 - Ánh xạ trường: [`hoc-vien-v2-mapping.md`](./hoc-vien-v2-mapping.md)

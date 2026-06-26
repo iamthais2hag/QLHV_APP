@@ -64,6 +64,16 @@ Trường liên quan (không nằm trong 11 cột hiển thị nhưng nên đồ
 | `V2RowHash` | hash các cột nguồn | Phát hiện thay đổi để upsert ở Phase B2. |
 | `LastSyncFromV2At` / `LastSyncStatus` / `LastSyncMessage` | sinh khi đồng bộ | Vết đồng bộ. |
 
+## Phase B3R readiness note
+
+Current code maps and writes `MaHangDT` explicitly:
+
+- `App_HocVien.MaHangDT` <- `NguoiLX_HoSo.HangDaoTao`.
+- `App_HocVien.HangGPLXHoc` <- `DM_HangDT.TenHangDT` through `DM_HangDT.MaHangDT = NguoiLX_HoSo.HangDaoTao`.
+- Both `MaHangDT` and `HangGPLXHoc` participate in `V2RowHash`.
+- The main schema file already contains `App_HocVien.MaHangDT` and `IX_App_HocVien_MaHangDT`.
+- The requested patch file `database/patches/20260610_add_mahangdt_app_hocvien.sql` is not present in the current repository state; confirm whether an already-applied migration/patch exists before any new local execute test.
+
 ## Ghi chú quan trọng (đã đối chiếu schema thật)
 
 - **Kiểu dữ liệu `NgaySinh`:** `NguoiLX.NgaySinh` là `varchar(8)` dạng `yyyyMMdd`, KHÔNG phải kiểu date.
