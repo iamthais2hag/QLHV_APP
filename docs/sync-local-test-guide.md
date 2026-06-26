@@ -215,13 +215,17 @@ After execute:
 
 ## Mapping questions requiring confirmation
 
+Use [`sync-v2-mapping-readiness.md`](./sync-v2-mapping-readiness.md) as the checklist before the first local dry-run.
+The SQL snippets in that document are reference only and must be run manually only against approved test databases.
+
 Before any broader test or production design review, confirm:
 
 - the actual `NguoiLX.GioiTinh` values and their display mapping;
 - the ratio of 12-digit CCCD values to legacy 9-digit CMND values in `NguoiLX.SoCMT`;
 - the business meaning of `TrangThai` in `NguoiLX`, `NguoiLX_HoSo`, and `KhoaHoc`;
 - how invalid/unparseable `NgaySinh` values should be reported;
-- join coverage for `DM_DVHC` addresses and `DM_HangDT` training categories.
+- join coverage for `DM_DVHC` addresses and `DM_HangDT` training categories;
+- whether the current joins can return more than one row for the same `MaDK` in local/test data.
 
 ## SQL integration tests
 

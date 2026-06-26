@@ -1,8 +1,9 @@
-# Dong bo V2 sang QLHV_APP - current design through Phase B3Q
+# Dong bo V2 sang QLHV_APP - current design through Phase B3R
 
 Task 5 has progressed beyond the original Phase A foundation. The current code includes the guarded
 HocVien write path from Phase B3B and the no-database safety tests from Phase B3C. Target writes remain
-disabled by default, and Phase B4 Hangfire scheduling has not been implemented.
+disabled by default, Phase B3R is the mapping-readiness review before local dry-run, and Phase B4 Hangfire
+scheduling has not been implemented.
 
 ## Scope
 
@@ -125,6 +126,7 @@ Target columns confirmed from `database/QLHV_APP_DATABASE_SCHEMA_v2_PERFORMANCE.
 | `NguoiNhanHoSo` | `NguoiLX_HoSo.NguoiNhanHSo` | Confirmed |
 | `TenKhoa` | `KhoaHoc.TenKH` | Confirmed |
 | `MaKhoa` | `NguoiLX_HoSo.MaKhoaHoc` / `KhoaHoc.MaKH` | Confirmed |
+| `MaHangDT` | `NguoiLX_HoSo.HangDaoTao` | Confirmed source; local data coverage must still be checked |
 | `HangGPLXHoc` | `NguoiLX_HoSo.HangDaoTao` -> `DM_HangDT.MaHangDT` -> `DM_HangDT.TenHangDT` | Confirmed related field |
 
 ## Remaining Data Questions
@@ -294,6 +296,24 @@ Phase B3C provides unit tests that require no SQL Server connection:
 - `SyncRunLogWriter` rejects before resolving a connection when target writes are disabled.
 
 SQL integration tests are opt-in through `QLHV_RUN_SQL_INTEGRATION_TESTS=true` and remain skipped by default.
+
+## Phase B3R: Mapping readiness before local dry-run
+
+B3R does not change sync behavior. It is a readiness pass to make sure code, docs, and schema assumptions agree
+before the first local dry-run against `CSDT_V2_TEST`.
+
+Confirmed from current code:
+
+- `HocVienV2SqlBuilder` reads `NguoiLX`, `NguoiLX_HoSo`, `KhoaHoc`, `DM_HangDT`, and `DM_DVHC`.
+- `MaHangDT` is selected from `NguoiLX_HoSo.HangDaoTao`.
+- `HangGPLXHoc` is selected from `DM_HangDT.TenHangDT`.
+- `DiaChiThuongTru` uses `DM_DVHC.TenDayDu`, falling back to `NguoiLX.NoiTT` in the mapper.
+- `V2RowHash` includes both `MaHangDT` and `HangGPLXHoc`.
+- `LastSyncFromV2At`, `LastSyncStatus`, `LastSyncMessage`, `UpdatedAt`, and `RowVersion` are excluded from the hash.
+
+Readiness checklist and optional reference SQL are in
+[`sync-v2-mapping-readiness.md`](./sync-v2-mapping-readiness.md). Those SQL snippets are documentation only; do
+not run them against production.
 
 ### Hangfire
 
