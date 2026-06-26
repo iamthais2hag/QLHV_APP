@@ -41,4 +41,26 @@ public sealed class HocVienV2SqlBuilderTests
         Assert.Contains("dvhc.TenDayDu", query.Sql, StringComparison.Ordinal);
         Assert.Contains("nlx.NoiTT", query.Sql, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Diagnostics_query_is_read_only_and_checks_source_data_quality()
+    {
+        var sql = HocVienV2SqlBuilder.BuildDiagnostics();
+
+        Assert.Contains("DuplicateMaDkCount", sql, StringComparison.Ordinal);
+        Assert.Contains("MissingMaDkCount", sql, StringComparison.Ordinal);
+        Assert.Contains("MissingHoTenCount", sql, StringComparison.Ordinal);
+        Assert.Contains("GioiTinh", sql, StringComparison.Ordinal);
+        Assert.Contains("LEN(LTRIM(RTRIM(SoCMT))) = 9", sql, StringComparison.Ordinal);
+        Assert.Contains("LEN(LTRIM(RTRIM(SoCMT))) = 12", sql, StringComparison.Ordinal);
+        Assert.Contains("TRY_CONVERT(date, NgaySinhRaw, 112)", sql, StringComparison.Ordinal);
+        Assert.Contains("HangDaoTaoUnmatchedDmHangDtCount", sql, StringComparison.Ordinal);
+        Assert.Contains("NoiTTUnmatchedDmDvhcCount", sql, StringComparison.Ordinal);
+        Assert.Contains("MissingMaKhoaHocCount", sql, StringComparison.Ordinal);
+        Assert.Contains("MaKhoaHocUnmatchedKhoaHocCount", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("INSERT ", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("UPDATE ", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DELETE ", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("MERGE ", sql, StringComparison.OrdinalIgnoreCase);
+    }
 }

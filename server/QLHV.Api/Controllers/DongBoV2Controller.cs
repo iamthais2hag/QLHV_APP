@@ -41,6 +41,19 @@ public sealed class DongBoV2Controller : ControllerBase
     }
 
     /// <summary>
+    /// Read-only source diagnostics for HocVien data in CSDT_V2 before any guarded execute run.
+    /// Returns aggregate counts only; does not write data or expose connection details.
+    /// </summary>
+    [HttpGet("hoc-vien/source-diagnostics")]
+    [ProducesResponseType(typeof(V2HocVienSourceDiagnosticsResultDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<V2HocVienSourceDiagnosticsResultDto>> SourceDiagnosticsHocVien(
+        CancellationToken cancellationToken)
+    {
+        var result = await _syncService.GetHocVienSourceDiagnosticsAsync(cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
     /// Guarded manual execution for HocVien sync.
     /// Defaults reject unless server config enables writes and the request includes explicit confirmation.
     /// </summary>

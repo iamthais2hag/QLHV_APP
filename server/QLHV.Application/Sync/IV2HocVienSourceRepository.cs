@@ -23,4 +23,10 @@ public interface IV2HocVienSourceRepository
         int offset,
         int pageSize,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Doc thong ke chat luong du lieu nguon V2 bang SELECT aggregate only.
+    /// Khong tra ve CCCD/GPLX raw, khong ghi database.
+    /// </summary>
+    Task<V2HocVienSourceDiagnosticsDto> GetDiagnosticsAsync(CancellationToken cancellationToken = default);
 }
