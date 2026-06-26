@@ -1,9 +1,9 @@
-# Dong bo V2 sang QLHV_APP - current design through Phase B3R
+# Dong bo V2 sang QLHV_APP - current design through Phase B3S
 
 Task 5 has progressed beyond the original Phase A foundation. The current code includes the guarded
 HocVien write path from Phase B3B and the no-database safety tests from Phase B3C. Target writes remain
-disabled by default, Phase B3R is the mapping-readiness review before local dry-run, and Phase B4 Hangfire
-scheduling has not been implemented.
+disabled by default. Phase B3R is the mapping-readiness review before local dry-run, Phase B3S adds the local
+dry-run checklist, and Phase B4 Hangfire scheduling has not been implemented.
 
 ## Scope
 
@@ -314,6 +314,20 @@ Confirmed from current code:
 Readiness checklist and optional reference SQL are in
 [`sync-v2-mapping-readiness.md`](./sync-v2-mapping-readiness.md). Those SQL snippets are documentation only; do
 not run them against production.
+
+## Phase B3S: Local dry-run preparation
+
+B3S is documentation and safety-check preparation only. It does not run dry-run, does not call execute, and does not
+change sync behavior.
+
+The operator checklist is in [`sync-v2-dry-run-checklist.md`](./sync-v2-dry-run-checklist.md). It covers:
+
+- required test databases: `QLHV_APP_TEST` and `CSDT_V2_TEST`;
+- target schema readiness, including `App_HocVien.MaHangDT` and `App_DongBoLog`;
+- placeholder-only user-secrets/environment variable examples;
+- confirmation that `SyncExecution:EnableTargetWrites=false`;
+- config-check and dry-run endpoints for a later approved run;
+- values to capture after dry-run, including counts, issues, mapping rows, and unmatched joins.
 
 ### Hangfire
 
