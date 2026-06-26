@@ -143,6 +143,37 @@ public sealed class HocVienSyncGuardTests
         Assert.Equal(0, fakes.Log.WriteCalls);
     }
 
+    [Fact]
+    public async Task Source_diagnostics_reads_source_only_and_does_not_write()
+    {
+        var diagnostics = new V2HocVienSourceDiagnosticsDto
+        {
+            SourceRows = 7,
+            MissingHoTenCount = 1,
+            SoCmtLength = new SoCmtLengthDiagnosticsDto
+            {
+                NineDigits = 2,
+                TwelveDigits = 4,
+                Other = 1,
+            },
+        };
+        var fakes = TestFakes.Create(enableWrites: false, sourceCount: 7, diagnostics: diagnostics);
+
+        var result = await fakes.Service.GetHocVienSourceDiagnosticsAsync();
+
+        Assert.True(result.IsReadOnly);
+        Assert.True(result.CanRead);
+        Assert.Equal("SanSang", result.Status);
+        Assert.NotNull(result.Diagnostics);
+        Assert.Equal(7, result.Diagnostics.SourceRows);
+        Assert.Equal(1, result.Diagnostics.MissingHoTenCount);
+        Assert.Equal(1, fakes.Source.DiagnosticsCalls);
+        Assert.Equal(0, fakes.Source.CountCalls);
+        Assert.Equal(0, fakes.Source.ReadPageCalls);
+        Assert.Equal(0, fakes.Target.UpsertCalls);
+        Assert.Equal(0, fakes.Log.WriteCalls);
+    }
+
     private sealed class TestFakes
     {
         private TestFakes(
@@ -165,7 +196,10 @@ public sealed class HocVienSyncGuardTests
         public FakeTarget Target { get; }
         public FakeRunLog Log { get; }
 
-        public static TestFakes Create(bool enableWrites, int sourceCount = 0)
+        public static TestFakes Create(
+            bool enableWrites,
+            int sourceCount = 0,
+            V2HocVienSourceDiagnosticsDto? diagnostics = null)
         {
             var sync = new AppSyncOptions
             {
@@ -179,7 +213,7 @@ public sealed class HocVienSyncGuardTests
                 ConfirmationPhrase = "EXECUTE_DONG_BO_V2_HOC_VIEN",
             };
             var connections = new FakeConnectionSettingsProvider();
-            var source = new FakeV2Source(sourceCount);
+            var source = new FakeV2Source(sourceCount, diagnostics);
             var target = new FakeTarget();
             var log = new FakeRunLog();
             var service = new HocVienSyncService(
@@ -227,14 +261,20 @@ public sealed class HocVienSyncGuardTests
     private sealed class FakeV2Source : IV2HocVienSourceRepository
     {
         private readonly int _sourceCount;
+        private readonly V2HocVienSourceDiagnosticsDto _diagnostics;
 
-        public FakeV2Source(int sourceCount)
+        public FakeV2Source(int sourceCount, V2HocVienSourceDiagnosticsDto? diagnostics)
         {
             _sourceCount = sourceCount;
+            _diagnostics = diagnostics ?? new V2HocVienSourceDiagnosticsDto
+            {
+                SourceRows = sourceCount,
+            };
         }
 
         public int CountCalls { get; private set; }
         public int ReadPageCalls { get; private set; }
+        public int DiagnosticsCalls { get; private set; }
 
         public Task<int> CountAsync(HocVienSourceFilter filter, CancellationToken cancellationToken = default)
         {
@@ -250,6 +290,13 @@ public sealed class HocVienSyncGuardTests
         {
             ReadPageCalls++;
             return Task.FromResult<IReadOnlyList<V2HocVienSourceRow>>(Array.Empty<V2HocVienSourceRow>());
+        }
+
+        public Task<V2HocVienSourceDiagnosticsDto> GetDiagnosticsAsync(
+            CancellationToken cancellationToken = default)
+        {
+            DiagnosticsCalls++;
+            return Task.FromResult(_diagnostics);
         }
     }
 

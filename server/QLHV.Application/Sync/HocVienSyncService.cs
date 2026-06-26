@@ -130,6 +130,62 @@ public sealed class HocVienSyncService : IHocVienSyncService
         };
     }
 
+    public async Task<V2HocVienSourceDiagnosticsResultDto> GetHocVienSourceDiagnosticsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var v2 = await _connections.GetSourceConnectionAsync(SourceSystem.V2, cancellationToken);
+        if (!v2.IsUsable)
+        {
+            var issue = v2.IsPlaceholder
+                ? "Cau hinh ket noi CSDT_V2 dang la placeholder."
+                : "CSDT_V2 chua co cau hinh ket noi dung duoc.";
+
+            return new V2HocVienSourceDiagnosticsResultDto
+            {
+                CanRead = false,
+                Status = "ThieuCauHinh",
+                Issues = new[] { issue },
+                Errors = new[]
+                {
+                    new SyncErrorDto
+                    {
+                        Code = "CONNECTION_NOT_CONFIGURED",
+                        Message = issue,
+                    },
+                },
+            };
+        }
+
+        try
+        {
+            var diagnostics = await _v2Source.GetDiagnosticsAsync(cancellationToken);
+            return new V2HocVienSourceDiagnosticsResultDto
+            {
+                CanRead = true,
+                Status = "SanSang",
+                Diagnostics = diagnostics,
+            };
+        }
+        catch (Exception ex)
+        {
+            var issue = "Khong doc duoc thong ke chan doan tu nguon CSDT_V2.";
+            return new V2HocVienSourceDiagnosticsResultDto
+            {
+                CanRead = false,
+                Status = "LoiDocNguon",
+                Issues = new[] { issue },
+                Errors = new[]
+                {
+                    new SyncErrorDto
+                    {
+                        Code = "SOURCE_DIAGNOSTICS_FAILED",
+                        Message = $"{issue} Chi tiet: {ex.GetType().Name}.",
+                    },
+                },
+            };
+        }
+    }
+
     public async Task<SyncExecuteResultDto> ExecuteHocVienAsync(
         SyncExecuteRequest request,
         CancellationToken cancellationToken = default)

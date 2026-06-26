@@ -158,7 +158,77 @@ Record these values from the dry-run output and readiness checks:
 If dry-run reports configuration or source read failure, stop and fix local/test configuration first. Do not switch to
 execute as a workaround.
 
-## 8. Absolute no-go list
+## 8. Read-only source diagnostics before execute
+
+After config-check and dry-run pass on `CSDT_V2_TEST`, run the read-only diagnostics endpoint before any future execute
+test:
+
+```http
+GET /api/dong-bo-v2/hoc-vien/source-diagnostics
+```
+
+PowerShell example:
+
+```powershell
+Invoke-RestMethod -Method Get -Uri "http://localhost:5000/api/dong-bo-v2/hoc-vien/source-diagnostics" |
+    ConvertTo-Json -Depth 10
+```
+
+The endpoint only reads `CSDT_V2`; it does not write `QLHV_APP`, does not write `App_DongBoLog`, and does not return
+connection strings, server names, database names, usernames, passwords, tokens, CCCD raw values, or GPLX raw values.
+
+Capture these aggregate counts:
+
+- duplicate `MaDK` groups and duplicate rows.
+- missing `MaDK`.
+- missing `HoTen`.
+- `GioiTinh` distribution.
+- `SoCMT` length buckets: 9 digits, 12 digits, other, null/empty.
+- missing `NgaySinh` and `NgaySinh` parse issues.
+- missing `HangDaoTao` and `HangDaoTao` values that do not join `DM_HangDT`.
+- missing `NoiTT` administrative codes and `NoiTT` rows that do not join `DM_DVHC`.
+- missing `MaKhoaHoc` and `MaKhoaHoc` values that do not join `KhoaHoc`.
+
+Treat any unexpected non-zero count as a mapping/data-quality question to review before a guarded local execute test.
+
+Example safe response shape:
+
+```json
+{
+  "isReadOnly": true,
+  "canRead": true,
+  "status": "SanSang",
+  "issues": [],
+  "errors": [],
+  "diagnostics": {
+    "sourceRows": 1970,
+    "duplicateMaDkCount": 0,
+    "duplicateMaDkRowCount": 0,
+    "missingMaDkCount": 0,
+    "missingHoTenCount": 0,
+    "gioiTinhDistribution": [
+      { "value": "M", "total": 1000 },
+      { "value": "F", "total": 970 }
+    ],
+    "soCmtLength": {
+      "nineDigits": 0,
+      "twelveDigits": 1970,
+      "other": 0,
+      "nullOrEmpty": 0
+    },
+    "missingNgaySinhCount": 0,
+    "ngaySinhParseIssueCount": 0,
+    "missingHangDaoTaoCount": 0,
+    "hangDaoTaoUnmatchedDmHangDtCount": 0,
+    "missingNoiTTCodesCount": 0,
+    "noiTTUnmatchedDmDvhcCount": 0,
+    "missingMaKhoaHocCount": 0,
+    "maKhoaHocUnmatchedKhoaHocCount": 0
+  }
+}
+```
+
+## 9. Absolute no-go list
 
 - Do not call `POST /api/dong-bo-v2/hoc-vien/execute`.
 - Do not set `SyncExecution:EnableTargetWrites=true`.
