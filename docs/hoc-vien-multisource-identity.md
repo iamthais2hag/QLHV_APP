@@ -255,3 +255,42 @@ Recommendation rules:
 
 Only a `High` confidence recommendation can be considered for a later human-approved backfill plan.
 The result is a proposal for human review only. It must not perform automatic backfill.
+
+## B3W10 controlled DATA_V2 backfill script
+
+B3W10 creates a controlled SQL patch for the existing 1970 `App_HocVien` rows after B3W9 returned:
+
+- `targetRows = 1970`;
+- `targetRowsWithSourceProfileCode = 0`;
+- `targetRowsWithoutSourceProfileCode = 1970`;
+- `DATA_V1 sourceRows = 1770`;
+- `DATA_V2 sourceRows = 1970`;
+- `strongerMatchDataV1 = 1770`;
+- `strongerMatchDataV2 = 1970`;
+- `dataV2OnlyMaDkCount = 200`;
+- `recommendation = DATA_V2`;
+- `confidence = High`.
+
+Patch files:
+
+- `database/patches/20260627_backfill_hocvien_source_profile_data_v2.sql`;
+- `database/patches/20260627_rollback_hocvien_source_profile_data_v2.sql`.
+
+B3W10 only creates scripts. It does not run them, does not backfill data, does not run sync, and does not approve
+execute.
+
+The backfill script is intentionally narrow:
+
+- requires `dbo.App_HocVien` and source identity columns to exist;
+- requires exactly `1970` rows;
+- requires all `1970` rows to have empty `SourceProfileCode`;
+- requires no empty `MaDK`;
+- updates only empty `SourceProfileCode` rows;
+- sets `SourceProfileCode = DATA_V2`;
+- sets `SourceMaDK = MaDK`;
+- sets `SourceSystem = V2`;
+- leaves `SourceVersion = NULL` because no source version convention is approved.
+
+The rollback script is also narrow. It clears source identity fields only if all `1970` rows are exactly in the
+expected DATA_V2 backfilled state. Both scripts must be reviewed and run on `QLHV_APP_TEST` with a backup/snapshot
+before any production consideration.
