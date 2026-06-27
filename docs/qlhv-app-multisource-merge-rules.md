@@ -23,30 +23,40 @@ The target design should preserve enough identity to answer:
 - When was this source last imported?
 - Did this import insert, update, skip, or warn?
 
-Suggested fields or concepts:
+Required fields or concepts for HocVien:
 
-- `SourceProfile`: `DATA_V1` or `DATA_V2`.
+- `SourceProfileCode`: `DATA_V1` or `DATA_V2`.
+- `MaDK`: source registration code used by current UI/business display.
+- `SourceMaDK`: optional explicit copy of source registration code, used if display `MaDK` later diverges.
 - `SourceSystem`: logical source name, for example `V1` or `V2`.
 - `SourceRecordKey`: stable source primary/business key.
 - `V2RowHash` or future source-specific row hash.
 - `LastSyncStatus`.
 - `LastSyncFromSourceAt`.
 
-The exact schema names can be finalized later.
-The important rule is that source scope must be part of merge reasoning.
+For `App_HocVien`, the sync identity is:
+
+```text
+SourceProfileCode + MaDK
+```
+
+Do not use `MaDK` alone for sync target matching once multi-source import is introduced.
 
 ## Target uniqueness
 
 The current single-source V2 path keys `App_HocVien` by `MaDK`.
-That is acceptable for a single source, but may not be enough for multi-source import.
+That is acceptable only for a single-source experiment.
+For multi-source HocVien import, `MaDK` alone is not an approved target identity because `DATA_V1` and `DATA_V2` can
+contain overlapping registration codes.
 
-Open design choices:
+Approved direction:
 
-1. Keep one learner row per `MaDK` globally.
-2. Keep one learner row per `(SourceProfile, MaDK)`.
-3. Keep one canonical learner row plus separate source link/history rows.
+1. Keep source-owned imported rows by `(SourceProfileCode, MaDK)` for sync/import.
+2. Preserve V1 and V2 rows independently unless a later canonical merge design is approved.
+3. Add a separate canonical/person-merge layer only after conflict rules are reviewed.
 
-Do not finalize execute behavior until this is decided.
+Phase 1 schema adds nullable source identity columns and indexes only.
+Phase 2 must update code and backfill data before enforcing composite uniqueness.
 
 ## Import behavior by source
 
@@ -57,6 +67,15 @@ For each source-scoped import:
 - Skip rows whose hash matches.
 - Never physically delete rows from another source scope.
 - Source-only deletion handling must be explicit. Default is report-only, not delete.
+
+Additional HocVien rules:
+
+- `DATA_V1` import may insert/update only rows where `SourceProfileCode = DATA_V1`.
+- `DATA_V2` import may insert/update only rows where `SourceProfileCode = DATA_V2`.
+- `DATA_V1` import must not match target rows where `SourceProfileCode = DATA_V2`.
+- `DATA_V2` import must not match target rows where `SourceProfileCode = DATA_V1`.
+- Any code path still using `MaDK` alone for `MERGE`, target snapshot, existing-key lookup, or pre-execute plan is
+  single-source only and must stay blocked for execute.
 
 Example:
 
@@ -97,4 +116,4 @@ B3V2 is a work-in-progress single-source pre-execute plan.
 It compares one source against QLHV_APP using `MaDK` and `V2RowHash`.
 
 Do not merge or treat B3V2 as final multi-source behavior until the source identity and conflict policy above are
-approved.
+approved and the code uses `SourceProfileCode + MaDK`.
