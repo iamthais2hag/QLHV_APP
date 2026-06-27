@@ -91,6 +91,104 @@ Each profile row should expose these safe configuration fields:
 
 The UI should always render the fixed 7 rows, even when some profiles are not configured.
 
+## Planned storage table
+
+Planned schema patch:
+
+```text
+database/patches/20260627_add_csdt_connection_profiles.sql
+```
+
+Main table:
+
+```text
+dbo.App_CsdtConnectionProfile
+```
+
+Designed columns:
+
+| Column | Type | Purpose |
+| --- | --- | --- |
+| `Id` | `uniqueidentifier` | Primary key. |
+| `ProfileCode` | `nvarchar(50)` | Fixed unique code, for example `CSDT_MOTO`. |
+| `DisplayName` | `nvarchar(200)` | User-facing name. |
+| `ProfileGroup` | `nvarchar(50)` | `MOTO`, `OTO`, `GPLX`, `DATA`, or `APP`. |
+| `ServerName` | `nvarchar(255)` | SQL Server host/instance. Sensitive-adjacent. |
+| `DatabaseName` | `nvarchar(255)` | Database name. Sensitive-adjacent. |
+| `AuthMode` | `nvarchar(30)` | `Windows` or `SqlLogin`. |
+| `UserName` | `nvarchar(255)` | Required only for SQL Login. Sensitive-adjacent. |
+| `PasswordCipherText` | `varbinary(max)` | Encrypted password bytes. Never plaintext. |
+| `PasswordUpdatedAt` | `datetime2` | Last password update time. |
+| `IsPasswordConfigured` | `bit` | Safe flag for UI; does not expose the password. |
+| `IsActive` | `bit` | Enables use by related features. |
+| `LastTestedAt` | `datetime2` | Last test time. |
+| `LastTestStatus` | `nvarchar(50)` | `NotConfigured`, `Success`, `Failed`, or `Unknown`. |
+| `LastTestMessage` | `nvarchar(1000)` | Sanitized message only. |
+| `CreatedAt` | `datetime2` | UTC creation time. |
+| `UpdatedAt` | `datetime2` | UTC update time. |
+| `RowVersion` | `rowversion` | Optimistic concurrency token. |
+
+Constraints in the patch:
+
+- `ProfileCode` is unique.
+- `AuthMode` is limited to `Windows` or `SqlLogin`.
+- `ProfileGroup` is limited to `MOTO`, `OTO`, `GPLX`, `DATA`, or `APP`.
+- `LastTestStatus` is null or one of `NotConfigured`, `Success`, `Failed`, `Unknown`.
+- `SqlLogin` requires a non-empty `UserName`.
+- `IsPasswordConfigured` must match whether `PasswordCipherText` is present.
+
+Indexes:
+
+- `IX_App_CsdtConnectionProfile_ProfileGroup` on `ProfileGroup`, `IsActive`, `ProfileCode`.
+
+## Fixed seed rows
+
+The schema patch seeds the fixed 7 rows with `IF NOT EXISTS` behavior:
+
+| ProfileCode | DisplayName | ProfileGroup |
+| --- | --- | --- |
+| `CSDT_MOTO` | `CSDT Moto` | `MOTO` |
+| `CSDT_OTO` | `CSDT Oto` | `OTO` |
+| `CSDT_MOTO_GPLX` | `CSDT Moto GPLX` | `GPLX` |
+| `CSDT_OTO_GPLX` | `CSDT Oto GPLX` | `GPLX` |
+| `DATA_V1` | `Data V1` | `DATA` |
+| `DATA_V2` | `Data V2` | `DATA` |
+| `QLHV_APP` | `QLHV App` | `APP` |
+
+Seed rows are intentionally empty/unconfigured:
+
+- no real server;
+- no real database;
+- no username;
+- no password;
+- no connection string.
+
+`QLHV_APP` is seeded so the menu can display/test bootstrap status later.
+In the first stage, the actual `QLHV_APP` connection still comes from protected server configuration, not from this
+table.
+
+## Audit table
+
+The B3W1 patch also designs a lightweight audit table:
+
+```text
+dbo.App_CsdtConnectionProfileAudit
+```
+
+It is intended for metadata-only audit events:
+
+- `Create`
+- `Update`
+- `Test`
+- `Enable`
+- `Disable`
+- `PasswordChange`
+- `Seed`
+
+Audit records must not store plaintext passwords, password ciphertext, full connection strings, tokens, or raw provider
+error dumps. Store only safe metadata such as profile code, action, actor, timestamp, result status, and sanitized
+message.
+
 ## Profile status model
 
 Each profile can independently be in these states:

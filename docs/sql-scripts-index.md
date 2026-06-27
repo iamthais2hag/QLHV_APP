@@ -9,7 +9,7 @@ Liệt kê toàn bộ file SQL trong thư mục [`database/`](../database) và m
 
 | Nhóm | File |
 | --- | --- |
-| Khởi tạo schema | `QLHV_APP_DATABASE_SCHEMA_v2_PERFORMANCE.sql`, `QLHV_APP_DATABASE_PATCH_INDEX_JSON.sql` |
+| Khởi tạo schema | `QLHV_APP_DATABASE_SCHEMA_v2_PERFORMANCE.sql`, `QLHV_APP_DATABASE_PATCH_INDEX_JSON.sql`, `patches/20260627_add_csdt_connection_profiles.sql` |
 | Kiểm tra trước chuyển | `CHECK_CCCD_CONFLICT_V1_V2.sql` |
 | Chuyển dữ liệu V1 → V2 | `TEST_V1_TO_V2_CHUYEN_ALL_KHOA_HOCVIEN.sql`, `FORCE_V1_TO_V2_CHUYEN_ALL_KHOA_HOCVIEN_IGNORE_CCCD.sql` |
 | Đổi mã CSĐT | `REMAP_CSDT_CODE_IN_CSDT_V2.sql` |
@@ -32,6 +32,15 @@ Liệt kê toàn bộ file SQL trong thư mục [`database/`](../database) và m
   `App_KhoaHoc_XeTap`: `MaKhoa`, `BienSoXe`, `MaGV` với filter `IsDeleted = 0`).
 - **Đặc điểm:** Idempotent (`IF NOT EXISTS (... sys.indexes ...)` trước khi tạo).
 - **Khi dùng:** Sau khi đã tạo schema, khi cần bổ sung index/JSON theo chuẩn hiệu năng.
+
+### `patches/20260627_add_csdt_connection_profiles.sql`
+- **Loại:** Patch thiết kế schema cấu hình kết nối.
+- **Tác động:** Tạo `dbo.App_CsdtConnectionProfile` và `dbo.App_CsdtConnectionProfileAudit`;
+  seed 7 profile cố định rỗng/chưa cấu hình.
+- **Đặc điểm:** Không chứa server/database/user/password thật; không lưu password plaintext;
+  `PasswordCipherText` dành cho dữ liệu đã mã hóa.
+- **Khi dùng:** Sau khi schema QLHV_APP được review và có phần API/UI quản trị kết nối CSDT.
+- **Trạng thái:** Chưa chạy tự động. Chỉ là patch tham khảo trong B3W1.
 
 ### `CHECK_CCCD_CONFLICT_V1_V2.sql`
 - **Loại:** Kiểm tra trước khi chuyển (read-only).
