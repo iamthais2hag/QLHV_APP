@@ -77,6 +77,12 @@ Imports into QLHV_APP must be source-scoped:
 - Target rows should preserve source identity, such as `SourceSystem`, `SourceProfile`, or another stable source marker.
 - Change detection should include the source scope so two sources cannot accidentally compete for the same target row.
 
+The planned connection profile storage is `dbo.App_CsdtConnectionProfile`.
+Future import jobs should resolve their source through `SourceProfile` rather than through a hardcoded single-source
+key. For example, a V2 import should be tied to `DATA_V2`, and a V1 import should be tied to `DATA_V1`.
+This source profile must flow into diagnostics, pre-execute plan, execution summary, audit records, and target merge
+rules.
+
 ## Current Task 5 relationship
 
 Current Task 5 work has a single-source V2 path:
