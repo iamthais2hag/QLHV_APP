@@ -1546,6 +1546,190 @@
 .table--card-print-results th:nth-child(10),
 .table--card-print-results td:nth-child(10) { width: 90px; }
 
+/* ===== CSDT connection profiles ===== */
+.csdt-profiles-page {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.csdt-profiles-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.csdt-profiles-toolbar p {
+  margin: 4px 0 0;
+  color: var(--tc-text-muted);
+  font-size: 13px;
+}
+
+.csdt-profiles-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(340px, 0.65fr);
+  gap: 16px;
+  align-items: start;
+  min-width: 0;
+}
+
+.csdt-profiles-list,
+.csdt-profile-detail {
+  min-width: 0;
+}
+
+.csdt-profiles-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.csdt-profiles-section-title strong {
+  color: var(--tc-blue-900);
+  font-size: 16px;
+}
+
+.csdt-profiles-section-title span {
+  color: var(--tc-text-muted);
+  font-size: 12px;
+}
+
+.csdt-profiles-table-wrap {
+  box-shadow: none;
+}
+
+.table--csdt-profiles {
+  min-width: 900px;
+  font-size: 13px;
+}
+
+.table--csdt-profiles th,
+.table--csdt-profiles td {
+  vertical-align: middle;
+}
+
+.table--csdt-profiles tbody tr {
+  cursor: pointer;
+}
+
+.table--csdt-profiles tbody tr.is-selected {
+  background: #e8f3ff;
+}
+
+.csdt-profile-code-button {
+  border: 0;
+  background: transparent;
+  color: var(--tc-blue-800);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: var(--tc-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.status-pill--ok {
+  background: #e7f7ed;
+  color: #166534;
+}
+
+.status-pill--warn {
+  background: #fff2e2;
+  color: #92400e;
+}
+
+.csdt-profile-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.csdt-profile-form-grid .field {
+  min-width: 0;
+}
+
+.csdt-profile-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  color: var(--tc-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.csdt-profile-note {
+  display: grid;
+  gap: 4px;
+  margin: 14px 0;
+  padding: 10px 12px;
+  border: 1px solid #cfe2f5;
+  border-radius: var(--tc-radius);
+  background: var(--tc-blue-50);
+  color: var(--tc-text);
+  font-size: 13px;
+}
+
+.csdt-profile-note span,
+.csdt-profile-meta {
+  color: var(--tc-text-muted);
+}
+
+.csdt-profile-meta {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.csdt-profile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.csdt-profiles-message {
+  padding: 10px 12px;
+  border: 1px solid #b8e0c3;
+  border-radius: var(--tc-radius);
+  background: #f0fbf4;
+  color: #166534;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+@media (max-width: 1180px) {
+  .csdt-profiles-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .csdt-profiles-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .csdt-profile-form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 900px) {
   .card-title-settings__summary,
   .card-title-settings__toolbar {
