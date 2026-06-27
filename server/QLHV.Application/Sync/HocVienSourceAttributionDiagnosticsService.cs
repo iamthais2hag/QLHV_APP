@@ -92,6 +92,9 @@ public sealed class HocVienSourceAttributionDiagnosticsService : IHocVienSourceA
             var dataV1Metrics = BuildSourceMetrics(targetRows, dataV1Map);
             var dataV2Metrics = BuildSourceMetrics(targetRows, dataV2Map);
             var canRead = dataV1.CanRead && dataV2.CanRead;
+            var targetRowsWithSourceProfileCode = targetRows.Count(HasSourceProfile);
+            var targetRowsWithoutSourceProfileCode = targetRows.Count(row => !HasSourceProfile(row));
+            var targetSourceProfileDistribution = BuildTargetDistribution(targetRows);
             var recommendation = canRead
                 ? Recommend(
                     targetRows.Count,
@@ -106,9 +109,16 @@ public sealed class HocVienSourceAttributionDiagnosticsService : IHocVienSourceA
                 issues.Add("Khong co dong App_HocVien dang hoat dong de xac dinh nguon.");
             }
 
-            if (matchedBoth > 0)
+            if (matchedBoth > 0 && targetRowsWithoutSourceProfileCode > 0)
             {
                 issues.Add("Co MaDK khop ca DATA_V1 va DATA_V2; can xac nhan thu cong truoc khi backfill.");
+            }
+
+            if (targetRows.Count > 0 &&
+                targetRowsWithSourceProfileCode == targetRows.Count &&
+                IsSingleSourceDistribution(targetSourceProfileDistribution, CsdtConnectionProfileCodes.DataV2, targetRows.Count))
+            {
+                issues.Add("Tat ca target rows da co SourceProfileCode = DATA_V2.");
             }
 
             if (matchedNeither > 0)
@@ -132,8 +142,8 @@ public sealed class HocVienSourceAttributionDiagnosticsService : IHocVienSourceA
                 {
                     CheckedAtUtc = DateTime.UtcNow,
                     TargetRows = targetRows.Count,
-                    TargetRowsWithSourceProfileCode = targetRows.Count(HasSourceProfile),
-                    TargetRowsWithoutSourceProfileCode = targetRows.Count(row => !HasSourceProfile(row)),
+                    TargetRowsWithSourceProfileCode = targetRowsWithSourceProfileCode,
+                    TargetRowsWithoutSourceProfileCode = targetRowsWithoutSourceProfileCode,
                     MatchedWithDataV1ByMaDk = matchedDataV1,
                     MatchedWithDataV2ByMaDk = matchedDataV2,
                     DataV1SourceRows = dataV1.SourceRows,
@@ -165,7 +175,7 @@ public sealed class HocVienSourceAttributionDiagnosticsService : IHocVienSourceA
                         ToSourceProfileAttribution(dataV1, dataV1Metrics),
                         ToSourceProfileAttribution(dataV2, dataV2Metrics),
                     },
-                    TargetSourceProfileDistribution = BuildTargetDistribution(targetRows),
+                    TargetSourceProfileDistribution = targetSourceProfileDistribution,
                 },
             };
         }
@@ -191,6 +201,14 @@ public sealed class HocVienSourceAttributionDiagnosticsService : IHocVienSourceA
 
     private static bool HasSourceProfile(HocVienComparableAttributionRowDto row)
         => !string.IsNullOrWhiteSpace(row.SourceProfileCode);
+
+    private static bool IsSingleSourceDistribution(
+        IReadOnlyList<HocVienTargetSourceProfileDistributionDto> distribution,
+        string sourceProfileCode,
+        int expectedTotal)
+        => distribution.Count == 1 &&
+           string.Equals(distribution[0].SourceProfileCode, sourceProfileCode, StringComparison.OrdinalIgnoreCase) &&
+           distribution[0].Total == expectedTotal;
 
     private static HocVienSourceProfileAttributionDto ToSourceProfileAttribution(
         HocVienSourceComparableReadResultDto source,
