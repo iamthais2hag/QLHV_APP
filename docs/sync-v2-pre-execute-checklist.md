@@ -23,6 +23,26 @@ B3V2 pre-execute-plan work is WIP single-source work and must not be merged to `
 Do not run single-source execute until source profile selection, merge identity, and V1/V2 preservation rules are
 confirmed.
 
+## B3W6 HocVien source identity hold
+
+HocVien execute/import remains blocked until the sync code and target merge use source-scoped identity:
+
+```text
+SourceProfileCode + MaDK
+```
+
+The design is documented in [`hoc-vien-multisource-identity.md`](./hoc-vien-multisource-identity.md).
+
+Rules before any execute/import:
+
+- Do not compare or merge HocVien target rows by `MaDK` alone.
+- Pre-execute plan must calculate counts inside one `SourceProfileCode`.
+- `DATA_V1` must run its own plan/import scope.
+- `DATA_V2` must run its own plan/import scope.
+- `DATA_V1` plan/import must not delete, hide, overwrite, or count as target-owned rows from `DATA_V2`.
+- `DATA_V2` plan/import must not delete, hide, overwrite, or count as target-owned rows from `DATA_V1`.
+- B3V2 single-source pre-execute plan is not execute readiness because it does not yet use `SourceProfileCode`.
+
 ## Current approved test context
 
 - `QLHV_APP` configuration key must point to `QLHV_APP_TEST` or another disposable app test database.
