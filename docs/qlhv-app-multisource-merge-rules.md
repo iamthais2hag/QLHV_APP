@@ -102,6 +102,7 @@ Before any multi-source execute, diagnostics should report:
 - source row count by profile;
 - duplicate key count within each profile;
 - overlapping key count across `DATA_V1` and `DATA_V2`;
+- attribution counts for existing target rows that still have empty `SourceProfileCode`;
 - rows with missing business keys;
 - rows that would insert/update/skip by source scope;
 - target-only rows by source scope;
@@ -109,6 +110,10 @@ Before any multi-source execute, diagnostics should report:
 
 Diagnostics must be aggregate and safe.
 Do not expose raw CCCD, GPLX, passwords, full connection strings, server names, database names, or usernames.
+
+The B3W8 source attribution diagnostics may propose `DATA_V1`, `DATA_V2`, `Ambiguous`, or `CannotDetermine` for
+existing `App_HocVien` rows. That recommendation is only for human review before a separate backfill step; it must not
+be treated as permission to merge or execute by `MaDK` alone.
 
 ## Current B3V2 status
 

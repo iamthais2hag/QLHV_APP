@@ -43,6 +43,32 @@ Rules before any execute/import:
 - `DATA_V2` plan/import must not delete, hide, overwrite, or count as target-owned rows from `DATA_V1`.
 - B3V2 single-source pre-execute plan is not execute readiness because it does not yet use `SourceProfileCode`.
 
+## B3W8 source attribution before backfill
+
+After the nullable source columns exist, run the read-only attribution diagnostics before any manual backfill:
+
+```http
+GET /api/dong-bo-v2/hoc-vien/source-attribution-diagnostics
+```
+
+PowerShell example:
+
+```powershell
+Invoke-RestMethod -Method Get -Uri "http://localhost:5000/api/dong-bo-v2/hoc-vien/source-attribution-diagnostics" |
+    ConvertTo-Json -Depth 10
+```
+
+This endpoint only reads `QLHV_APP`, `DATA_V1`, and `DATA_V2`.
+It must not write `App_HocVien`, must not write `App_DongBoLog`, and must not expose connection strings, server names,
+database names, usernames, passwords, CCCD, or GPLX raw values.
+
+Use the `recommendation` only as a human-reviewed proposal:
+
+- `DATA_V1`: safe candidate only if all rows match DATA_V1 and not DATA_V2.
+- `DATA_V2`: safe candidate only if all rows match DATA_V2 and not DATA_V1.
+- `Ambiguous`: do not backfill automatically; review overlapping or mixed source matches.
+- `CannotDetermine`: do not backfill automatically; review missing/unreadable source or unmatched target rows.
+
 ## Current approved test context
 
 - `QLHV_APP` configuration key must point to `QLHV_APP_TEST` or another disposable app test database.
