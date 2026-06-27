@@ -294,3 +294,6 @@ The backfill script is intentionally narrow:
 The rollback script is also narrow. It clears source identity fields only if all `1970` rows are exactly in the
 expected DATA_V2 backfilled state. Both scripts must be reviewed and run on `QLHV_APP_TEST` with a backup/snapshot
 before any production consideration.
+
+B3W11 hotfix adds `USE [QLHV_APP_TEST]` and required SQL Server SET options, including
+`SET QUOTED_IDENTIFIER ON`, to both backfill and rollback scripts so they can run correctly through `sqlcmd`.
