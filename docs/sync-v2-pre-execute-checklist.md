@@ -3,6 +3,26 @@
 This checklist is for the first guarded execute test on local/test databases only.
 It is not approval to run execute on production.
 
+## B3W0 multi-source architecture hold
+
+Single-source execute is currently blocked until the multi-source CSDT strategy is approved.
+The current single-source V2 path is useful as a technical foundation, but it is not the final import model.
+
+The planned fixed connection profiles are documented in:
+
+- [`csdt-connection-profiles.md`](./csdt-connection-profiles.md)
+- [`sync-data-flow-architecture.md`](./sync-data-flow-architecture.md)
+- [`qlhv-app-multisource-merge-rules.md`](./qlhv-app-multisource-merge-rules.md)
+
+The CSDT connection configuration is planned as a QLHV_APP menu, for example
+`He thong / Cau hinh ket noi CSDT` or `Quan tri / Ket noi CSDL`.
+The menu manages the fixed 7 profiles and stores CSDT/DATA profile settings in `QLHV_APP`; the bootstrap
+`QLHV_APP` connection remains protected server configuration in the first stage.
+
+B3V2 pre-execute-plan work is WIP single-source work and must not be merged to `main` as final execute readiness.
+Do not run single-source execute until source profile selection, merge identity, and V1/V2 preservation rules are
+confirmed.
+
 ## Current approved test context
 
 - `QLHV_APP` configuration key must point to `QLHV_APP_TEST` or another disposable app test database.
