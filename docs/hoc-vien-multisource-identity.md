@@ -136,7 +136,7 @@ After code migration:
 - decide whether UI shows source-specific rows or a canonical merged row;
 - add human review for conflicts if needed.
 
-## B3W8 read-only source attribution diagnostics
+## B3W8/B3W9 read-only source attribution diagnostics
 
 Before backfilling existing `App_HocVien.SourceProfileCode`, use:
 
@@ -153,23 +153,105 @@ The endpoint is read-only. It reads:
 It does not write `App_HocVien`, does not write `App_DongBoLog`, does not run sync/execute, and does not return raw
 CCCD/GPLX or connection details.
 
-The response reports aggregate counts:
+B3W8 compared `MaDK` only. The first local/test result was ambiguous:
+
+- `targetRows = 1970`;
+- `targetRowsWithSourceProfileCode = 0`;
+- `targetRowsWithoutSourceProfileCode = 1970`;
+- `DATA_V1 sourceRows = 1770`;
+- `DATA_V1 matched target by MaDK = 1770`;
+- `DATA_V2 sourceRows = 1970`;
+- `DATA_V2 matched target by MaDK = 1970`;
+- `matchedBoth = 1770`;
+- `matchedNeither = 0`;
+- `recommendation = Ambiguous`.
+
+Because `1770` target rows matched both source profiles by `MaDK`, `MaDK` alone is not enough to backfill
+`SourceProfileCode`.
+
+B3W9 extends the same endpoint with stronger aggregate comparison. The response reports:
 
 - `targetRows`;
 - `targetRowsWithSourceProfileCode`;
 - `targetRowsWithoutSourceProfileCode`;
 - `matchedWithDataV1ByMaDk`;
 - `matchedWithDataV2ByMaDk`;
+- `dataV1SourceRows`;
+- `dataV2SourceRows`;
+- `dataV1DistinctSourceMaDk`;
+- `dataV2DistinctSourceMaDk`;
+- `dataV1DuplicateSourceMaDkCount`;
+- `dataV2DuplicateSourceMaDkCount`;
+- `matchedByMaDkDataV1`;
+- `matchedByMaDkDataV2`;
+- `exactFieldMatchDataV1`;
+- `exactFieldMatchDataV2`;
+- `v2RowHashMatchDataV1`;
+- `v2RowHashMatchDataV2`;
+- `strongerMatchDataV1`;
+- `strongerMatchDataV2`;
+- `dataV2OnlyMaDkCount`;
+- `dataV1OnlyMaDkCount`;
+- `overlappingMaDkCount`;
 - `matchedBoth`;
 - `matchedNeither`;
+- `changedFieldSummary` with counts by field only;
 - `recommendation`: `DATA_V1`, `DATA_V2`, `Ambiguous`, or `CannotDetermine`.
+- `confidence`: `Low`, `Medium`, or `High`.
+
+Deep diagnostics compares aggregate matches by:
+
+- `MaDK`;
+- normalized `HoTen`;
+- `NgaySinh`;
+- `GioiTinh`;
+- `MaKhoa`;
+- `TenKhoa`;
+- `MaHangDT`;
+- `HangGPLXHoc`;
+- `V2RowHash` where available.
+
+During B3W9 review, `DATA_V1` schema checks showed:
+
+- `NguoiLX_HoSo JOIN NguoiLX = 1770` rows;
+- adding `KhoaHoc` still returns `1770` rows;
+- adding `DM_HangDT` still returns `1770` rows;
+- adding `DM_DVHC` expands to `3564` rows.
+
+That means `DM_DVHC` can multiply rows for this diagnostic path. Source attribution does not need address, so the
+attribution source reader intentionally does not join `DM_DVHC` and does not compare address at this step.
+
+The source reader for attribution is intentionally limited to:
+
+- `hs.MaDK`;
+- `nlx.HoVaTen`;
+- `nlx.NgaySinh AS NgaySinhRaw`;
+- `nlx.GioiTinh`;
+- `hs.MaKhoaHoc`;
+- `kh.TenKH`;
+- `hs.HangDaoTao`;
+- `hdt.TenHangDT`.
+
+It also reports `sourceRows`, `distinctSourceMaDk`, and `duplicateSourceMaDkCount` for each source profile.
+If duplicates exist, the endpoint uses the first row per `MaDK` only for aggregate comparison and returns a clear issue
+instead of a generic SQL exception.
+
+`DATA_V1` may run under an older SQL Server compatibility level where `TRY_CONVERT` is unavailable. The attribution
+query therefore does not use `TRY_CONVERT`, `TRIM`, `CONCAT_WS`, or `STRING_AGG`. It reads `NgaySinhRaw` and parses
+`yyyyMMdd` in C# with `DateTime.TryParseExact`. Invalid date values are treated as `null` for comparison and counted in
+`invalidNgaySinhCount`.
+
+The endpoint must not return raw CCCD/GPLX, connection strings, server names, database names, usernames, or passwords.
+Because the attribution reader does not pull address/CCCD/GPLX, it cannot recompute the full production `V2RowHash`;
+backfill must still wait until the endpoint can read both `DATA_V1` and `DATA_V2` cleanly and produce a clear enough
+recommendation.
 
 Recommendation rules:
 
-- `DATA_V1`: all active target `MaDK` values match `DATA_V1` only.
-- `DATA_V2`: all active target `MaDK` values match `DATA_V2` only.
-- `Ambiguous`: at least one target `MaDK` matches both sources, or the target set is split across sources.
-- `CannotDetermine`: there are target rows that do not match either source, a source cannot be read, or there are no
-  target rows.
+- `DATA_V1`: target rows have a clearly stronger field/hash match to `DATA_V1`.
+- `DATA_V2`: target rows have a clearly stronger field/hash match to `DATA_V2`.
+- `Ambiguous`: both sources match too closely or the difference is not strong enough.
+- `CannotDetermine`: there are no target rows, a source cannot be read, or the data is insufficient.
 
+Only a `High` confidence recommendation can be considered for a later human-approved backfill plan.
 The result is a proposal for human review only. It must not perform automatic backfill.

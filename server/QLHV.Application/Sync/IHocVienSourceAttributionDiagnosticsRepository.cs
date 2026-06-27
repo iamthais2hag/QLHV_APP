@@ -8,10 +8,10 @@ namespace QLHV.Application.Sync;
 /// </summary>
 public interface IHocVienSourceAttributionDiagnosticsRepository
 {
-    Task<IReadOnlyList<HocVienTargetAttributionKeyDto>> ReadTargetKeysAsync(
+    Task<IReadOnlyList<HocVienComparableAttributionRowDto>> ReadTargetRowsAsync(
         CancellationToken cancellationToken = default);
 
-    Task<HocVienSourceMaDkReadResultDto> ReadSourceKeysAsync(
+    Task<HocVienSourceComparableReadResultDto> ReadSourceRowsAsync(
         string sourceProfileCode,
         CancellationToken cancellationToken = default);
 }
