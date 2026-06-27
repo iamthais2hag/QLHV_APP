@@ -67,6 +67,18 @@ public sealed class DongBoV2Controller : ControllerBase
     }
 
     /// <summary>
+    /// Read-only pre-execute plan for HocVien sync. Compares source rows with target hashes without writing data.
+    /// </summary>
+    [HttpGet("hoc-vien/pre-execute-plan")]
+    [ProducesResponseType(typeof(HocVienPreExecutePlanResultDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<HocVienPreExecutePlanResultDto>> PreExecutePlanHocVien(
+        CancellationToken cancellationToken)
+    {
+        var result = await _syncService.GetHocVienPreExecutePlanAsync(cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
     /// Guarded manual execution for HocVien sync.
     /// Defaults reject unless server config enables writes and the request includes explicit confirmation.
     /// </summary>

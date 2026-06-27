@@ -1,4 +1,4 @@
-# Task 5 B3V1 - Pre-execute safety checklist for V2 HocVien sync
+# Task 5 B3V2 - Pre-execute safety checklist for V2 HocVien sync
 
 This checklist is for the first guarded execute test on local/test databases only.
 It is not approval to run execute on production.
@@ -93,18 +93,84 @@ The current guarded write path processes data by batch:
 
 Because rollback is batch-scoped, a test database backup/snapshot is required before executing.
 
+## Required read-only checks before execute
+
+Run these checks in order before any local/test execute:
+
+1. `GET /api/dong-bo-v2/hoc-vien/config-check`
+2. `POST /api/dong-bo-v2/hoc-vien/dry-run`
+3. `GET /api/dong-bo-v2/hoc-vien/source-diagnostics`
+4. `GET /api/dong-bo-v2/hoc-vien/target-diagnostics`
+5. `GET /api/dong-bo-v2/hoc-vien/pre-execute-plan`
+
+All five checks are read-only. They must not write `App_HocVien`, must not write `App_DongBoLog`, and must not
+return connection strings, server names, database names, usernames, passwords, tokens, CCCD raw values, or GPLX raw
+values.
+
 ## Pre-execute plan
 
-`pre-execute-plan` is not implemented in B3V1. Keep it for B3V2 if needed.
-The intended read-only plan should compare source rows and target `V2RowHash` values and return:
+The pre-execute plan compares current CSDT_V2 source rows with the QLHV_APP target snapshot using `MaDK` and
+`V2RowHash`. It is intended to answer: "If execute were allowed later, how many rows would be inserted, updated, or
+skipped?"
 
-- `sourceRows`
-- `targetRows`
-- `wouldInsert`
-- `wouldUpdate`
-- `wouldSkip`
-- `warningCount`
-- warning summary without exposing CCCD/GPLX raw values
+Endpoint:
+
+```http
+GET /api/dong-bo-v2/hoc-vien/pre-execute-plan
+```
+
+PowerShell example:
+
+```powershell
+Invoke-RestMethod -Method Get -Uri "http://localhost:5000/api/dong-bo-v2/hoc-vien/pre-execute-plan" |
+    ConvertTo-Json -Depth 10
+```
+
+Expected response shape:
+
+```json
+{
+  "isReadOnly": true,
+  "canPlan": true,
+  "status": "SanSang",
+  "issues": [],
+  "errors": [],
+  "plan": {
+    "sourceRows": 1970,
+    "targetRows": 1970,
+    "wouldInsert": 0,
+    "wouldUpdate": 0,
+    "wouldSkip": 1970,
+    "targetOnlyRows": 0,
+    "warningCount": 1,
+    "warnings": [
+      {
+        "code": "CCCD_LENGTH",
+        "field": "SoCCCD",
+        "count": 1,
+        "message": "So CCCD khong du 12 chu so (giu nguyen gia tri goc)."
+      }
+    ]
+  }
+}
+```
+
+Classification rules:
+
+- `wouldInsert`: source `MaDK` is not in target, or target row exists but is currently `IsDeleted = 1`.
+- `wouldUpdate`: source `MaDK` exists in active target and `V2RowHash` differs.
+- `wouldSkip`: source `MaDK` exists in active target and `V2RowHash` matches, or the source row is skipped by mapper
+  validation.
+- `targetOnlyRows`: active target rows whose `MaDK` no longer exists in source. This is report-only. The sync does
+  not physically delete rows.
+
+Warnings are aggregate only. They can include:
+
+- source mapping warnings such as the known 1 row with non-12-digit `SoCMT`;
+- row-count mismatch between source and active target;
+- unusually large `wouldUpdate` volume.
+
+Do not execute if the plan looks surprising. Review mapping, source diagnostics, and target diagnostics first.
 
 ## Absolute no-go list
 

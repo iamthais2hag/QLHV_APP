@@ -244,6 +244,164 @@ public sealed class HocVienSyncService : IHocVienSyncService
         }
     }
 
+    public async Task<HocVienPreExecutePlanResultDto> GetHocVienPreExecutePlanAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var errors = new List<SyncErrorDto>();
+        var issues = new List<string>();
+
+        AddConfigIssueIf(_options.BatchSize <= 0, "BatchSize phai lon hon 0.", errors, issues);
+        AddConfigIssueIf(_options.TimeoutSeconds <= 0, "TimeoutSeconds phai lon hon 0.", errors, issues);
+        AddConfigIssueIf(
+            string.IsNullOrWhiteSpace(_options.QlhvAppConnectionName),
+            "Thieu ten connection string QLHV_APP.",
+            errors,
+            issues);
+        AddConfigIssueIf(
+            string.IsNullOrWhiteSpace(_options.V2ConnectionName),
+            "Thieu ten cau hinh ket noi CSDT_V2.",
+            errors,
+            issues);
+
+        var qlhv = await _connections.GetQlhvAppConnectionAsync(cancellationToken);
+        var v2 = await _connections.GetSourceConnectionAsync(SourceSystem.V2, cancellationToken);
+
+        AddConnectionIssueIfNotUsable("QLHV_APP", qlhv, errors, issues);
+        AddConnectionIssueIfNotUsable("CSDT_V2", v2, errors, issues);
+
+        if (errors.Count > 0)
+        {
+            return new HocVienPreExecutePlanResultDto
+            {
+                CanPlan = false,
+                Status = "ThieuCauHinh",
+                Issues = issues,
+                Errors = errors,
+            };
+        }
+
+        try
+        {
+            var sourceRows = await ReadAllSourceRowsAsync(cancellationToken);
+            var targetRows = await _target.GetSyncSnapshotAsync(cancellationToken);
+            var targetByMaDk = BuildTargetSnapshotByMaDk(targetRows);
+            var activeTargetKeys = targetByMaDk
+                .Where(row => !row.Value.IsDeleted)
+                .Select(row => row.Key)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var sourceKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var warnings = new List<HocVienDataWarningDto>();
+            var planWarnings = new List<HocVienPreExecuteWarningSummaryDto>();
+            var wouldInsert = 0;
+            var wouldUpdate = 0;
+            var wouldSkip = 0;
+            var skippedByMapping = 0;
+
+            foreach (var sourceRow in sourceRows)
+            {
+                var mapped = HocVienSyncMapper.MapAndValidate(sourceRow);
+                warnings.AddRange(mapped.Warnings);
+
+                if (mapped.ShouldSkip || mapped.Model is null)
+                {
+                    skippedByMapping++;
+                    wouldSkip++;
+                    continue;
+                }
+
+                var maDk = mapped.Model.MaDK.Trim();
+                sourceKeys.Add(maDk);
+
+                if (!targetByMaDk.TryGetValue(maDk, out var target) || target.IsDeleted)
+                {
+                    wouldInsert++;
+                    continue;
+                }
+
+                if (string.Equals(target.V2RowHash, mapped.Model.V2RowHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    wouldSkip++;
+                    continue;
+                }
+
+                wouldUpdate++;
+            }
+
+            var targetOnlyRows = activeTargetKeys.Count(maDk => !sourceKeys.Contains(maDk));
+            if (skippedByMapping > 0)
+            {
+                planWarnings.Add(new HocVienPreExecuteWarningSummaryDto
+                {
+                    Code = "SOURCE_ROW_SKIPPED",
+                    Field = "MaDK",
+                    Count = skippedByMapping,
+                    Message = "Co dong nguon bi bo qua vi thieu MaDK.",
+                });
+            }
+
+            if (sourceRows.Count != activeTargetKeys.Count)
+            {
+                planWarnings.Add(new HocVienPreExecuteWarningSummaryDto
+                {
+                    Code = "ROW_COUNT_MISMATCH",
+                    Field = "MaDK",
+                    Count = Math.Abs(sourceRows.Count - activeTargetKeys.Count),
+                    Message = "Tong so dong nguon va dich dang lech nhau; can kiem tra truoc khi execute.",
+                });
+            }
+
+            if (sourceRows.Count > 0 && wouldUpdate > Math.Max(100, sourceRows.Count / 2))
+            {
+                planWarnings.Add(new HocVienPreExecuteWarningSummaryDto
+                {
+                    Code = "UPDATE_VOLUME_HIGH",
+                    Field = "V2RowHash",
+                    Count = wouldUpdate,
+                    Message = "So dong du kien update lon; can ra soat mapping/V2RowHash truoc khi execute.",
+                });
+            }
+
+            var warningSummary = BuildPreExecuteWarningSummaries(warnings, planWarnings);
+
+            return new HocVienPreExecutePlanResultDto
+            {
+                CanPlan = true,
+                Status = "SanSang",
+                Issues = Array.Empty<string>(),
+                Errors = Array.Empty<SyncErrorDto>(),
+                Plan = new HocVienPreExecutePlanDto
+                {
+                    SourceRows = sourceRows.Count,
+                    TargetRows = activeTargetKeys.Count,
+                    WouldInsert = wouldInsert,
+                    WouldUpdate = wouldUpdate,
+                    WouldSkip = wouldSkip,
+                    TargetOnlyRows = targetOnlyRows,
+                    WarningCount = warningSummary.Sum(w => w.Count),
+                    Warnings = warningSummary,
+                },
+            };
+        }
+        catch (Exception ex)
+        {
+            var issue = "Khong lap duoc pre-execute plan cho dong bo HocVien.";
+            return new HocVienPreExecutePlanResultDto
+            {
+                CanPlan = false,
+                Status = "LoiLapKeHoach",
+                Issues = new[] { issue },
+                Errors = new[]
+                {
+                    new SyncErrorDto
+                    {
+                        Code = "PRE_EXECUTE_PLAN_FAILED",
+                        Message = $"{issue} Chi tiet: {ex.GetType().Name}.",
+                    },
+                },
+            };
+        }
+    }
+
     public async Task<SyncExecuteResultDto> ExecuteHocVienAsync(
         SyncExecuteRequest request,
         CancellationToken cancellationToken = default)
@@ -394,6 +552,89 @@ public sealed class HocVienSyncService : IHocVienSyncService
         }
 
         return issues;
+    }
+
+    private async Task<IReadOnlyList<V2HocVienSourceRow>> ReadAllSourceRowsAsync(
+        CancellationToken cancellationToken)
+    {
+        var pageSize = Math.Max(1, _options.BatchSize);
+        var offset = 0;
+        var rows = new List<V2HocVienSourceRow>();
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var batch = await _v2Source.ReadPageAsync(
+                HocVienSourceFilter.Empty,
+                offset,
+                pageSize,
+                cancellationToken);
+
+            if (batch.Count == 0)
+            {
+                break;
+            }
+
+            rows.AddRange(batch);
+            if (batch.Count < pageSize)
+            {
+                break;
+            }
+
+            offset += pageSize;
+        }
+
+        return rows;
+    }
+
+    private static Dictionary<string, HocVienTargetSyncSnapshotDto> BuildTargetSnapshotByMaDk(
+        IEnumerable<HocVienTargetSyncSnapshotDto> rows)
+    {
+        var targetByMaDk = new Dictionary<string, HocVienTargetSyncSnapshotDto>(
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var row in rows)
+        {
+            var maDk = row.MaDK?.Trim();
+            if (string.IsNullOrEmpty(maDk))
+            {
+                continue;
+            }
+
+            if (!targetByMaDk.TryGetValue(maDk, out var existing) || (existing.IsDeleted && !row.IsDeleted))
+            {
+                targetByMaDk[maDk] = new HocVienTargetSyncSnapshotDto
+                {
+                    MaDK = maDk,
+                    V2RowHash = row.V2RowHash,
+                    IsDeleted = row.IsDeleted,
+                };
+            }
+        }
+
+        return targetByMaDk;
+    }
+
+    private static IReadOnlyList<HocVienPreExecuteWarningSummaryDto> BuildPreExecuteWarningSummaries(
+        IReadOnlyList<HocVienDataWarningDto> mappingWarnings,
+        IReadOnlyList<HocVienPreExecuteWarningSummaryDto> planWarnings)
+    {
+        var warnings = mappingWarnings
+            .GroupBy(w => new { w.Code, w.Field, w.Message })
+            .Select(g => new HocVienPreExecuteWarningSummaryDto
+            {
+                Code = g.Key.Code,
+                Field = g.Key.Field,
+                Count = g.Count(),
+                Message = g.Key.Message,
+            })
+            .Concat(planWarnings)
+            .OrderBy(w => w.Code, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(w => w.Field, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return warnings;
     }
 
     private static SyncSummaryDto BuildSummary(

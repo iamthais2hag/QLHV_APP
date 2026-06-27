@@ -119,6 +119,20 @@ public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
         };
     }
 
+    public async Task<IReadOnlyList<HocVienTargetSyncSnapshotDto>> GetSyncSnapshotAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var connectionString = await ResolveUsableTargetAsync(cancellationToken);
+        await using var connection = new SqlConnection(connectionString);
+
+        var rows = await connection.QueryAsync<HocVienTargetSyncSnapshotDto>(new CommandDefinition(
+            TargetSyncSnapshotSql,
+            commandTimeout: _options.TimeoutSeconds,
+            cancellationToken: cancellationToken));
+
+        return rows.ToList();
+    }
+
     public async Task<UpsertCounts> UpsertBatchAsync(
         IReadOnlyList<HocVienTargetWriteModel> rows,
         CancellationToken cancellationToken = default)
@@ -318,6 +332,14 @@ LEFT JOIN sys.columns AS sysColumns
     ON sysColumns.object_id = sysObjects.object_id
    AND sysColumns.name = requiredColumns.ColumnName
 ORDER BY requiredColumns.SortOrder;";
+
+    internal const string TargetSyncSnapshotSql = @"
+SELECT
+    MaDK,
+    V2RowHash,
+    CAST(IsDeleted AS bit) AS IsDeleted
+FROM dbo.App_HocVien
+WHERE MaDK IS NOT NULL;";
 
     private sealed class TargetSchemaDiagnosticsRow
     {

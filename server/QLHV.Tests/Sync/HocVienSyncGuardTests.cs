@@ -4,6 +4,7 @@ using QLHV.Application.Sync;
 using QLHV.Application.Sync.Configuration;
 using QLHV.Application.Sync.Connections;
 using QLHV.Application.Sync.Dtos;
+using QLHV.Application.Sync.Mapping;
 using AppSyncOptions = QLHV.Application.Sync.SyncOptions;
 
 namespace QLHV.Tests.Sync;
@@ -235,6 +236,147 @@ public sealed class HocVienSyncGuardTests
         Assert.DoesNotContain("Server=", json, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task Pre_execute_plan_reads_source_and_target_only_without_writes_or_secrets()
+    {
+        var sourceRows = new[] { SourceRow("DK001") };
+        var targetSnapshot = new[]
+        {
+            TargetSnapshot("DK001", HashFor(sourceRows[0])),
+        };
+        var fakes = TestFakes.Create(
+            enableWrites: false,
+            dryRun: true,
+            sourceRows: sourceRows,
+            targetSnapshot: targetSnapshot);
+
+        var result = await fakes.Service.GetHocVienPreExecutePlanAsync();
+        var json = JsonSerializer.Serialize(result);
+
+        Assert.True(result.IsReadOnly);
+        Assert.True(result.CanPlan);
+        Assert.Equal("SanSang", result.Status);
+        Assert.NotNull(result.Plan);
+        Assert.Equal(1, result.Plan.SourceRows);
+        Assert.Equal(1, result.Plan.TargetRows);
+        Assert.Equal(0, result.Plan.WouldInsert);
+        Assert.Equal(0, result.Plan.WouldUpdate);
+        Assert.Equal(1, result.Plan.WouldSkip);
+        Assert.Equal(0, result.Plan.TargetOnlyRows);
+        Assert.Equal(1, fakes.Source.ReadPageCalls);
+        Assert.Equal(1, fakes.Target.SnapshotCalls);
+        Assert.Equal(0, fakes.Source.CountCalls);
+        Assert.Equal(0, fakes.Target.UpsertCalls);
+        Assert.Equal(0, fakes.Log.WriteCalls);
+        Assert.DoesNotContain("ConnectionString", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Password", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("User Id", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Server=", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("123456789012", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("GPLX001", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Pre_execute_plan_classifies_insert_update_skip_and_target_only_rows()
+    {
+        var insert = SourceRow("DK_INSERT");
+        var update = SourceRow("DK_UPDATE", hoTen: "Nguyen Van Update");
+        var skip = SourceRow("DK_SKIP");
+        var restore = SourceRow("DK_RESTORE");
+        var sourceRows = new[] { insert, update, skip, restore };
+        var targetSnapshot = new[]
+        {
+            TargetSnapshot("DK_UPDATE", "OLD_HASH"),
+            TargetSnapshot("DK_SKIP", HashFor(skip)),
+            TargetSnapshot("DK_RESTORE", HashFor(restore), isDeleted: true),
+            TargetSnapshot("DK_TARGET_ONLY", "TARGET_ONLY_HASH"),
+        };
+        var fakes = TestFakes.Create(
+            enableWrites: false,
+            dryRun: true,
+            sourceRows: sourceRows,
+            targetSnapshot: targetSnapshot);
+
+        var result = await fakes.Service.GetHocVienPreExecutePlanAsync();
+
+        Assert.True(result.CanPlan);
+        Assert.NotNull(result.Plan);
+        Assert.Equal(4, result.Plan.SourceRows);
+        Assert.Equal(3, result.Plan.TargetRows);
+        Assert.Equal(2, result.Plan.WouldInsert);
+        Assert.Equal(1, result.Plan.WouldUpdate);
+        Assert.Equal(1, result.Plan.WouldSkip);
+        Assert.Equal(1, result.Plan.TargetOnlyRows);
+        Assert.Equal(0, fakes.Target.UpsertCalls);
+        Assert.Equal(0, fakes.Log.WriteCalls);
+    }
+
+    [Fact]
+    public async Task Pre_execute_plan_aggregates_mapping_warnings_without_raw_identity_values()
+    {
+        var sourceRows = new[]
+        {
+            SourceRow("DK_WARN", soCmt: "12345678901"),
+        };
+        var targetSnapshot = new[]
+        {
+            TargetSnapshot("DK_WARN", HashFor(sourceRows[0])),
+        };
+        var fakes = TestFakes.Create(
+            enableWrites: false,
+            dryRun: true,
+            sourceRows: sourceRows,
+            targetSnapshot: targetSnapshot);
+
+        var result = await fakes.Service.GetHocVienPreExecutePlanAsync();
+        var json = JsonSerializer.Serialize(result);
+
+        Assert.True(result.CanPlan);
+        Assert.NotNull(result.Plan);
+        Assert.Equal(1, result.Plan.WarningCount);
+        var warning = Assert.Single(result.Plan.Warnings);
+        Assert.Equal("CCCD_LENGTH", warning.Code);
+        Assert.Equal("SoCCCD", warning.Field);
+        Assert.Equal(1, warning.Count);
+        Assert.DoesNotContain("12345678901", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("DK_WARN", json, StringComparison.Ordinal);
+        Assert.Equal(0, fakes.Target.UpsertCalls);
+        Assert.Equal(0, fakes.Log.WriteCalls);
+    }
+
+    private static V2HocVienSourceRow SourceRow(
+        string maDk,
+        string? hoTen = "Nguyen Van A",
+        string? soCmt = "123456789012") => new()
+    {
+        MaDK = maDk,
+        MaKhoaHoc = "KHOA001",
+        TenKH = "AK01",
+        HangDaoTao = "Am",
+        TenHangDT = "Hang Am",
+        HoVaTen = hoTen,
+        NgaySinh = new DateTime(2000, 1, 2),
+        GioiTinh = "M",
+        SoCMT = soCmt,
+        NoiTTTenDayDu = "Dia chi test",
+        SoGPLXDaCo = "GPLX001",
+        HangGPLXDaCo = "A1",
+        NguoiNhanHoSo = "Can bo test",
+    };
+
+    private static string HashFor(V2HocVienSourceRow source)
+        => HocVienSyncMapper.MapAndValidate(source).Model?.V2RowHash ?? string.Empty;
+
+    private static HocVienTargetSyncSnapshotDto TargetSnapshot(
+        string maDk,
+        string? v2RowHash,
+        bool isDeleted = false) => new()
+    {
+        MaDK = maDk,
+        V2RowHash = v2RowHash,
+        IsDeleted = isDeleted,
+    };
+
     private sealed class TestFakes
     {
         private TestFakes(
@@ -262,6 +404,8 @@ public sealed class HocVienSyncGuardTests
             int sourceCount = 0,
             V2HocVienSourceDiagnosticsDto? diagnostics = null,
             QlhvHocVienTargetDiagnosticsDto? targetDiagnostics = null,
+            IReadOnlyList<V2HocVienSourceRow>? sourceRows = null,
+            IReadOnlyList<HocVienTargetSyncSnapshotDto>? targetSnapshot = null,
             bool dryRun = false)
         {
             var sync = new AppSyncOptions
@@ -277,8 +421,8 @@ public sealed class HocVienSyncGuardTests
                 ConfirmationPhrase = "EXECUTE_DONG_BO_V2_HOC_VIEN",
             };
             var connections = new FakeConnectionSettingsProvider();
-            var source = new FakeV2Source(sourceCount, diagnostics);
-            var target = new FakeTarget(targetDiagnostics);
+            var source = new FakeV2Source(sourceCount, diagnostics, sourceRows);
+            var target = new FakeTarget(targetDiagnostics, targetSnapshot);
             var log = new FakeRunLog();
             var service = new HocVienSyncService(
                 Options.Create(sync),
@@ -326,13 +470,18 @@ public sealed class HocVienSyncGuardTests
     {
         private readonly int _sourceCount;
         private readonly V2HocVienSourceDiagnosticsDto _diagnostics;
+        private readonly IReadOnlyList<V2HocVienSourceRow> _sourceRows;
 
-        public FakeV2Source(int sourceCount, V2HocVienSourceDiagnosticsDto? diagnostics)
+        public FakeV2Source(
+            int sourceCount,
+            V2HocVienSourceDiagnosticsDto? diagnostics,
+            IReadOnlyList<V2HocVienSourceRow>? sourceRows)
         {
             _sourceCount = sourceCount;
+            _sourceRows = sourceRows ?? Array.Empty<V2HocVienSourceRow>();
             _diagnostics = diagnostics ?? new V2HocVienSourceDiagnosticsDto
             {
-                SourceRows = sourceCount,
+                SourceRows = _sourceRows.Count > 0 ? _sourceRows.Count : sourceCount,
             };
         }
 
@@ -343,7 +492,7 @@ public sealed class HocVienSyncGuardTests
         public Task<int> CountAsync(HocVienSourceFilter filter, CancellationToken cancellationToken = default)
         {
             CountCalls++;
-            return Task.FromResult(_sourceCount);
+            return Task.FromResult(_sourceRows.Count > 0 ? _sourceRows.Count : _sourceCount);
         }
 
         public Task<IReadOnlyList<V2HocVienSourceRow>> ReadPageAsync(
@@ -353,7 +502,11 @@ public sealed class HocVienSyncGuardTests
             CancellationToken cancellationToken = default)
         {
             ReadPageCalls++;
-            return Task.FromResult<IReadOnlyList<V2HocVienSourceRow>>(Array.Empty<V2HocVienSourceRow>());
+            var page = _sourceRows
+                .Skip(offset)
+                .Take(pageSize)
+                .ToList();
+            return Task.FromResult<IReadOnlyList<V2HocVienSourceRow>>(page);
         }
 
         public Task<V2HocVienSourceDiagnosticsDto> GetDiagnosticsAsync(
@@ -367,14 +520,19 @@ public sealed class HocVienSyncGuardTests
     private sealed class FakeTarget : IQlhvHocVienTargetRepository
     {
         private readonly QlhvHocVienTargetDiagnosticsDto _diagnostics;
+        private readonly IReadOnlyList<HocVienTargetSyncSnapshotDto> _snapshot;
 
-        public FakeTarget(QlhvHocVienTargetDiagnosticsDto? diagnostics)
+        public FakeTarget(
+            QlhvHocVienTargetDiagnosticsDto? diagnostics,
+            IReadOnlyList<HocVienTargetSyncSnapshotDto>? snapshot)
         {
             _diagnostics = diagnostics ?? new QlhvHocVienTargetDiagnosticsDto();
+            _snapshot = snapshot ?? Array.Empty<HocVienTargetSyncSnapshotDto>();
         }
 
         public int UpsertCalls { get; private set; }
         public int DiagnosticsCalls { get; private set; }
+        public int SnapshotCalls { get; private set; }
 
         public Task<int> CountAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
 
@@ -389,8 +547,15 @@ public sealed class HocVienSyncGuardTests
             return Task.FromResult(_diagnostics);
         }
 
+        public Task<IReadOnlyList<HocVienTargetSyncSnapshotDto>> GetSyncSnapshotAsync(
+            CancellationToken cancellationToken = default)
+        {
+            SnapshotCalls++;
+            return Task.FromResult(_snapshot);
+        }
+
         public Task<UpsertCounts> UpsertBatchAsync(
-            IReadOnlyList<QLHV.Application.Sync.Mapping.HocVienTargetWriteModel> rows,
+            IReadOnlyList<HocVienTargetWriteModel> rows,
             CancellationToken cancellationToken = default)
         {
             UpsertCalls++;

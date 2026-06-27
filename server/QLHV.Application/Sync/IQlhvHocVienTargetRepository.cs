@@ -18,6 +18,12 @@ public interface IQlhvHocVienTargetRepository
     Task<QlhvHocVienTargetDiagnosticsDto> GetDiagnosticsAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Reads the minimal target state needed for pre-execute planning. SELECT only.
+    /// </summary>
+    Task<IReadOnlyList<HocVienTargetSyncSnapshotDto>> GetSyncSnapshotAsync(
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Upserts one mapped batch using staging + MERGE in a SQL transaction.
     /// Implementations must reject when target writes are disabled.
     /// </summary>
