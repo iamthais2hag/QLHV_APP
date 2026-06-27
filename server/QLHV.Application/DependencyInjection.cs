@@ -15,6 +15,7 @@ public static class DependencyInjection
         services.AddSingleton(HocVienCardTemplate.Default);
         services.AddSingleton<IHocVienCardPdfGenerator, HocVienCardPdfGenerator>();
         services.AddScoped<ICsdtConnectionProfileService, CsdtConnectionProfileService>();
+        services.AddScoped<IHocVienSourceAttributionDiagnosticsService, HocVienSourceAttributionDiagnosticsService>();
         services.AddScoped<IHocVienSyncService, HocVienSyncService>();
         return services;
     }

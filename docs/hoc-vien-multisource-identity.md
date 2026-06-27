@@ -118,6 +118,8 @@ Design goals:
 
 After data review:
 
+- run read-only source attribution diagnostics to decide whether current rows belong to `DATA_V1`, `DATA_V2`, or are
+  ambiguous;
 - backfill existing rows with the correct `SourceProfileCode`;
 - update source readers/planners to carry `SourceProfileCode`;
 - update staging table and merge SQL to include `SourceProfileCode`;
@@ -133,3 +135,41 @@ After code migration:
 - detect overlapping `MaDK` across `DATA_V1` and `DATA_V2`;
 - decide whether UI shows source-specific rows or a canonical merged row;
 - add human review for conflicts if needed.
+
+## B3W8 read-only source attribution diagnostics
+
+Before backfilling existing `App_HocVien.SourceProfileCode`, use:
+
+```http
+GET /api/dong-bo-v2/hoc-vien/source-attribution-diagnostics
+```
+
+The endpoint is read-only. It reads:
+
+- `QLHV_APP.dbo.App_HocVien`;
+- the `DATA_V1` connection profile;
+- the `DATA_V2` connection profile.
+
+It does not write `App_HocVien`, does not write `App_DongBoLog`, does not run sync/execute, and does not return raw
+CCCD/GPLX or connection details.
+
+The response reports aggregate counts:
+
+- `targetRows`;
+- `targetRowsWithSourceProfileCode`;
+- `targetRowsWithoutSourceProfileCode`;
+- `matchedWithDataV1ByMaDk`;
+- `matchedWithDataV2ByMaDk`;
+- `matchedBoth`;
+- `matchedNeither`;
+- `recommendation`: `DATA_V1`, `DATA_V2`, `Ambiguous`, or `CannotDetermine`.
+
+Recommendation rules:
+
+- `DATA_V1`: all active target `MaDK` values match `DATA_V1` only.
+- `DATA_V2`: all active target `MaDK` values match `DATA_V2` only.
+- `Ambiguous`: at least one target `MaDK` matches both sources, or the target set is split across sources.
+- `CannotDetermine`: there are target rows that do not match either source, a source cannot be read, or there are no
+  target rows.
+
+The result is a proposal for human review only. It must not perform automatic backfill.

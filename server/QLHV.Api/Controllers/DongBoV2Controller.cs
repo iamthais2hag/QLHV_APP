@@ -14,10 +14,14 @@ namespace QLHV.Api.Controllers;
 public sealed class DongBoV2Controller : ControllerBase
 {
     private readonly IHocVienSyncService _syncService;
+    private readonly IHocVienSourceAttributionDiagnosticsService _sourceAttributionDiagnostics;
 
-    public DongBoV2Controller(IHocVienSyncService syncService)
+    public DongBoV2Controller(
+        IHocVienSyncService syncService,
+        IHocVienSourceAttributionDiagnosticsService sourceAttributionDiagnostics)
     {
         _syncService = syncService;
+        _sourceAttributionDiagnostics = sourceAttributionDiagnostics;
     }
 
     /// <summary>
@@ -63,6 +67,19 @@ public sealed class DongBoV2Controller : ControllerBase
         CancellationToken cancellationToken)
     {
         var result = await _syncService.GetHocVienTargetDiagnosticsAsync(cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Read-only diagnostics to identify whether existing App_HocVien rows likely came from DATA_V1 or DATA_V2.
+    /// Returns aggregate counts only; does not write data or expose connection details.
+    /// </summary>
+    [HttpGet("hoc-vien/source-attribution-diagnostics")]
+    [ProducesResponseType(typeof(HocVienSourceAttributionDiagnosticsResultDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<HocVienSourceAttributionDiagnosticsResultDto>> SourceAttributionDiagnosticsHocVien(
+        CancellationToken cancellationToken)
+    {
+        var result = await _sourceAttributionDiagnostics.GetDiagnosticsAsync(cancellationToken);
         return Ok(result);
     }
 
