@@ -1,9 +1,11 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using QLHV.Application.CsdtConnections;
 using QLHV.Application.HocVien;
 using QLHV.Application.Sync;
 using QLHV.Application.Sync.Configuration;
 using QLHV.Application.Sync.Connections;
+using QLHV.Infrastructure.CsdtConnections;
 using QLHV.Infrastructure.HocVien;
 using QLHV.Infrastructure.Sync;
 using AppSyncOptions = QLHV.Application.Sync.SyncOptions;
@@ -18,6 +20,7 @@ public static class DependencyInjection
         IConfiguration configuration,
         string? contentRootPath = null)
     {
+        services.AddScoped<ICsdtConnectionProfileRepository, CsdtConnectionProfileRepository>();
         services.AddScoped<IHocVienRepository, HocVienRepository>();
 
         services.Configure<AppSyncOptions>(configuration.GetSection(AppSyncOptions.SectionName));
@@ -32,6 +35,8 @@ public static class DependencyInjection
         }
 
         services.AddSingleton<IConnectionSettingsProvider, ServerConnectionSettingsProvider>();
+        services.AddSingleton<IConnectionPasswordProtector, UnavailableConnectionPasswordProtector>();
+        services.AddSingleton<ICsdtConnectionTester, SqlServerCsdtConnectionTester>();
         services.AddSingleton<HocVienPhotoPathResolver>();
         services.AddScoped<IHocVienPhotoService, HocVienPhotoService>();
         services.AddSingleton<ISyncConnectionProvider, SyncConnectionProvider>();

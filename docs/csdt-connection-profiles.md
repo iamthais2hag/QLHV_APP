@@ -263,6 +263,61 @@ The UI may leave room for future extension, but the current design should priori
 If a profile is not configured, inactive, or has a failed test, only the related function should be blocked.
 The application must not fail globally just because one of the 7 profiles is not ready.
 
+## Backend API contract
+
+B3W2 adds a backend API contract and safe skeleton implementation for the menu:
+
+```http
+GET  /api/csdt-connection-profiles
+GET  /api/csdt-connection-profiles/{profileCode}
+PUT  /api/csdt-connection-profiles/{profileCode}
+POST /api/csdt-connection-profiles/{profileCode}/test
+```
+
+Only the fixed 7 profile codes are accepted in this phase.
+There is no free-form create endpoint yet.
+
+Response DTOs:
+
+- `CsdtConnectionProfileListItemDto`
+- `CsdtConnectionProfileDetailDto`
+- `TestCsdtConnectionProfileResultDto`
+
+Request DTOs:
+
+- `SaveCsdtConnectionProfileRequest`
+- `TestCsdtConnectionProfileRequest`
+
+Password safety:
+
+- API responses do not include `PasswordCipherText`.
+- API responses do not include plaintext password.
+- API responses expose only `IsPasswordConfigured`.
+- `SaveCsdtConnectionProfileRequest.PasswordPlainText` is optional and is only an input field.
+- If password is supplied, backend must protect it through `IConnectionPasswordProtector` before repository save.
+- If encryption/key management is not configured, backend must reject password save instead of storing plaintext.
+
+Bootstrap profile:
+
+- `QLHV_APP` remains the application bootstrap connection.
+- The API allows viewing/testing `QLHV_APP` status.
+- In this phase, `PUT /api/csdt-connection-profiles/QLHV_APP` is blocked with a clear message because the actual
+  bootstrap connection still comes from protected server configuration.
+
+Repository behavior:
+
+- Repository uses the existing `QLHV_APP` connection key.
+- Repository does not create database or tables.
+- If `dbo.App_CsdtConnectionProfile` is missing, controller returns a sanitized unavailable/error response instead
+  of exposing connection details.
+
+Authorization status:
+
+- The app still does not have a complete authentication/role pipeline.
+- This API is not production-ready until authorization is added for an approved admin role such as `Admin` or
+  `Giam doc trung tam`.
+- Do not expose this API in a real environment before authorization and encryption/key management are finalized.
+
 ## Relationship to current Task 5 work
 
 The current V2 sync work was built around a single source key named `CSDT_V2`.

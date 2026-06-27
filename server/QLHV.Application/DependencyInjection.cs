@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using QLHV.Application.CsdtConnections;
 using QLHV.Application.HocVien;
 using QLHV.Application.HocVien.Printing;
 using QLHV.Application.Sync;
@@ -13,6 +14,7 @@ public static class DependencyInjection
         services.AddScoped<IHocVienService, HocVienService>();
         services.AddSingleton(HocVienCardTemplate.Default);
         services.AddSingleton<IHocVienCardPdfGenerator, HocVienCardPdfGenerator>();
+        services.AddScoped<ICsdtConnectionProfileService, CsdtConnectionProfileService>();
         services.AddScoped<IHocVienSyncService, HocVienSyncService>();
         return services;
     }
