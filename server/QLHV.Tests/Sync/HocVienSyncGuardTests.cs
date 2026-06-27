@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using System.Text.Json;
 using QLHV.Application.Sync;
 using QLHV.Application.Sync.Configuration;
 using QLHV.Application.Sync.Connections;
@@ -12,7 +13,7 @@ public sealed class HocVienSyncGuardTests
     [Fact]
     public async Task Execute_rejects_when_target_writes_disabled()
     {
-        var fakes = TestFakes.Create(enableWrites: false);
+        var fakes = TestFakes.Create(enableWrites: false, dryRun: false);
 
         var result = await fakes.Service.ExecuteHocVienAsync(new SyncExecuteRequest
         {
@@ -31,7 +32,7 @@ public sealed class HocVienSyncGuardTests
     [Fact]
     public async Task Execute_rejects_when_manual_confirm_is_false()
     {
-        var fakes = TestFakes.Create(enableWrites: true);
+        var fakes = TestFakes.Create(enableWrites: true, dryRun: false);
 
         var result = await fakes.Service.ExecuteHocVienAsync(new SyncExecuteRequest
         {
@@ -50,7 +51,7 @@ public sealed class HocVienSyncGuardTests
     [Fact]
     public async Task Execute_rejects_when_confirmation_phrase_is_not_exact()
     {
-        var fakes = TestFakes.Create(enableWrites: true);
+        var fakes = TestFakes.Create(enableWrites: true, dryRun: false);
 
         var result = await fakes.Service.ExecuteHocVienAsync(new SyncExecuteRequest
         {
@@ -61,6 +62,25 @@ public sealed class HocVienSyncGuardTests
         Assert.False(result.Executed);
         Assert.Equal("BiChan", result.Status);
         Assert.Contains("xac nhan", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, fakes.Source.ReadPageCalls);
+        Assert.Equal(0, fakes.Target.UpsertCalls);
+        Assert.Equal(0, fakes.Log.WriteCalls);
+    }
+
+    [Fact]
+    public async Task Execute_rejects_when_sync_dry_run_is_true_even_with_write_guard_and_confirmation()
+    {
+        var fakes = TestFakes.Create(enableWrites: true, dryRun: true);
+
+        var result = await fakes.Service.ExecuteHocVienAsync(new SyncExecuteRequest
+        {
+            Confirm = true,
+            ConfirmationText = fakes.Execution.ConfirmationPhrase,
+        });
+
+        Assert.False(result.Executed);
+        Assert.Equal("BiChan", result.Status);
+        Assert.Contains("Sync:DryRun", result.Message);
         Assert.Equal(0, fakes.Source.ReadPageCalls);
         Assert.Equal(0, fakes.Target.UpsertCalls);
         Assert.Equal(0, fakes.Log.WriteCalls);
@@ -134,6 +154,7 @@ public sealed class HocVienSyncGuardTests
 
         Assert.True(result.QlhvAppConfigured);
         Assert.True(result.CsdtV2Configured);
+        Assert.False(result.DryRun);
         Assert.False(result.EnableTargetWrites);
         Assert.True(result.RequireManualConfirmation);
         Assert.False(result.AllowHangfireSchedule);
@@ -174,6 +195,46 @@ public sealed class HocVienSyncGuardTests
         Assert.Equal(0, fakes.Log.WriteCalls);
     }
 
+    [Fact]
+    public async Task Target_diagnostics_reads_target_only_and_does_not_write_or_expose_secrets()
+    {
+        var diagnostics = new QlhvHocVienTargetDiagnosticsDto
+        {
+            AppHocVienExists = true,
+            AppDongBoLogExists = true,
+            TargetRows = 1970,
+            RequiredColumns = new[]
+            {
+                new RequiredColumnCheckDto { ColumnName = "MaDK", Exists = true },
+                new RequiredColumnCheckDto { ColumnName = "V2RowHash", Exists = true },
+            },
+            SoCccdLength = new SoCmtLengthDiagnosticsDto
+            {
+                TwelveDigits = 1969,
+                Other = 1,
+            },
+        };
+        var fakes = TestFakes.Create(enableWrites: false, dryRun: true, targetDiagnostics: diagnostics);
+
+        var result = await fakes.Service.GetHocVienTargetDiagnosticsAsync();
+        var json = JsonSerializer.Serialize(result);
+
+        Assert.True(result.IsReadOnly);
+        Assert.True(result.CanRead);
+        Assert.Equal("SanSang", result.Status);
+        Assert.NotNull(result.Diagnostics);
+        Assert.Equal(1970, result.Diagnostics.TargetRows);
+        Assert.Equal(1, fakes.Target.DiagnosticsCalls);
+        Assert.Equal(0, fakes.Source.CountCalls);
+        Assert.Equal(0, fakes.Source.ReadPageCalls);
+        Assert.Equal(0, fakes.Target.UpsertCalls);
+        Assert.Equal(0, fakes.Log.WriteCalls);
+        Assert.DoesNotContain("ConnectionString", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Password", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("User Id", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Server=", json, StringComparison.OrdinalIgnoreCase);
+    }
+
     private sealed class TestFakes
     {
         private TestFakes(
@@ -199,12 +260,15 @@ public sealed class HocVienSyncGuardTests
         public static TestFakes Create(
             bool enableWrites,
             int sourceCount = 0,
-            V2HocVienSourceDiagnosticsDto? diagnostics = null)
+            V2HocVienSourceDiagnosticsDto? diagnostics = null,
+            QlhvHocVienTargetDiagnosticsDto? targetDiagnostics = null,
+            bool dryRun = false)
         {
             var sync = new AppSyncOptions
             {
                 BatchSize = 100,
                 TimeoutSeconds = 30,
+                DryRun = dryRun,
             };
             var execution = new SyncExecutionOptions
             {
@@ -214,7 +278,7 @@ public sealed class HocVienSyncGuardTests
             };
             var connections = new FakeConnectionSettingsProvider();
             var source = new FakeV2Source(sourceCount, diagnostics);
-            var target = new FakeTarget();
+            var target = new FakeTarget(targetDiagnostics);
             var log = new FakeRunLog();
             var service = new HocVienSyncService(
                 Options.Create(sync),
@@ -302,7 +366,15 @@ public sealed class HocVienSyncGuardTests
 
     private sealed class FakeTarget : IQlhvHocVienTargetRepository
     {
+        private readonly QlhvHocVienTargetDiagnosticsDto _diagnostics;
+
+        public FakeTarget(QlhvHocVienTargetDiagnosticsDto? diagnostics)
+        {
+            _diagnostics = diagnostics ?? new QlhvHocVienTargetDiagnosticsDto();
+        }
+
         public int UpsertCalls { get; private set; }
+        public int DiagnosticsCalls { get; private set; }
 
         public Task<int> CountAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
 
@@ -310,6 +382,12 @@ public sealed class HocVienSyncGuardTests
             IReadOnlyCollection<string> maDks,
             CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyCollection<string>>(Array.Empty<string>());
+
+        public Task<QlhvHocVienTargetDiagnosticsDto> GetDiagnosticsAsync(CancellationToken cancellationToken = default)
+        {
+            DiagnosticsCalls++;
+            return Task.FromResult(_diagnostics);
+        }
 
         public Task<UpsertCounts> UpsertBatchAsync(
             IReadOnlyList<QLHV.Application.Sync.Mapping.HocVienTargetWriteModel> rows,

@@ -8,6 +8,7 @@ public sealed class SyncConfigCheckDto
 {
     public bool QlhvAppConfigured { get; init; }
     public bool CsdtV2Configured { get; init; }
+    public bool DryRun { get; init; }
     public bool EnableTargetWrites { get; init; }
     public bool RequireManualConfirmation { get; init; }
     public bool AllowHangfireSchedule { get; init; }

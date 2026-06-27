@@ -64,10 +64,71 @@ public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
         return keys.ToList();
     }
 
+    public async Task<QlhvHocVienTargetDiagnosticsDto> GetDiagnosticsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var connectionString = await ResolveUsableTargetAsync(cancellationToken);
+        await using var connection = new SqlConnection(connectionString);
+
+        var schema = await connection.QuerySingleAsync<TargetSchemaDiagnosticsRow>(new CommandDefinition(
+            TargetSchemaDiagnosticsSql,
+            commandTimeout: _options.TimeoutSeconds,
+            cancellationToken: cancellationToken));
+
+        var columns = (await connection.QueryAsync<RequiredColumnCheckDto>(new CommandDefinition(
+            RequiredColumnsSql,
+            commandTimeout: _options.TimeoutSeconds,
+            cancellationToken: cancellationToken))).ToList();
+
+        int? targetRows = null;
+        SoCmtLengthDiagnosticsDto? soCccdLength = null;
+        if (schema.AppHocVienExists)
+        {
+            var activeFilter = schema.IsDeletedColumnExists ? " WHERE IsDeleted = 0" : string.Empty;
+            targetRows = await connection.ExecuteScalarAsync<int>(new CommandDefinition(
+                "SELECT COUNT(1) FROM dbo.App_HocVien" + activeFilter + ";",
+                commandTimeout: _options.TimeoutSeconds,
+                cancellationToken: cancellationToken));
+
+            if (columns.Any(c => string.Equals(c.ColumnName, "SoCCCD", StringComparison.OrdinalIgnoreCase) && c.Exists))
+            {
+                var soCccdRows = (await connection.QueryAsync<SourceValueDistributionDto>(new CommandDefinition(
+                    BuildTargetSoCccdLengthSql(activeFilter),
+                    commandTimeout: _options.TimeoutSeconds,
+                    cancellationToken: cancellationToken))).ToList();
+
+                soCccdLength = new SoCmtLengthDiagnosticsDto
+                {
+                    NineDigits = GetBucket(soCccdRows, "9"),
+                    TwelveDigits = GetBucket(soCccdRows, "12"),
+                    Other = GetBucket(soCccdRows, "other"),
+                    NullOrEmpty = GetBucket(soCccdRows, "null-empty"),
+                };
+            }
+        }
+
+        return new QlhvHocVienTargetDiagnosticsDto
+        {
+            CheckedAtUtc = DateTime.UtcNow,
+            AppHocVienExists = schema.AppHocVienExists,
+            AppDongBoLogExists = schema.AppDongBoLogExists,
+            RequiredColumns = columns,
+            TargetRows = targetRows,
+            TargetRowsUseIsDeletedFilter = schema.IsDeletedColumnExists,
+            SoCccdLength = soCccdLength,
+        };
+    }
+
     public async Task<UpsertCounts> UpsertBatchAsync(
         IReadOnlyList<HocVienTargetWriteModel> rows,
         CancellationToken cancellationToken = default)
     {
+        if (_options.DryRun)
+        {
+            throw new InvalidOperationException(
+                "Ghi vao QLHV_APP bi chan: Sync:DryRun = true.");
+        }
+
         if (!_execution.EnableTargetWrites)
         {
             throw new InvalidOperationException(
@@ -205,4 +266,63 @@ public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
 
     private static object Db(string? value) => value is null ? DBNull.Value : value;
     private static object Db(DateTime? value) => value.HasValue ? value.Value : DBNull.Value;
+
+    private static int GetBucket(IEnumerable<SourceValueDistributionDto> rows, string value)
+        => rows.FirstOrDefault(r => string.Equals(r.Value, value, StringComparison.OrdinalIgnoreCase))?.Total ?? 0;
+
+    private static string BuildTargetSoCccdLengthSql(string activeFilter) => @"
+SELECT
+    CASE
+        WHEN NULLIF(LTRIM(RTRIM(SoCCCD)), '') IS NULL THEN 'null-empty'
+        WHEN LEN(LTRIM(RTRIM(SoCCCD))) = 9 THEN '9'
+        WHEN LEN(LTRIM(RTRIM(SoCCCD))) = 12 THEN '12'
+        ELSE 'other'
+    END AS Value,
+    COUNT(1) AS Total
+FROM dbo.App_HocVien" + activeFilter + @"
+GROUP BY CASE
+    WHEN NULLIF(LTRIM(RTRIM(SoCCCD)), '') IS NULL THEN 'null-empty'
+    WHEN LEN(LTRIM(RTRIM(SoCCCD))) = 9 THEN '9'
+    WHEN LEN(LTRIM(RTRIM(SoCCCD))) = 12 THEN '12'
+    ELSE 'other'
+END
+ORDER BY Value;";
+
+    private const string TargetSchemaDiagnosticsSql = @"
+SELECT
+    CAST(CASE WHEN OBJECT_ID(N'dbo.App_HocVien', N'U') IS NULL THEN 0 ELSE 1 END AS bit) AS AppHocVienExists,
+    CAST(CASE WHEN OBJECT_ID(N'dbo.App_DongBoLog', N'U') IS NULL THEN 0 ELSE 1 END AS bit) AS AppDongBoLogExists,
+    CAST(CASE WHEN COL_LENGTH(N'dbo.App_HocVien', N'IsDeleted') IS NULL THEN 0 ELSE 1 END AS bit) AS IsDeletedColumnExists;";
+
+    private const string RequiredColumnsSql = @"
+SELECT
+    requiredColumns.ColumnName,
+    CAST(CASE WHEN sysColumns.column_id IS NULL THEN 0 ELSE 1 END AS bit) AS [Exists]
+FROM (
+    VALUES
+        (1, N'MaDK'),
+        (2, N'HoTen'),
+        (3, N'NgaySinh'),
+        (4, N'GioiTinh'),
+        (5, N'SoCCCD'),
+        (6, N'DiaChiThuongTru'),
+        (7, N'MaKhoa'),
+        (8, N'TenKhoa'),
+        (9, N'MaHangDT'),
+        (10, N'HangGPLXHoc'),
+        (11, N'V2RowHash')
+) AS requiredColumns(SortOrder, ColumnName)
+LEFT JOIN sys.objects AS sysObjects
+    ON sysObjects.object_id = OBJECT_ID(N'dbo.App_HocVien', N'U')
+LEFT JOIN sys.columns AS sysColumns
+    ON sysColumns.object_id = sysObjects.object_id
+   AND sysColumns.name = requiredColumns.ColumnName
+ORDER BY requiredColumns.SortOrder;";
+
+    private sealed class TargetSchemaDiagnosticsRow
+    {
+        public bool AppHocVienExists { get; init; }
+        public bool AppDongBoLogExists { get; init; }
+        public bool IsDeletedColumnExists { get; init; }
+    }
 }

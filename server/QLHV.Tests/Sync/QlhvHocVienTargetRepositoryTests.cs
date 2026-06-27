@@ -3,46 +3,34 @@ using QLHV.Application.Sync;
 using QLHV.Application.Sync.Configuration;
 using QLHV.Application.Sync.Connections;
 using QLHV.Application.Sync.Dtos;
+using QLHV.Application.Sync.Mapping;
 using QLHV.Infrastructure.Sync;
 using AppSyncOptions = QLHV.Application.Sync.SyncOptions;
 
 namespace QLHV.Tests.Sync;
 
-public sealed class SyncRunLogWriterTests
+public sealed class QlhvHocVienTargetRepositoryTests
 {
     [Fact]
-    public async Task Write_rejects_before_resolving_connection_when_target_writes_disabled()
+    public async Task Upsert_rejects_before_resolving_connection_when_sync_dry_run_is_true()
     {
         var connections = new TrackingConnectionSettingsProvider();
-        var writer = new SyncRunLogWriter(
-            connections,
-            Options.Create(new AppSyncOptions { DryRun = false }),
-            Options.Create(new SyncExecutionOptions
-            {
-                EnableTargetWrites = false,
-            }));
-
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => writer.WriteAsync(new SyncRunLogEntry()));
-
-        Assert.Contains("EnableTargetWrites = false", exception.Message, StringComparison.Ordinal);
-        Assert.Equal(0, connections.QlhvResolutionCalls);
-    }
-
-    [Fact]
-    public async Task Write_rejects_before_resolving_connection_when_sync_dry_run_is_true()
-    {
-        var connections = new TrackingConnectionSettingsProvider();
-        var writer = new SyncRunLogWriter(
+        var repository = new QlhvHocVienTargetRepository(
             connections,
             Options.Create(new AppSyncOptions { DryRun = true }),
-            Options.Create(new SyncExecutionOptions
+            Options.Create(new SyncExecutionOptions { EnableTargetWrites = true }));
+
+        var rows = new[]
+        {
+            new HocVienTargetWriteModel
             {
-                EnableTargetWrites = true,
-            }));
+                MaDK = "TEST-MADK",
+                V2RowHash = "hash",
+            },
+        };
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => writer.WriteAsync(new SyncRunLogEntry()));
+            () => repository.UpsertBatchAsync(rows));
 
         Assert.Contains("Sync:DryRun = true", exception.Message, StringComparison.Ordinal);
         Assert.Equal(0, connections.QlhvResolutionCalls);

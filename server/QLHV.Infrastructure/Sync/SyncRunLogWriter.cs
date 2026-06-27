@@ -43,6 +43,12 @@ VALUES
 
     public async Task<long> WriteAsync(SyncRunLogEntry entry, CancellationToken cancellationToken = default)
     {
+        if (_options.DryRun)
+        {
+            throw new InvalidOperationException(
+                "Ghi nhat ky dong bo bi chan: Sync:DryRun = true.");
+        }
+
         if (!_execution.EnableTargetWrites)
         {
             throw new InvalidOperationException(

@@ -54,6 +54,19 @@ public sealed class DongBoV2Controller : ControllerBase
     }
 
     /// <summary>
+    /// Read-only target diagnostics for HocVien data in QLHV_APP before any guarded execute run.
+    /// Returns schema and aggregate counts only; does not write data or expose connection details.
+    /// </summary>
+    [HttpGet("hoc-vien/target-diagnostics")]
+    [ProducesResponseType(typeof(QlhvHocVienTargetDiagnosticsResultDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<QlhvHocVienTargetDiagnosticsResultDto>> TargetDiagnosticsHocVien(
+        CancellationToken cancellationToken)
+    {
+        var result = await _syncService.GetHocVienTargetDiagnosticsAsync(cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
     /// Guarded manual execution for HocVien sync.
     /// Defaults reject unless server config enables writes and the request includes explicit confirmation.
     /// </summary>
