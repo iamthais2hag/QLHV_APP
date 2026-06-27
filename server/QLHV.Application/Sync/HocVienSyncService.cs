@@ -44,6 +44,7 @@ public sealed class HocVienSyncService : IHocVienSyncService
         {
             QlhvAppConfigured = qlhv.IsUsable,
             CsdtV2Configured = v2.IsUsable,
+            DryRun = _options.DryRun,
             EnableTargetWrites = _execution.EnableTargetWrites,
             RequireManualConfirmation = _execution.RequireManualConfirmation,
             AllowHangfireSchedule = _execution.AllowHangfireSchedule,
@@ -186,6 +187,63 @@ public sealed class HocVienSyncService : IHocVienSyncService
         }
     }
 
+    public async Task<QlhvHocVienTargetDiagnosticsResultDto> GetHocVienTargetDiagnosticsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var qlhv = await _connections.GetQlhvAppConnectionAsync(cancellationToken);
+        if (!qlhv.IsUsable)
+        {
+            var issue = qlhv.IsPlaceholder
+                ? "Cau hinh ket noi QLHV_APP dang la placeholder."
+                : "QLHV_APP chua co cau hinh ket noi dung duoc.";
+
+            return new QlhvHocVienTargetDiagnosticsResultDto
+            {
+                CanRead = false,
+                Status = "ThieuCauHinh",
+                Issues = new[] { issue },
+                Errors = new[]
+                {
+                    new SyncErrorDto
+                    {
+                        Code = "CONNECTION_NOT_CONFIGURED",
+                        Message = issue,
+                    },
+                },
+            };
+        }
+
+        try
+        {
+            var diagnostics = await _target.GetDiagnosticsAsync(cancellationToken);
+            return new QlhvHocVienTargetDiagnosticsResultDto
+            {
+                CanRead = true,
+                Status = "SanSang",
+                Issues = BuildTargetDiagnosticIssues(diagnostics),
+                Diagnostics = diagnostics,
+            };
+        }
+        catch (Exception ex)
+        {
+            var issue = "Khong doc duoc thong ke chan doan tu QLHV_APP.";
+            return new QlhvHocVienTargetDiagnosticsResultDto
+            {
+                CanRead = false,
+                Status = "LoiDocDich",
+                Issues = new[] { issue },
+                Errors = new[]
+                {
+                    new SyncErrorDto
+                    {
+                        Code = "TARGET_DIAGNOSTICS_FAILED",
+                        Message = $"{issue} Chi tiet: {ex.GetType().Name}.",
+                    },
+                },
+            };
+        }
+    }
+
     public async Task<SyncExecuteResultDto> ExecuteHocVienAsync(
         SyncExecuteRequest request,
         CancellationToken cancellationToken = default)
@@ -286,6 +344,11 @@ public sealed class HocVienSyncService : IHocVienSyncService
 
     private SyncExecuteResultDto? ValidateExecutionGuard(SyncExecuteRequest request)
     {
+        if (_options.DryRun)
+        {
+            return Blocked("Execute bi chan vi Sync:DryRun = true.");
+        }
+
         if (!_execution.EnableTargetWrites)
         {
             return Blocked("Ghi bi chan: SyncExecution.EnableTargetWrites = false.");
@@ -306,6 +369,31 @@ public sealed class HocVienSyncService : IHocVienSyncService
         }
 
         return null;
+    }
+
+    private static IReadOnlyList<string> BuildTargetDiagnosticIssues(QlhvHocVienTargetDiagnosticsDto diagnostics)
+    {
+        var issues = new List<string>();
+        if (!diagnostics.AppHocVienExists)
+        {
+            issues.Add("Thieu bang dbo.App_HocVien.");
+        }
+
+        if (!diagnostics.AppDongBoLogExists)
+        {
+            issues.Add("Thieu bang dbo.App_DongBoLog.");
+        }
+
+        var missingColumns = diagnostics.RequiredColumns
+            .Where(c => !c.Exists)
+            .Select(c => c.ColumnName)
+            .ToList();
+        if (missingColumns.Count > 0)
+        {
+            issues.Add("Thieu cot bat buoc trong dbo.App_HocVien: " + string.Join(", ", missingColumns) + ".");
+        }
+
+        return issues;
     }
 
     private static SyncSummaryDto BuildSummary(

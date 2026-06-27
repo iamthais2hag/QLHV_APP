@@ -15,6 +15,9 @@ public interface IHocVienSyncService
     Task<V2HocVienSourceDiagnosticsResultDto> GetHocVienSourceDiagnosticsAsync(
         CancellationToken cancellationToken = default);
 
+    Task<QlhvHocVienTargetDiagnosticsResultDto> GetHocVienTargetDiagnosticsAsync(
+        CancellationToken cancellationToken = default);
+
     Task<SyncExecuteResultDto> ExecuteHocVienAsync(
         SyncExecuteRequest request,
         CancellationToken cancellationToken = default);

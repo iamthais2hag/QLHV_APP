@@ -103,6 +103,7 @@ Expected safe response:
 {
   "qlhvAppConfigured": true,
   "csdtV2Configured": true,
+  "dryRun": true,
   "enableTargetWrites": false,
   "requireManualConfirmation": true,
   "allowHangfireSchedule": false
