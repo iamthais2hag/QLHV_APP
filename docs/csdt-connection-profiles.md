@@ -46,6 +46,22 @@ The menu manages the 7 fixed profiles:
 
 The menu is a configuration and status screen. It must not imply that all 7 databases already exist.
 
+Frontend route added in B3W4:
+
+```text
+/cau-hinh-ket-noi-csdt
+```
+
+Sidebar label:
+
+```text
+Cau hinh ket noi CSDT
+```
+
+The first UI version loads the fixed profiles from `GET /api/csdt-connection-profiles`, shows status/detail fields,
+and keeps password input disabled until encryption/key management is finalized. The UI must not store passwords in
+`localStorage`, `sessionStorage`, or console logs.
+
 ## Bootstrap and storage boundary
 
 `QLHV_APP` is special:

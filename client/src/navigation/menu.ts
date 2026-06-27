@@ -95,6 +95,12 @@ export const MENU_ITEMS: MenuItem[] = [
     icon: '🔄',
   },
   {
+    path: '/cau-hinh-ket-noi-csdt',
+    label: 'Cấu hình kết nối CSDT',
+    description: 'Quản lý 7 profile kết nối CSDT/DATA/QLHV_APP an toàn.',
+    icon: '🔌',
+  },
+  {
     path: '/tai-lieu-scan',
     label: 'Tài liệu scan/PDF',
     description: 'Quản lý tài liệu scan và tệp PDF.',
