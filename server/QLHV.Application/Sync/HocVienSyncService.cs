@@ -12,6 +12,8 @@ namespace QLHV.Application.Sync;
 /// </summary>
 public sealed class HocVienSyncService : IHocVienSyncService
 {
+    private static readonly HocVienSourceIdentityContext V2SourceIdentity = HocVienSourceIdentityContext.DataV2;
+
     private readonly SyncOptions _options;
     private readonly SyncExecutionOptions _execution;
     private readonly IConnectionSettingsProvider _connections;
@@ -287,7 +289,7 @@ public sealed class HocVienSyncService : IHocVienSyncService
                 var models = new List<HocVienTargetWriteModel>(batch.Count);
                 foreach (var sourceRow in batch)
                 {
-                    var mapped = HocVienSyncMapper.MapAndValidate(sourceRow);
+                    var mapped = HocVienSyncMapper.MapAndValidate(sourceRow, V2SourceIdentity);
                     warningCount += mapped.Warnings.Count;
                     if (mapped.ShouldSkip || mapped.Model is null)
                     {

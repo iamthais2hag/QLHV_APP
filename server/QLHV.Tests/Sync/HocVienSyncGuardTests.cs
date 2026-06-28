@@ -378,8 +378,9 @@ public sealed class HocVienSyncGuardTests
 
         public Task<int> CountAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
 
-        public Task<IReadOnlyCollection<string>> GetExistingKeysAsync(
-            IReadOnlyCollection<string> maDks,
+        public Task<IReadOnlyCollection<string>> GetExistingSourceKeysAsync(
+            string sourceProfileCode,
+            IReadOnlyCollection<string> sourceMaDks,
             CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyCollection<string>>(Array.Empty<string>());
 

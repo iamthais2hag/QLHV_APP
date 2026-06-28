@@ -43,11 +43,24 @@ public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
         return await connection.ExecuteScalarAsync<int>(command);
     }
 
-    public async Task<IReadOnlyCollection<string>> GetExistingKeysAsync(
-        IReadOnlyCollection<string> maDks,
+    public async Task<IReadOnlyCollection<string>> GetExistingSourceKeysAsync(
+        string sourceProfileCode,
+        IReadOnlyCollection<string> sourceMaDks,
         CancellationToken cancellationToken = default)
     {
-        if (maDks is null || maDks.Count == 0)
+        if (sourceMaDks is null || sourceMaDks.Count == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        var normalizedProfile = NormalizeRequired(sourceProfileCode, nameof(sourceProfileCode)).ToUpperInvariant();
+        var normalizedSourceMaDks = sourceMaDks
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        if (normalizedSourceMaDks.Length == 0)
         {
             return Array.Empty<string>();
         }
@@ -55,13 +68,26 @@ public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
         var connectionString = await ResolveUsableTargetAsync(cancellationToken);
         await using var connection = new SqlConnection(connectionString);
         var command = new CommandDefinition(
-            "SELECT MaDK FROM dbo.App_HocVien WHERE MaDK IN @MaDks;",
-            new { MaDks = maDks },
+            @"
+SELECT SourceProfileCode, SourceMaDK
+FROM dbo.App_HocVien
+WHERE SourceProfileCode = @SourceProfileCode
+  AND SourceMaDK IN @SourceMaDks;",
+            new
+            {
+                SourceProfileCode = normalizedProfile,
+                SourceMaDks = normalizedSourceMaDks,
+            },
             commandTimeout: _options.TimeoutSeconds,
             cancellationToken: cancellationToken);
 
-        var keys = await connection.QueryAsync<string>(command);
-        return keys.ToList();
+        var keys = await connection.QueryAsync<ExistingSourceKeyRow>(command);
+        return keys
+            .Where(row =>
+                !string.IsNullOrWhiteSpace(row.SourceProfileCode) &&
+                !string.IsNullOrWhiteSpace(row.SourceMaDK))
+            .Select(row => HocVienSourceIdentityKey.Create(row.SourceProfileCode, row.SourceMaDK))
+            .ToList();
     }
 
     public async Task<QlhvHocVienTargetDiagnosticsDto> GetDiagnosticsAsync(
@@ -140,6 +166,8 @@ public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
             return UpsertCounts.Empty;
         }
 
+        ValidateSourceIdentity(rows);
+
         var connectionString = await ResolveUsableTargetAsync(cancellationToken);
         return await SyncRetryPolicyFactory.CreateDefault(_options.MaxRetryAttempts).ExecuteAsync(
             ct => UpsertBatchCoreAsync(connectionString, rows, ct),
@@ -209,6 +237,10 @@ public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
     private static DataTable BuildStagingTable(IReadOnlyList<HocVienTargetWriteModel> rows)
     {
         var table = new DataTable();
+        table.Columns.Add("SourceProfileCode", typeof(string));
+        table.Columns.Add("SourceMaDK", typeof(string));
+        table.Columns.Add("SourceSystem", typeof(string));
+        table.Columns.Add("SourceVersion", typeof(string));
         table.Columns.Add("MaDK", typeof(string));
         table.Columns.Add("MaKhoa", typeof(string));
         table.Columns.Add("TenKhoa", typeof(string));
@@ -227,11 +259,20 @@ public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
 
         foreach (var row in rows)
         {
+            var sourceProfileCode = NormalizeRequired(row.SourceProfileCode, nameof(row.SourceProfileCode))
+                .ToUpperInvariant();
+            var sourceMaDK = NormalizeRequired(row.SourceMaDK, nameof(row.SourceMaDK));
+            var sourceSystem = NormalizeRequired(row.SourceSystem, nameof(row.SourceSystem))
+                .ToUpperInvariant();
             var hash = string.IsNullOrWhiteSpace(row.V2RowHash)
                 ? V2RowHashCalculator.Compute(row)
                 : row.V2RowHash;
 
             table.Rows.Add(
+                sourceProfileCode,
+                sourceMaDK,
+                sourceSystem,
+                Db(row.SourceVersion),
                 row.MaDK,
                 Db(row.MaKhoa),
                 Db(row.TenKhoa),
@@ -252,6 +293,16 @@ public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
         return table;
     }
 
+    private static void ValidateSourceIdentity(IReadOnlyList<HocVienTargetWriteModel> rows)
+    {
+        foreach (var row in rows)
+        {
+            _ = NormalizeRequired(row.SourceProfileCode, nameof(row.SourceProfileCode));
+            _ = NormalizeRequired(row.SourceMaDK, nameof(row.SourceMaDK));
+            _ = NormalizeRequired(row.SourceSystem, nameof(row.SourceSystem));
+        }
+    }
+
     private async Task<string> ResolveUsableTargetAsync(CancellationToken cancellationToken)
     {
         var target = await _connections.GetQlhvAppConnectionAsync(cancellationToken);
@@ -266,6 +317,10 @@ public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
 
     private static object Db(string? value) => value is null ? DBNull.Value : value;
     private static object Db(DateTime? value) => value.HasValue ? value.Value : DBNull.Value;
+    private static string NormalizeRequired(string? value, string name)
+        => string.IsNullOrWhiteSpace(value)
+            ? throw new InvalidOperationException($"Thieu thong tin dinh danh nguon bat buoc: {name}.")
+            : value.Trim();
 
     private static int GetBucket(IEnumerable<SourceValueDistributionDto> rows, string value)
         => rows.FirstOrDefault(r => string.Equals(r.Value, value, StringComparison.OrdinalIgnoreCase))?.Total ?? 0;
@@ -310,7 +365,11 @@ FROM (
         (8, N'TenKhoa'),
         (9, N'MaHangDT'),
         (10, N'HangGPLXHoc'),
-        (11, N'V2RowHash')
+        (11, N'SourceProfileCode'),
+        (12, N'SourceMaDK'),
+        (13, N'SourceSystem'),
+        (14, N'SourceVersion'),
+        (15, N'V2RowHash')
 ) AS requiredColumns(SortOrder, ColumnName)
 LEFT JOIN sys.objects AS sysObjects
     ON sysObjects.object_id = OBJECT_ID(N'dbo.App_HocVien', N'U')
@@ -324,5 +383,11 @@ ORDER BY requiredColumns.SortOrder;";
         public bool AppHocVienExists { get; init; }
         public bool AppDongBoLogExists { get; init; }
         public bool IsDeletedColumnExists { get; init; }
+    }
+
+    private sealed class ExistingSourceKeyRow
+    {
+        public string SourceProfileCode { get; init; } = string.Empty;
+        public string SourceMaDK { get; init; } = string.Empty;
     }
 }

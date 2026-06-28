@@ -86,6 +86,30 @@ public sealed class HocVienMappingRulesTests
         Assert.NotEqual(first.Model.V2RowHash, third.Model!.V2RowHash);
     }
 
+    [Fact]
+    public void Default_mapping_sets_data_v2_source_identity()
+    {
+        var result = HocVienSyncMapper.MapAndValidate(Source());
+
+        Assert.NotNull(result.Model);
+        Assert.Equal("DATA_V2", result.Model!.SourceProfileCode);
+        Assert.Equal("DK001", result.Model.SourceMaDK);
+        Assert.Equal("V2", result.Model.SourceSystem);
+        Assert.Null(result.Model.SourceVersion);
+    }
+
+    [Fact]
+    public void Mapping_can_set_data_v1_source_identity_from_context()
+    {
+        var result = HocVienSyncMapper.MapAndValidate(Source(), HocVienSourceIdentityContext.DataV1);
+
+        Assert.NotNull(result.Model);
+        Assert.Equal("DATA_V1", result.Model!.SourceProfileCode);
+        Assert.Equal("DK001", result.Model.SourceMaDK);
+        Assert.Equal("V1", result.Model.SourceSystem);
+        Assert.Null(result.Model.SourceVersion);
+    }
+
     private static V2HocVienSourceRow Source(
         string soCmt = "001234567890",
         string gioiTinh = "M",

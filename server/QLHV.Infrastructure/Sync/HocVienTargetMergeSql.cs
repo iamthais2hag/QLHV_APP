@@ -8,7 +8,11 @@ internal static class HocVienTargetMergeSql
     public const string CreateStagingTable = @"
 IF OBJECT_ID('tempdb..#Sync_HocVien_Staging') IS NOT NULL DROP TABLE #Sync_HocVien_Staging;
 CREATE TABLE #Sync_HocVien_Staging (
-    MaDK            NVARCHAR(50)   NOT NULL PRIMARY KEY,
+    SourceProfileCode NVARCHAR(50)   NOT NULL,
+    SourceMaDK        NVARCHAR(50)   NOT NULL,
+    SourceSystem      NVARCHAR(50)   NOT NULL,
+    SourceVersion     NVARCHAR(50)   NULL,
+    MaDK            NVARCHAR(50)   NOT NULL,
     MaKhoa          NVARCHAR(50)   NULL,
     TenKhoa         NVARCHAR(255)  NULL,
     MaHangDT        NVARCHAR(20)   NULL,
@@ -22,17 +26,22 @@ CREATE TABLE #Sync_HocVien_Staging (
     HangGPLXDaCo    NVARCHAR(20)   NULL,
     NguoiNhanHoSo   NVARCHAR(150)  NULL,
     SourceOfTruth   NVARCHAR(30)   NOT NULL,
-    V2RowHash       NVARCHAR(64)   NOT NULL
+    V2RowHash       NVARCHAR(64)   NOT NULL,
+    PRIMARY KEY (SourceProfileCode, SourceMaDK)
 );
 ";
 
     public const string MergeStatement = @"
 MERGE dbo.App_HocVien AS tgt
 USING #Sync_HocVien_Staging AS src
-ON tgt.MaDK = src.MaDK
+ON tgt.SourceProfileCode = src.SourceProfileCode
+AND tgt.SourceMaDK = src.SourceMaDK
 
 WHEN MATCHED AND ISNULL(tgt.V2RowHash, '') <> ISNULL(src.V2RowHash, '')
 THEN UPDATE SET
+    tgt.SourceSystem     = src.SourceSystem,
+    tgt.SourceVersion    = src.SourceVersion,
+    tgt.MaDK             = src.MaDK,
     tgt.MaKhoa           = src.MaKhoa,
     tgt.TenKhoa          = src.TenKhoa,
     tgt.MaHangDT         = src.MaHangDT,
@@ -56,12 +65,14 @@ THEN UPDATE SET
 
 WHEN NOT MATCHED BY TARGET
 THEN INSERT (
+    SourceProfileCode, SourceMaDK, SourceSystem, SourceVersion,
     MaDK, MaKhoa, TenKhoa, MaHangDT, HangGPLXHoc, HoTen, NgaySinh, GioiTinh,
     SoCCCD, DiaChiThuongTru, SoGPLXDaCo, HangGPLXDaCo, NguoiNhanHoSo,
     SourceOfTruth, V2RowHash, LastSyncFromV2At, LastSyncStatus, LastSyncMessage,
     CreatedBy
 )
 VALUES (
+    src.SourceProfileCode, src.SourceMaDK, src.SourceSystem, src.SourceVersion,
     src.MaDK, src.MaKhoa, src.TenKhoa, src.MaHangDT, src.HangGPLXHoc, src.HoTen, src.NgaySinh, src.GioiTinh,
     src.SoCCCD, src.DiaChiThuongTru, src.SoGPLXDaCo, src.HangGPLXDaCo, src.NguoiNhanHoSo,
     src.SourceOfTruth, src.V2RowHash, SYSDATETIME(), N'ThanhCong', NULL,

@@ -36,6 +36,31 @@ public sealed class QlhvHocVienTargetRepositoryTests
         Assert.Equal(0, connections.QlhvResolutionCalls);
     }
 
+    [Fact]
+    public async Task Upsert_rejects_before_resolving_connection_when_source_identity_is_missing()
+    {
+        var connections = new TrackingConnectionSettingsProvider();
+        var repository = new QlhvHocVienTargetRepository(
+            connections,
+            Options.Create(new AppSyncOptions { DryRun = false }),
+            Options.Create(new SyncExecutionOptions { EnableTargetWrites = true }));
+
+        var rows = new[]
+        {
+            new HocVienTargetWriteModel
+            {
+                MaDK = "TEST-MADK",
+                V2RowHash = "hash",
+            },
+        };
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => repository.UpsertBatchAsync(rows));
+
+        Assert.Contains("SourceProfileCode", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(0, connections.QlhvResolutionCalls);
+    }
+
     private sealed class TrackingConnectionSettingsProvider : IConnectionSettingsProvider
     {
         public int QlhvResolutionCalls { get; private set; }

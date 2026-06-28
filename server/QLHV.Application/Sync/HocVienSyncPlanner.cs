@@ -15,15 +15,17 @@ public static class HocVienSyncPlanner
 
     public static HocVienSyncPlanDto BuildPlan(
         IReadOnlyList<V2HocVienSourceRow> sourceRows,
-        ISet<string> existingTargetKeys)
+        ISet<string> existingTargetKeys,
+        HocVienSourceIdentityContext? sourceIdentity = null)
     {
+        sourceIdentity ??= HocVienSourceIdentityContext.DataV2;
         var warnings = new List<HocVienDataWarningDto>();
         var items = new List<HocVienSyncPlanItemDto>();
         int insert = 0, update = 0, skip = 0;
 
         foreach (var row in sourceRows)
         {
-            var result = HocVienSyncMapper.MapAndValidate(row);
+            var result = HocVienSyncMapper.MapAndValidate(row, sourceIdentity);
 
             if (result.ShouldSkip || result.Model is null)
             {
@@ -38,7 +40,10 @@ public static class HocVienSyncPlanner
                 continue;
             }
 
-            var action = existingTargetKeys.Contains(result.Model.MaDK)
+            var sourceKey = HocVienSourceIdentityKey.Create(
+                result.Model.SourceProfileCode,
+                result.Model.SourceMaDK);
+            var action = existingTargetKeys.Contains(sourceKey)
                 ? PlannedSyncAction.Update
                 : PlannedSyncAction.Insert;
 

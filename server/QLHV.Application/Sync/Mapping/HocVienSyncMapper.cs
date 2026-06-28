@@ -14,7 +14,14 @@ public static class HocVienSyncMapper
         bool ShouldSkip);
 
     public static MapResult MapAndValidate(V2HocVienSourceRow source)
+        => MapAndValidate(source, HocVienSourceIdentityContext.DataV2);
+
+    public static MapResult MapAndValidate(
+        V2HocVienSourceRow source,
+        HocVienSourceIdentityContext sourceIdentity)
     {
+        ArgumentNullException.ThrowIfNull(sourceIdentity);
+
         var warnings = new List<HocVienDataWarningDto>();
 
         var maDK = Trim(source.MaDK);
@@ -37,6 +44,10 @@ public static class HocVienSyncMapper
 
         var modelWithoutHash = new HocVienTargetWriteModel
         {
+            SourceProfileCode = sourceIdentity.SourceProfileCode,
+            SourceMaDK = maDK,
+            SourceSystem = sourceIdentity.SourceSystem,
+            SourceVersion = sourceIdentity.SourceVersion,
             MaDK = maDK,
             MaKhoa = Trim(source.MaKhoaHoc),
             TenKhoa = Trim(source.TenKH),
@@ -55,6 +66,10 @@ public static class HocVienSyncMapper
 
         var model = new HocVienTargetWriteModel
         {
+            SourceProfileCode = modelWithoutHash.SourceProfileCode,
+            SourceMaDK = modelWithoutHash.SourceMaDK,
+            SourceSystem = modelWithoutHash.SourceSystem,
+            SourceVersion = modelWithoutHash.SourceVersion,
             MaDK = modelWithoutHash.MaDK,
             MaKhoa = modelWithoutHash.MaKhoa,
             TenKhoa = modelWithoutHash.TenKhoa,

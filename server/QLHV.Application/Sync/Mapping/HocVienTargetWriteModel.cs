@@ -6,6 +6,10 @@ namespace QLHV.Application.Sync.Mapping;
 /// </summary>
 public sealed class HocVienTargetWriteModel
 {
+    public string SourceProfileCode { get; init; } = string.Empty;
+    public string SourceMaDK { get; init; } = string.Empty;
+    public string SourceSystem { get; init; } = string.Empty;
+    public string? SourceVersion { get; init; }
     public string MaDK { get; init; } = string.Empty;
     public string? MaKhoa { get; init; }
     public string? TenKhoa { get; init; }
