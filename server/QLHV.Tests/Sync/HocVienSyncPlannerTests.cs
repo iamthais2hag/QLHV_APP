@@ -24,7 +24,8 @@ public sealed class HocVienSyncPlannerTests
         Assert.Equal(0, plan.PlannedUpdate);
         Assert.Contains(plan.Items, item =>
             item.MaDK == "DK001" &&
-            item.Action == PlannedSyncAction.Insert);
+            item.Action == PlannedSyncAction.Insert &&
+            item.ActionName == nameof(PlannedSyncAction.Insert));
     }
 
     [Fact]
@@ -45,7 +46,8 @@ public sealed class HocVienSyncPlannerTests
         Assert.Equal(1, plan.PlannedUpdate);
         Assert.Contains(plan.Items, item =>
             item.MaDK == "DK001" &&
-            item.Action == PlannedSyncAction.Update);
+            item.Action == PlannedSyncAction.Update &&
+            item.ActionName == nameof(PlannedSyncAction.Update));
     }
 
     [Fact]
@@ -69,7 +71,8 @@ public sealed class HocVienSyncPlannerTests
         Assert.Equal(1, plan.PlannedSkip);
         Assert.Contains(plan.Items, item =>
             item.MaDK == "DK001" &&
-            item.Action == PlannedSyncAction.Skip);
+            item.Action == PlannedSyncAction.Skip &&
+            item.ActionName == nameof(PlannedSyncAction.Skip));
     }
 
     [Fact]
@@ -90,6 +93,10 @@ public sealed class HocVienSyncPlannerTests
         Assert.Equal(0, plan.PlannedInsert);
         Assert.Equal(1, plan.PlannedUpdate);
         Assert.Equal(0, plan.PlannedSkip);
+        Assert.Contains(plan.Items, item =>
+            item.MaDK == "DK001" &&
+            item.Action == PlannedSyncAction.Update &&
+            item.ActionName == nameof(PlannedSyncAction.Update));
     }
 
     private static V2HocVienSourceRow Source(string maDk) => new()

@@ -261,6 +261,10 @@ public sealed class HocVienSyncGuardTests
         Assert.Equal(0, result.PlannedInsert);
         Assert.Equal(0, result.PlannedUpdate);
         Assert.Equal(1, result.PlannedSkip);
+        Assert.Contains(result.Items, item =>
+            item.MaDK == "DK001" &&
+            item.Action == PlannedSyncAction.Skip &&
+            item.ActionName == nameof(PlannedSyncAction.Skip));
         Assert.Equal(1, fakes.Source.ReadPageCalls);
         Assert.Equal(1, fakes.Target.HashLookupCalls);
         Assert.Equal(0, fakes.Target.UpsertCalls);
