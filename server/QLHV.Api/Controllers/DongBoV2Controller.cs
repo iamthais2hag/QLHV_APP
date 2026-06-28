@@ -45,6 +45,18 @@ public sealed class DongBoV2Controller : ControllerBase
     }
 
     /// <summary>
+    /// Read-only pre-execute plan for HocVien sync using source-scoped identity.
+    /// Reads source and target hashes only; does not write data.
+    /// </summary>
+    [HttpGet("hoc-vien/pre-execute-plan")]
+    [ProducesResponseType(typeof(HocVienSyncPlanDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<HocVienSyncPlanDto>> PreExecutePlanHocVien(CancellationToken cancellationToken)
+    {
+        var result = await _syncService.GetHocVienPreExecutePlanAsync(cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
     /// Read-only source diagnostics for HocVien data in CSDT_V2 before any guarded execute run.
     /// Returns aggregate counts only; does not write data or expose connection details.
     /// </summary>

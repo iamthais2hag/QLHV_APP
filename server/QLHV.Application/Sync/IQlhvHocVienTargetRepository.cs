@@ -13,6 +13,11 @@ public interface IQlhvHocVienTargetRepository
         IReadOnlyCollection<string> sourceMaDks,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyDictionary<string, string>> GetExistingSourceHashesAsync(
+        string sourceProfileCode,
+        IReadOnlyCollection<string> sourceMaDks,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Reads target schema/data diagnostics using SELECT only. Must not write App_HocVien or App_DongBoLog.
     /// </summary>

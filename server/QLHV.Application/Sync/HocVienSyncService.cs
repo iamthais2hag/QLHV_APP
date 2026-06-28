@@ -133,6 +133,103 @@ public sealed class HocVienSyncService : IHocVienSyncService
         };
     }
 
+    public async Task<HocVienSyncPlanDto> GetHocVienPreExecutePlanAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var errors = new List<SyncErrorDto>();
+        var issues = new List<string>();
+
+        AddConfigIssueIf(_options.BatchSize <= 0, "BatchSize phai lon hon 0.", errors, issues);
+        AddConfigIssueIf(_options.TimeoutSeconds <= 0, "TimeoutSeconds phai lon hon 0.", errors, issues);
+        AddConfigIssueIf(
+            string.IsNullOrWhiteSpace(_options.QlhvAppConnectionName),
+            "Thieu ten connection string QLHV_APP.",
+            errors,
+            issues);
+        AddConfigIssueIf(
+            string.IsNullOrWhiteSpace(_options.V2ConnectionName),
+            "Thieu ten cau hinh ket noi CSDT_V2.",
+            errors,
+            issues);
+
+        var qlhv = await _connections.GetQlhvAppConnectionAsync(cancellationToken);
+        var v2 = await _connections.GetSourceConnectionAsync(SourceSystem.V2, cancellationToken);
+
+        AddConnectionIssueIfNotUsable("QLHV_APP", qlhv, errors, issues);
+        AddConnectionIssueIfNotUsable("CSDT_V2", v2, errors, issues);
+
+        if (errors.Count > 0)
+        {
+            return new HocVienSyncPlanDto
+            {
+                SourceProfileCode = V2SourceIdentity.SourceProfileCode,
+                SourceSystem = V2SourceIdentity.SourceSystem,
+                Errors = errors,
+            };
+        }
+
+        var sourceRows = new List<V2HocVienSourceRow>();
+        try
+        {
+            var pageSize = Math.Max(1, _options.BatchSize);
+            var offset = 0;
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var batch = await _v2Source.ReadPageAsync(
+                    HocVienSourceFilter.Empty,
+                    offset,
+                    pageSize,
+                    cancellationToken);
+
+                if (batch.Count == 0)
+                {
+                    break;
+                }
+
+                sourceRows.AddRange(batch);
+                if (batch.Count < pageSize)
+                {
+                    break;
+                }
+
+                offset += pageSize;
+            }
+
+            var sourceMaDks = sourceRows
+                .Select(row => row.MaDK)
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value!.Trim())
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+
+            var existingTargetHashes = await _target.GetExistingSourceHashesAsync(
+                V2SourceIdentity.SourceProfileCode,
+                sourceMaDks,
+                cancellationToken);
+
+            return HocVienSyncPlanner.BuildPlan(sourceRows, existingTargetHashes, V2SourceIdentity);
+        }
+        catch (Exception ex)
+        {
+            return new HocVienSyncPlanDto
+            {
+                SourceProfileCode = V2SourceIdentity.SourceProfileCode,
+                SourceSystem = V2SourceIdentity.SourceSystem,
+                SourceRowsRead = sourceRows.Count,
+                Errors = new[]
+                {
+                    new SyncErrorDto
+                    {
+                        Code = "PRE_EXECUTE_PLAN_FAILED",
+                        Message = $"Khong tao duoc ke hoach pre-execute read-only. Chi tiet: {ex.GetType().Name}.",
+                    },
+                },
+            };
+        }
+    }
+
     public async Task<V2HocVienSourceDiagnosticsResultDto> GetHocVienSourceDiagnosticsAsync(
         CancellationToken cancellationToken = default)
     {

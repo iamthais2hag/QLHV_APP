@@ -235,6 +235,38 @@ public sealed class HocVienSyncGuardTests
         Assert.DoesNotContain("Server=", json, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task Pre_execute_plan_reads_source_and_target_hashes_without_write()
+    {
+        var sourceRows = new[] { SourceRow("DK001") };
+        var mapped = QLHV.Application.Sync.Mapping.HocVienSyncMapper.MapAndValidate(
+            sourceRows[0],
+            QLHV.Application.Sync.Mapping.HocVienSourceIdentityContext.DataV2);
+        var sourceKey = QLHV.Application.Sync.Mapping.HocVienSourceIdentityKey.Create("DATA_V2", "DK001");
+        var fakes = TestFakes.Create(
+            enableWrites: false,
+            dryRun: true,
+            sourceRows: sourceRows,
+            targetHashes: new Dictionary<string, string>
+            {
+                [sourceKey] = mapped.Model!.V2RowHash,
+            });
+
+        var result = await fakes.Service.GetHocVienPreExecutePlanAsync();
+
+        Assert.True(result.IsDryRun);
+        Assert.Equal("DATA_V2", result.SourceProfileCode);
+        Assert.Equal("V2", result.SourceSystem);
+        Assert.Equal(1, result.SourceRowsRead);
+        Assert.Equal(0, result.PlannedInsert);
+        Assert.Equal(0, result.PlannedUpdate);
+        Assert.Equal(1, result.PlannedSkip);
+        Assert.Equal(1, fakes.Source.ReadPageCalls);
+        Assert.Equal(1, fakes.Target.HashLookupCalls);
+        Assert.Equal(0, fakes.Target.UpsertCalls);
+        Assert.Equal(0, fakes.Log.WriteCalls);
+    }
+
     private sealed class TestFakes
     {
         private TestFakes(
@@ -262,7 +294,9 @@ public sealed class HocVienSyncGuardTests
             int sourceCount = 0,
             V2HocVienSourceDiagnosticsDto? diagnostics = null,
             QlhvHocVienTargetDiagnosticsDto? targetDiagnostics = null,
-            bool dryRun = false)
+            bool dryRun = false,
+            IReadOnlyList<V2HocVienSourceRow>? sourceRows = null,
+            IReadOnlyDictionary<string, string>? targetHashes = null)
         {
             var sync = new AppSyncOptions
             {
@@ -277,8 +311,8 @@ public sealed class HocVienSyncGuardTests
                 ConfirmationPhrase = "EXECUTE_DONG_BO_V2_HOC_VIEN",
             };
             var connections = new FakeConnectionSettingsProvider();
-            var source = new FakeV2Source(sourceCount, diagnostics);
-            var target = new FakeTarget(targetDiagnostics);
+            var source = new FakeV2Source(sourceCount, diagnostics, sourceRows);
+            var target = new FakeTarget(targetDiagnostics, targetHashes);
             var log = new FakeRunLog();
             var service = new HocVienSyncService(
                 Options.Create(sync),
@@ -326,13 +360,18 @@ public sealed class HocVienSyncGuardTests
     {
         private readonly int _sourceCount;
         private readonly V2HocVienSourceDiagnosticsDto _diagnostics;
+        private readonly IReadOnlyList<V2HocVienSourceRow> _sourceRows;
 
-        public FakeV2Source(int sourceCount, V2HocVienSourceDiagnosticsDto? diagnostics)
+        public FakeV2Source(
+            int sourceCount,
+            V2HocVienSourceDiagnosticsDto? diagnostics,
+            IReadOnlyList<V2HocVienSourceRow>? sourceRows)
         {
             _sourceCount = sourceCount;
+            _sourceRows = sourceRows ?? Array.Empty<V2HocVienSourceRow>();
             _diagnostics = diagnostics ?? new V2HocVienSourceDiagnosticsDto
             {
-                SourceRows = sourceCount,
+                SourceRows = sourceRows?.Count ?? sourceCount,
             };
         }
 
@@ -353,7 +392,11 @@ public sealed class HocVienSyncGuardTests
             CancellationToken cancellationToken = default)
         {
             ReadPageCalls++;
-            return Task.FromResult<IReadOnlyList<V2HocVienSourceRow>>(Array.Empty<V2HocVienSourceRow>());
+            var page = _sourceRows
+                .Skip(offset)
+                .Take(pageSize)
+                .ToArray();
+            return Task.FromResult<IReadOnlyList<V2HocVienSourceRow>>(page);
         }
 
         public Task<V2HocVienSourceDiagnosticsDto> GetDiagnosticsAsync(
@@ -367,14 +410,19 @@ public sealed class HocVienSyncGuardTests
     private sealed class FakeTarget : IQlhvHocVienTargetRepository
     {
         private readonly QlhvHocVienTargetDiagnosticsDto _diagnostics;
+        private readonly IReadOnlyDictionary<string, string> _targetHashes;
 
-        public FakeTarget(QlhvHocVienTargetDiagnosticsDto? diagnostics)
+        public FakeTarget(
+            QlhvHocVienTargetDiagnosticsDto? diagnostics,
+            IReadOnlyDictionary<string, string>? targetHashes)
         {
             _diagnostics = diagnostics ?? new QlhvHocVienTargetDiagnosticsDto();
+            _targetHashes = targetHashes ?? new Dictionary<string, string>();
         }
 
         public int UpsertCalls { get; private set; }
         public int DiagnosticsCalls { get; private set; }
+        public int HashLookupCalls { get; private set; }
 
         public Task<int> CountAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
 
@@ -383,6 +431,15 @@ public sealed class HocVienSyncGuardTests
             IReadOnlyCollection<string> sourceMaDks,
             CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyCollection<string>>(Array.Empty<string>());
+
+        public Task<IReadOnlyDictionary<string, string>> GetExistingSourceHashesAsync(
+            string sourceProfileCode,
+            IReadOnlyCollection<string> sourceMaDks,
+            CancellationToken cancellationToken = default)
+        {
+            HashLookupCalls++;
+            return Task.FromResult(_targetHashes);
+        }
 
         public Task<QlhvHocVienTargetDiagnosticsDto> GetDiagnosticsAsync(CancellationToken cancellationToken = default)
         {
@@ -409,4 +466,22 @@ public sealed class HocVienSyncGuardTests
             return Task.FromResult(1L);
         }
     }
+
+    private static V2HocVienSourceRow SourceRow(string maDk) => new()
+    {
+        MaDK = maDk,
+        HoVaTen = "Nguyen Van A",
+        NgaySinh = new DateTime(1990, 1, 2),
+        SoCMT = "001234567890",
+        GioiTinh = "M",
+        MaKhoaHoc = "K001",
+        TenKH = "Khoa 1",
+        HangDaoTao = "B2",
+        TenHangDT = "Hang B2",
+        NoiTT = "Dia chi",
+        NoiTTTenDayDu = "Dia chi day du",
+        SoGPLXDaCo = "GPLX1",
+        HangGPLXDaCo = "A1",
+        NguoiNhanHoSo = "Nhan vien",
+    };
 }

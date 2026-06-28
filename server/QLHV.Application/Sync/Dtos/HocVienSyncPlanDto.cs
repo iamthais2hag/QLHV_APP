@@ -9,6 +9,8 @@ public sealed class HocVienSyncPlanDto
 {
     /// <summary>Luôn true ở Phase B3A.</summary>
     public bool IsDryRun { get; init; } = true;
+    public string SourceProfileCode { get; init; } = string.Empty;
+    public string SourceSystem { get; init; } = string.Empty;
 
     /// <summary>Số dòng đọc được từ nguồn V2.</summary>
     public int SourceRowsRead { get; init; }
