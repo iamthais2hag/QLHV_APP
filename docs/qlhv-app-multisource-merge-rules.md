@@ -7,6 +7,8 @@ It is documentation only and does not change application behavior.
 
 `DATA_V1` and `DATA_V2` are separate source scopes.
 An import from one source must not destroy or silently replace data imported from the other source.
+These scopes are technical import/audit boundaries, not a decision that QLHV_APP must permanently duplicate learners by
+V1/V2 in the business UI.
 
 Required rule:
 
@@ -51,9 +53,12 @@ contain overlapping registration codes.
 
 Approved direction:
 
-1. Keep source-owned imported rows by `(SourceProfileCode, MaDK)` for sync/import.
-2. Preserve V1 and V2 rows independently unless a later canonical merge design is approved.
+1. Keep source-owned imported rows by `(SourceProfileCode, MaDK)` for safe sync/import.
+2. Preserve V1 and V2 source scopes at the technical import layer unless a later canonical merge design is approved.
 3. Add a separate canonical/person-merge layer only after conflict rules are reviewed.
+
+This is a safety strategy for upsert/audit. It does not mean the learner-management screens must show duplicated
+business learners after the Moto transition is reconciled.
 
 Phase 1 schema adds nullable source identity columns and indexes only.
 Phase 2 must update code and backfill data before enforcing composite uniqueness.
@@ -81,8 +86,8 @@ Example:
 
 | Existing target data | Import action | Allowed result |
 | --- | --- | --- |
-| Rows from `DATA_V1` exist | Import `DATA_V2` | `DATA_V1` rows remain. `DATA_V2` rows insert/update in V2 scope. |
-| Rows from `DATA_V2` exist | Import `DATA_V1` | `DATA_V2` rows remain. `DATA_V1` rows insert/update in V1 scope. |
+| Rows from `DATA_V1` exist | Import `DATA_V2` | `DATA_V1` technical source rows remain. `DATA_V2` rows insert/update in V2 scope. |
+| Rows from `DATA_V2` exist | Import `DATA_V1` | `DATA_V2` technical source rows remain. `DATA_V1` rows insert/update in V1 scope. |
 | Same `MaDK` appears in both sources | Import either source | Apply approved conflict rule; do not silently overwrite the other source. |
 
 ## Conflict policy to decide
@@ -90,6 +95,7 @@ Example:
 These questions must be answered before production execute:
 
 - If `DATA_V1` and `DATA_V2` have the same `MaDK`, are they the same learner or separate source records?
+- For the current Moto flow, do old/new test data represent one business learner lifecycle after reconciliation?
 - Which source wins for display fields such as name, address, gender, course, and license class?
 - Should QLHV_APP show source-specific rows or a merged canonical row?
 - How are conflicts reviewed by humans?
