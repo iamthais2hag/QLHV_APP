@@ -4,6 +4,10 @@ Date: 2026-06-28
 
 Scope: prepare and verify a read-only pre-execute plan after the multi-source readiness work. This task does not run sync, does not call `/execute`, does not write the database, and does not enable `EnableTargetWrites`.
 
+B3W22 concept correction: this plan uses `DATA_V2` as the current technical source identity for the Moto new 2026 test
+data. It must not be read as a business decision to permanently duplicate learners by `DATA_V1`/`DATA_V2` in QLHV_APP.
+The plan protects safe upsert/audit boundaries only.
+
 ## Endpoint / Command To Use
 
 Read-only endpoint:
@@ -68,6 +72,7 @@ SourceProfileCode + SourceMaDK
 ```
 
 `MaDK` remains a business/display field and must not be used alone as sync identity.
+`SourceProfileCode + SourceMaDK` is a technical import key, not a final business learner identity.
 
 ## Insert / Update / Skip Meaning
 
@@ -123,6 +128,8 @@ Execute/sync is still blocked until:
 6. `EnableTargetWrites` remains `false` until a human explicitly approves a local/test execute.
 7. Authorization/role policy for execute is reviewed before any non-local environment.
 8. A fresh backup/snapshot exists before any write test.
+9. The Moto old/new data-flow meaning is reviewed so `DATA_V1`/`DATA_V2` technical source identity is not mistaken for
+   intentional business duplication.
 
 ## Exact Next Manual Read-Only Checks
 

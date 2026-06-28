@@ -23,6 +23,8 @@ Important:
 - The application must not require all 7 databases to exist before it can start.
 - A missing profile should block only the feature that needs that profile.
 - Profile status must be shown safely without exposing server, database, user, password, token, or full connection string.
+- `DATA_V1` and `DATA_V2` are technical staging/import profiles; they do not by themselves mean learners should be
+  duplicated in QLHV_APP business screens.
 
 ## Admin menu
 

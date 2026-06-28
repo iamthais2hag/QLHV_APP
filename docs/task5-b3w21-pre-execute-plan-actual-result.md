@@ -68,6 +68,8 @@ For the current `DATA_V2` state, the pre-execute plan says no write is needed:
 - `plannedSkip = 1970`
 
 This means QLHV_APP_TEST is already aligned with the current DATA_V2 source rows by the multi-source identity rule `SourceProfileCode + SourceMaDK`.
+This is a technical test-state conclusion only. It does not decide that learners should be duplicated by V1/V2 in the
+business UI after the Moto data flow is reconciled.
 
 Do not execute sync based only on this note. Before any future execute test, re-run the full read-only checklist and stop if:
 

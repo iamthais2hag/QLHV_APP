@@ -19,8 +19,10 @@ The CSDT connection configuration is planned as a QLHV_APP menu, for example
 The menu manages the fixed 7 profiles and stores CSDT/DATA profile settings in `QLHV_APP`; the bootstrap
 `QLHV_APP` connection remains protected server configuration in the first stage.
 
-B3V2 pre-execute-plan work is WIP single-source work and must not be merged to `main` as final execute readiness.
-Do not run single-source execute until source profile selection, merge identity, and V1/V2 preservation rules are
+The older B3V2 branch was WIP single-source work and must not be treated as final execute readiness.
+The current B3W20/B3W21 pre-execute plan on `main` is read-only diagnostics only. It uses technical source identity;
+it does not approve business duplication of learners by `DATA_V1`/`DATA_V2`.
+Do not run execute until source profile selection, merge identity, and Moto old/new business reconciliation rules are
 confirmed.
 
 ## B3W6 HocVien source identity hold
@@ -41,7 +43,7 @@ Rules before any execute/import:
 - `DATA_V2` must run its own plan/import scope.
 - `DATA_V1` plan/import must not delete, hide, overwrite, or count as target-owned rows from `DATA_V2`.
 - `DATA_V2` plan/import must not delete, hide, overwrite, or count as target-owned rows from `DATA_V1`.
-- B3V2 single-source pre-execute plan is not execute readiness because it does not yet use `SourceProfileCode`.
+- Technical `DATA_V1`/`DATA_V2` source identity is not a final learner/person identity.
 
 ## B3W8 source attribution before backfill
 
