@@ -8,8 +8,9 @@ public interface IQlhvHocVienTargetRepository
 {
     Task<int> CountAsync(CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyCollection<string>> GetExistingKeysAsync(
-        IReadOnlyCollection<string> maDks,
+    Task<IReadOnlyCollection<string>> GetExistingSourceKeysAsync(
+        string sourceProfileCode,
+        IReadOnlyCollection<string> sourceMaDks,
         CancellationToken cancellationToken = default);
 
     /// <summary>
