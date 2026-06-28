@@ -18,6 +18,19 @@ public static class HocVienSyncPlanner
         ISet<string> existingTargetKeys,
         HocVienSourceIdentityContext? sourceIdentity = null)
     {
+        var existingTargetHashes = existingTargetKeys.ToDictionary(
+            key => key,
+            _ => string.Empty,
+            StringComparer.Ordinal);
+
+        return BuildPlan(sourceRows, existingTargetHashes, sourceIdentity);
+    }
+
+    public static HocVienSyncPlanDto BuildPlan(
+        IReadOnlyList<V2HocVienSourceRow> sourceRows,
+        IReadOnlyDictionary<string, string> existingTargetHashes,
+        HocVienSourceIdentityContext? sourceIdentity = null)
+    {
         sourceIdentity ??= HocVienSourceIdentityContext.DataV2;
         var warnings = new List<HocVienDataWarningDto>();
         var items = new List<HocVienSyncPlanItemDto>();
@@ -43,17 +56,19 @@ public static class HocVienSyncPlanner
             var sourceKey = HocVienSourceIdentityKey.Create(
                 result.Model.SourceProfileCode,
                 result.Model.SourceMaDK);
-            var action = existingTargetKeys.Contains(sourceKey)
-                ? PlannedSyncAction.Update
-                : PlannedSyncAction.Insert;
+            var action = ResolveAction(result.Model, sourceKey, existingTargetHashes);
 
             if (action == PlannedSyncAction.Insert)
             {
                 insert++;
             }
-            else
+            else if (action == PlannedSyncAction.Update)
             {
                 update++;
+            }
+            else
+            {
+                skip++;
             }
 
             warnings.AddRange(result.Warnings);
@@ -68,6 +83,8 @@ public static class HocVienSyncPlanner
         return new HocVienSyncPlanDto
         {
             IsDryRun = true,
+            SourceProfileCode = sourceIdentity.SourceProfileCode,
+            SourceSystem = sourceIdentity.SourceSystem,
             SourceRowsRead = sourceRows.Count,
             PlannedInsert = insert,
             PlannedUpdate = update,
@@ -76,6 +93,28 @@ public static class HocVienSyncPlanner
             Warnings = warnings,
             Items = items,
         };
+    }
+
+    private static PlannedSyncAction ResolveAction(
+        HocVienTargetWriteModel model,
+        string sourceKey,
+        IReadOnlyDictionary<string, string> existingTargetHashes)
+    {
+        if (!existingTargetHashes.TryGetValue(sourceKey, out var existingHash))
+        {
+            return PlannedSyncAction.Insert;
+        }
+
+        if (string.IsNullOrWhiteSpace(existingHash))
+        {
+            return string.IsNullOrWhiteSpace(model.V2RowHash)
+                ? PlannedSyncAction.Skip
+                : PlannedSyncAction.Update;
+        }
+
+        return string.Equals(existingHash, model.V2RowHash, StringComparison.OrdinalIgnoreCase)
+            ? PlannedSyncAction.Skip
+            : PlannedSyncAction.Update;
     }
 
     private static void AddPreview(List<HocVienSyncPlanItemDto> items, HocVienSyncPlanItemDto item)

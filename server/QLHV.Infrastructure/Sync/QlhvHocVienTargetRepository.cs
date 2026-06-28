@@ -90,6 +90,58 @@ WHERE SourceProfileCode = @SourceProfileCode
             .ToList();
     }
 
+    public async Task<IReadOnlyDictionary<string, string>> GetExistingSourceHashesAsync(
+        string sourceProfileCode,
+        IReadOnlyCollection<string> sourceMaDks,
+        CancellationToken cancellationToken = default)
+    {
+        if (sourceMaDks is null || sourceMaDks.Count == 0)
+        {
+            return new Dictionary<string, string>();
+        }
+
+        var normalizedProfile = NormalizeRequired(sourceProfileCode, nameof(sourceProfileCode)).ToUpperInvariant();
+        var normalizedSourceMaDks = sourceMaDks
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        if (normalizedSourceMaDks.Length == 0)
+        {
+            return new Dictionary<string, string>();
+        }
+
+        var connectionString = await ResolveUsableTargetAsync(cancellationToken);
+        await using var connection = new SqlConnection(connectionString);
+        var command = new CommandDefinition(
+            @"
+SELECT SourceProfileCode, SourceMaDK, V2RowHash
+FROM dbo.App_HocVien
+WHERE SourceProfileCode = @SourceProfileCode
+  AND SourceMaDK IN @SourceMaDks;",
+            new
+            {
+                SourceProfileCode = normalizedProfile,
+                SourceMaDks = normalizedSourceMaDks,
+            },
+            commandTimeout: _options.TimeoutSeconds,
+            cancellationToken: cancellationToken);
+
+        var rows = await connection.QueryAsync<ExistingSourceHashRow>(command);
+        return rows
+            .Where(row =>
+                !string.IsNullOrWhiteSpace(row.SourceProfileCode) &&
+                !string.IsNullOrWhiteSpace(row.SourceMaDK))
+            .GroupBy(
+                row => HocVienSourceIdentityKey.Create(row.SourceProfileCode, row.SourceMaDK),
+                StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group.First().V2RowHash ?? string.Empty,
+                StringComparer.Ordinal);
+    }
+
     public async Task<QlhvHocVienTargetDiagnosticsDto> GetDiagnosticsAsync(
         CancellationToken cancellationToken = default)
     {
@@ -389,5 +441,12 @@ ORDER BY requiredColumns.SortOrder;";
     {
         public string SourceProfileCode { get; init; } = string.Empty;
         public string SourceMaDK { get; init; } = string.Empty;
+    }
+
+    private sealed class ExistingSourceHashRow
+    {
+        public string SourceProfileCode { get; init; } = string.Empty;
+        public string SourceMaDK { get; init; } = string.Empty;
+        public string? V2RowHash { get; init; }
     }
 }

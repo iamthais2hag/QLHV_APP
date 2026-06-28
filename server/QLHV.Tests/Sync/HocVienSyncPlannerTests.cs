@@ -48,6 +48,50 @@ public sealed class HocVienSyncPlannerTests
             item.Action == PlannedSyncAction.Update);
     }
 
+    [Fact]
+    public void BuildPlan_skips_when_same_source_identity_has_same_hash()
+    {
+        var sourceRows = new[] { Source("DK001") };
+        var mapped = HocVienSyncMapper.MapAndValidate(sourceRows[0], HocVienSourceIdentityContext.DataV2);
+        var sourceKey = HocVienSourceIdentityKey.Create("DATA_V2", "DK001");
+        var existingTargetHashes = new Dictionary<string, string>
+        {
+            [sourceKey] = mapped.Model!.V2RowHash,
+        };
+
+        var plan = HocVienSyncPlanner.BuildPlan(
+            sourceRows,
+            existingTargetHashes,
+            HocVienSourceIdentityContext.DataV2);
+
+        Assert.Equal(0, plan.PlannedInsert);
+        Assert.Equal(0, plan.PlannedUpdate);
+        Assert.Equal(1, plan.PlannedSkip);
+        Assert.Contains(plan.Items, item =>
+            item.MaDK == "DK001" &&
+            item.Action == PlannedSyncAction.Skip);
+    }
+
+    [Fact]
+    public void BuildPlan_updates_when_same_source_identity_has_different_hash()
+    {
+        var sourceRows = new[] { Source("DK001") };
+        var sourceKey = HocVienSourceIdentityKey.Create("DATA_V2", "DK001");
+        var existingTargetHashes = new Dictionary<string, string>
+        {
+            [sourceKey] = "old-hash",
+        };
+
+        var plan = HocVienSyncPlanner.BuildPlan(
+            sourceRows,
+            existingTargetHashes,
+            HocVienSourceIdentityContext.DataV2);
+
+        Assert.Equal(0, plan.PlannedInsert);
+        Assert.Equal(1, plan.PlannedUpdate);
+        Assert.Equal(0, plan.PlannedSkip);
+    }
+
     private static V2HocVienSourceRow Source(string maDk) => new()
     {
         MaDK = maDk,

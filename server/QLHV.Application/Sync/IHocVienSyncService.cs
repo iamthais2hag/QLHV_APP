@@ -12,6 +12,8 @@ public interface IHocVienSyncService
 
     Task<DryRunResultDto> DryRunHocVienAsync(CancellationToken cancellationToken = default);
 
+    Task<HocVienSyncPlanDto> GetHocVienPreExecutePlanAsync(CancellationToken cancellationToken = default);
+
     Task<V2HocVienSourceDiagnosticsResultDto> GetHocVienSourceDiagnosticsAsync(
         CancellationToken cancellationToken = default);
 
