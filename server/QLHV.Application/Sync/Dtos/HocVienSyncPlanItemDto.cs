@@ -24,6 +24,9 @@ public sealed class HocVienSyncPlanItemDto
     /// <summary>Hành động dự kiến.</summary>
     public PlannedSyncAction Action { get; init; }
 
+    /// <summary>Tên hành động dễ đọc cho người rà soát thủ công.</summary>
+    public string ActionName => Action.ToString();
+
     /// <summary>Cảnh báo chất lượng dữ liệu của bản ghi (nếu có).</summary>
     public IReadOnlyList<HocVienDataWarningDto> Warnings { get; init; } = Array.Empty<HocVienDataWarningDto>();
 }
