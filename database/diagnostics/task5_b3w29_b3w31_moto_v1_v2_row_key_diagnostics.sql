@@ -39,7 +39,7 @@ END;
 V1Counts AS (
     SELECT
         t.name AS TableName,
-        SUM(ps.rows) AS RowCount
+        SUM(ps.rows) AS TotalRows
     FROM CSDT_V1.sys.tables t
     JOIN CSDT_V1.sys.schemas s ON s.schema_id = t.schema_id
     JOIN CSDT_V1.sys.partitions ps ON ps.object_id = t.object_id
@@ -51,7 +51,7 @@ V1Counts AS (
 V2Counts AS (
     SELECT
         t.name AS TableName,
-        SUM(ps.rows) AS RowCount
+        SUM(ps.rows) AS TotalRows
     FROM CSDT_V2.sys.tables t
     JOIN CSDT_V2.sys.schemas s ON s.schema_id = t.schema_id
     JOIN CSDT_V2.sys.partitions ps ON ps.object_id = t.object_id
@@ -62,10 +62,10 @@ V2Counts AS (
 )
 SELECT
     ct.TableName,
-    CAST(CASE WHEN v1.RowCount IS NULL THEN 0 ELSE 1 END AS bit) AS ExistsInV1,
-    CAST(CASE WHEN v2.RowCount IS NULL THEN 0 ELSE 1 END AS bit) AS ExistsInV2,
-    v1.RowCount AS V1RowCount,
-    v2.RowCount AS V2RowCount
+    CAST(CASE WHEN v1.TotalRows IS NULL THEN 0 ELSE 1 END AS bit) AS ExistsInV1,
+    CAST(CASE WHEN v2.TotalRows IS NULL THEN 0 ELSE 1 END AS bit) AS ExistsInV2,
+    v1.TotalRows AS V1RowCount,
+    v2.TotalRows AS V2RowCount
 FROM CandidateTables ct
 LEFT JOIN V1Counts v1 ON v1.TableName = ct.TableName
 LEFT JOIN V2Counts v2 ON v2.TableName = ct.TableName
