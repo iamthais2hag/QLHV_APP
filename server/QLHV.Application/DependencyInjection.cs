@@ -17,6 +17,7 @@ public static class DependencyInjection
         services.AddScoped<ICsdtConnectionProfileService, CsdtConnectionProfileService>();
         services.AddScoped<IHocVienSourceAttributionDiagnosticsService, HocVienSourceAttributionDiagnosticsService>();
         services.AddScoped<IHocVienSyncService, HocVienSyncService>();
+        services.AddScoped<IMotoSyncService, MotoSyncService>();
         return services;
     }
 }

@@ -15,13 +15,16 @@ public sealed class DongBoV2Controller : ControllerBase
 {
     private readonly IHocVienSyncService _syncService;
     private readonly IHocVienSourceAttributionDiagnosticsService _sourceAttributionDiagnostics;
+    private readonly IMotoSyncService _motoSyncService;
 
     public DongBoV2Controller(
         IHocVienSyncService syncService,
-        IHocVienSourceAttributionDiagnosticsService sourceAttributionDiagnostics)
+        IHocVienSourceAttributionDiagnosticsService sourceAttributionDiagnostics,
+        IMotoSyncService motoSyncService)
     {
         _syncService = syncService;
         _sourceAttributionDiagnostics = sourceAttributionDiagnostics;
+        _motoSyncService = motoSyncService;
     }
 
     /// <summary>
@@ -92,6 +95,38 @@ public sealed class DongBoV2Controller : ControllerBase
         CancellationToken cancellationToken)
     {
         var result = await _sourceAttributionDiagnostics.GetDiagnosticsAsync(cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Read-only Moto V1/V2 TEST sync plan. Does not write either source or target database.
+    /// </summary>
+    [HttpGet("moto/sync-plan")]
+    [ProducesResponseType(typeof(MotoSyncPlanDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<MotoSyncPlanDto>> MotoSyncPlan(
+        [FromQuery] MotoSyncPlanRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _motoSyncService.GetPlanAsync(request, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Guarded TEST-only Moto V1/V2 insert-only sync. Requires exact confirmation and blocks dirty duplicate data.
+    /// </summary>
+    [HttpPost("moto/sync-test")]
+    [ProducesResponseType(typeof(MotoSyncExecuteResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(MotoSyncExecuteResultDto), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<MotoSyncExecuteResultDto>> MotoSyncTest(
+        [FromBody] MotoSyncTestExecuteRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _motoSyncService.ExecuteTestAsync(request, cancellationToken);
+        if (!result.Executed)
+        {
+            return Conflict(result);
+        }
+
         return Ok(result);
     }
 
