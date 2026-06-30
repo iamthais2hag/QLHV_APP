@@ -91,7 +91,7 @@ export const MENU_ITEMS: MenuItem[] = [
   {
     path: '/dong-bo-v2',
     label: 'Đồng bộ dữ liệu',
-    description: 'Đồng bộ dữ liệu một chiều từ nguồn V2.',
+    description: 'Đồng bộ dữ liệu Moto giữa CSDT_V1 và CSDT_V2.',
     icon: '🔄',
   },
   {
