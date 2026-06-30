@@ -132,10 +132,12 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
         await AddMappingBlockersAsync(
             source,
             target,
+            sourceOnlyMaDks,
             plannedInsertNguoiLx,
             plannedInsertHoSo,
             plannedInsertGiayTo,
             blockers,
+            warnings,
             null,
             cancellationToken);
 
@@ -370,26 +372,52 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
     private async Task AddMappingBlockersAsync(
         SqlConnection source,
         SqlConnection target,
+        IReadOnlyCollection<string> plannedMaDks,
         long plannedInsertNguoiLx,
         long plannedInsertHoSo,
         long plannedInsertGiayTo,
         ICollection<string> blockers,
+        ICollection<string> warnings,
         SqlTransaction? transaction,
         CancellationToken cancellationToken)
     {
         if (plannedInsertNguoiLx > 0)
         {
-            await AddTableMappingBlockersAsync(source, target, "NguoiLX", blockers, transaction, cancellationToken);
+            await AddTableMappingBlockersAsync(
+                source,
+                target,
+                "NguoiLX",
+                plannedMaDks,
+                blockers,
+                warnings,
+                transaction,
+                cancellationToken);
         }
 
         if (plannedInsertHoSo > 0)
         {
-            await AddTableMappingBlockersAsync(source, target, "NguoiLX_HoSo", blockers, transaction, cancellationToken);
+            await AddTableMappingBlockersAsync(
+                source,
+                target,
+                "NguoiLX_HoSo",
+                plannedMaDks,
+                blockers,
+                warnings,
+                transaction,
+                cancellationToken);
         }
 
         if (plannedInsertGiayTo > 0)
         {
-            await AddTableMappingBlockersAsync(source, target, "NguoiLXHS_GiayTo", blockers, transaction, cancellationToken);
+            await AddTableMappingBlockersAsync(
+                source,
+                target,
+                "NguoiLXHS_GiayTo",
+                plannedMaDks,
+                blockers,
+                warnings,
+                transaction,
+                cancellationToken);
         }
     }
 
@@ -397,7 +425,9 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
         SqlConnection source,
         SqlConnection target,
         string tableName,
+        IReadOnlyCollection<string> plannedMaDks,
         ICollection<string> blockers,
+        ICollection<string> warnings,
         SqlTransaction? transaction,
         CancellationToken cancellationToken)
     {
@@ -430,12 +460,43 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
             }
 
             if (IsStringType(sourceColumn.DataType) &&
-                IsStringType(targetColumn.DataType) &&
-                sourceColumn.MaxLength > targetColumn.MaxLength &&
-                targetColumn.MaxLength > 0)
+                IsStringType(targetColumn.DataType))
             {
-                blockers.Add(
-                    $"dbo.{tableName}.{targetColumn.Name} co do dai source lon hon target ({sourceColumn.MaxLength}>{targetColumn.MaxLength}).");
+                var sourceLimit = MotoSyncStringWidthGuard.ToCharacterLimit(
+                    sourceColumn.DataType,
+                    sourceColumn.MaxLength);
+                var targetLimit = MotoSyncStringWidthGuard.ToCharacterLimit(
+                    targetColumn.DataType,
+                    targetColumn.MaxLength);
+                if (targetLimit is null || (sourceLimit is not null && sourceLimit <= targetLimit.Value))
+                {
+                    continue;
+                }
+
+                var actualMaxLength = await GetMaxActualStringLengthAsync(
+                    source,
+                    tableName,
+                    targetColumn.Name,
+                    plannedMaDks,
+                    null,
+                    cancellationToken);
+                var widthResult = MotoSyncStringWidthGuard.Evaluate(
+                    tableName,
+                    targetColumn.Name,
+                    sourceColumn.DataType,
+                    sourceColumn.MaxLength,
+                    targetColumn.DataType,
+                    targetColumn.MaxLength,
+                    actualMaxLength);
+
+                if (widthResult.IsBlocker)
+                {
+                    blockers.Add(widthResult.Message);
+                }
+                else if (widthResult.IsWarning)
+                {
+                    warnings.Add(widthResult.Message);
+                }
             }
         }
     }
@@ -609,6 +670,39 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
         }
 
         return result;
+    }
+
+    private async Task<long> GetMaxActualStringLengthAsync(
+        SqlConnection connection,
+        string tableName,
+        string columnName,
+        IReadOnlyCollection<string> maDks,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        long maxLength = 0;
+        foreach (var chunk in maDks.Chunk(900))
+        {
+            if (chunk.Length == 0)
+            {
+                continue;
+            }
+
+            var parameters = CreateInParameters(chunk, "@p");
+            await using var command = new SqlCommand(
+                $"SELECT ISNULL(MAX(LEN({Quote(columnName)})), 0) FROM dbo.{Quote(tableName)} WHERE MaDK IN ({string.Join(", ", parameters.Select(p => p.ParameterName))});",
+                connection,
+                transaction);
+            command.CommandTimeout = _options.TimeoutSeconds;
+            command.Parameters.AddRange(parameters.ToArray());
+            var chunkMax = Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken) ?? 0L);
+            if (chunkMax > maxLength)
+            {
+                maxLength = chunkMax;
+            }
+        }
+
+        return maxLength;
     }
 
     private async Task<long> CountDuplicateBusinessKeysAsync(
