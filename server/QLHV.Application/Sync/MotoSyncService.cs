@@ -5,6 +5,7 @@ namespace QLHV.Application.Sync;
 public sealed class MotoSyncService : IMotoSyncService
 {
     public const string ConfirmationText = "SYNC TEST DATABASE";
+    public const string UpdateConfirmationText = "SYNC TEST DATABASE UPDATE";
 
     private const string CsdtV1 = "CSDT_V1";
     private const string CsdtV2 = "CSDT_V2";
@@ -53,6 +54,7 @@ public sealed class MotoSyncService : IMotoSyncService
         CancellationToken cancellationToken = default)
     {
         request ??= new MotoSyncTestExecuteRequest();
+        var syncMode = request.SyncMode;
         var planRequest = Normalize(new MotoSyncPlanRequest
         {
             Direction = request.Direction,
@@ -62,10 +64,20 @@ public sealed class MotoSyncService : IMotoSyncService
             AllowDirtyData = false,
         });
 
-        if (!string.Equals(request.ConfirmText, ConfirmationText, StringComparison.Ordinal))
+        if (syncMode is not MotoSyncMode.INSERT_ONLY and not MotoSyncMode.INSERT_AND_UPDATE)
         {
             return BlockedExecute(
-                "Thieu chuoi xac nhan chinh xac: SYNC TEST DATABASE.",
+                "SyncMode khong hop le. Chi ho tro INSERT_ONLY hoac INSERT_AND_UPDATE.",
+                BlockedPlan(planRequest, new[] { "SyncMode khong hop le." }));
+        }
+
+        var requiredConfirmText = syncMode == MotoSyncMode.INSERT_AND_UPDATE
+            ? UpdateConfirmationText
+            : ConfirmationText;
+        if (!string.Equals(request.ConfirmText, requiredConfirmText, StringComparison.Ordinal))
+        {
+            return BlockedExecute(
+                $"Thieu chuoi xac nhan chinh xac: {requiredConfirmText}.",
                 BlockedPlan(planRequest, new[] { "ConfirmText khong khop." }));
         }
 
@@ -77,12 +89,16 @@ public sealed class MotoSyncService : IMotoSyncService
 
         try
         {
-            var summary = await _repository.ExecuteInsertOnlyAsync(planRequest, cancellationToken);
+            var summary = syncMode == MotoSyncMode.INSERT_AND_UPDATE
+                ? await _repository.ExecuteInsertAndUpdateAsync(planRequest, cancellationToken)
+                : await _repository.ExecuteInsertOnlyAsync(planRequest, cancellationToken);
             return new MotoSyncExecuteResultDto
             {
                 Executed = true,
                 Status = "ThanhCong",
-                Message = "Moto sync TEST insert-only hoan tat.",
+                Message = syncMode == MotoSyncMode.INSERT_AND_UPDATE
+                    ? "Moto sync TEST insert-and-update hoan tat."
+                    : "Moto sync TEST insert-only hoan tat.",
                 Summary = summary,
                 Plan = plan,
             };
