@@ -24,6 +24,26 @@ public sealed class MotoSyncServiceTests
         Assert.Contains("SYNC TEST DATABASE", result.Message);
         Assert.Equal(0, repo.PlanCalls);
         Assert.Equal(0, repo.ExecuteCalls);
+        Assert.Equal(0, repo.UpdateExecuteCalls);
+    }
+
+    [Fact]
+    public async Task Insert_and_update_requires_update_confirm_text()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan(plannedUpdateNguoiLx: 1));
+        var service = new MotoSyncService(repo);
+
+        var request = ConfirmedRequest();
+        request.SyncMode = MotoSyncMode.INSERT_AND_UPDATE;
+
+        var result = await service.ExecuteTestAsync(request);
+
+        Assert.False(result.Executed);
+        Assert.Equal("BiChan", result.Status);
+        Assert.Contains(MotoSyncService.UpdateConfirmationText, result.Message);
+        Assert.Equal(0, repo.PlanCalls);
+        Assert.Equal(0, repo.ExecuteCalls);
+        Assert.Equal(0, repo.UpdateExecuteCalls);
     }
 
     [Fact]
@@ -58,6 +78,7 @@ public sealed class MotoSyncServiceTests
         Assert.Contains(result.Plan!.Blockers, blocker => blocker.Contains("MaDK ngan", StringComparison.Ordinal));
         Assert.Equal(1, repo.PlanCalls);
         Assert.Equal(0, repo.ExecuteCalls);
+        Assert.Equal(0, repo.UpdateExecuteCalls);
     }
 
     [Fact]
@@ -73,6 +94,7 @@ public sealed class MotoSyncServiceTests
         Assert.Contains(result.Plan!.Blockers, blocker => blocker.Contains("KhoaHoc", StringComparison.Ordinal));
         Assert.Equal(1, repo.PlanCalls);
         Assert.Equal(0, repo.ExecuteCalls);
+        Assert.Equal(0, repo.UpdateExecuteCalls);
     }
 
     [Fact]
@@ -132,6 +154,77 @@ public sealed class MotoSyncServiceTests
         Assert.Equal(0, result.Summary.DeletedRows);
         Assert.Equal(1, repo.PlanCalls);
         Assert.Equal(1, repo.ExecuteCalls);
+        Assert.Equal(0, repo.UpdateExecuteCalls);
+    }
+
+    [Fact]
+    public async Task Insert_only_mode_does_not_call_update_path_even_when_plan_has_updates()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan(plannedUpdateNguoiLx: 1, plannedUpdateHoSo: 1));
+        var service = new MotoSyncService(repo);
+
+        var result = await service.ExecuteTestAsync(ConfirmedRequest());
+
+        Assert.True(result.Executed);
+        Assert.Equal(1, repo.ExecuteCalls);
+        Assert.Equal(0, repo.UpdateExecuteCalls);
+    }
+
+    [Fact]
+    public async Task Insert_and_update_mode_uses_update_path_with_update_confirm_text()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan(plannedUpdateNguoiLx: 1, plannedUpdateHoSo: 1))
+        {
+            UpdateSummary = new MotoSyncExecuteSummaryDto
+            {
+                Direction = MotoSyncDirection.V1_TO_V2,
+                SyncMode = MotoSyncMode.INSERT_AND_UPDATE,
+                SourceProfileCode = "CSDT_V1",
+                TargetProfileCode = "CSDT_V2",
+                InsertedNguoiLX = 2,
+                InsertedNguoiLXHoSo = 2,
+                InsertedGiayTo = 3,
+                UpdatedNguoiLX = 1,
+                UpdatedNguoiLXHoSo = 1,
+                UpdatedRows = 2,
+                DeletedRows = 0,
+            },
+        };
+        var service = new MotoSyncService(repo);
+
+        var request = ConfirmedRequest();
+        request.SyncMode = MotoSyncMode.INSERT_AND_UPDATE;
+        request.ConfirmText = MotoSyncService.UpdateConfirmationText;
+        var result = await service.ExecuteTestAsync(request);
+
+        Assert.True(result.Executed);
+        Assert.Equal("ThanhCong", result.Status);
+        Assert.Equal(MotoSyncMode.INSERT_AND_UPDATE, result.Summary!.SyncMode);
+        Assert.Equal(1, result.Summary.UpdatedNguoiLX);
+        Assert.Equal(1, result.Summary.UpdatedNguoiLXHoSo);
+        Assert.Equal(2, result.Summary.UpdatedRows);
+        Assert.Equal(0, result.Summary.DeletedRows);
+        Assert.Equal(1, repo.PlanCalls);
+        Assert.Equal(0, repo.ExecuteCalls);
+        Assert.Equal(1, repo.UpdateExecuteCalls);
+    }
+
+    [Fact]
+    public async Task Insert_and_update_refuses_blockers()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan(shortFullPairs: 1, plannedUpdateNguoiLx: 1));
+        var service = new MotoSyncService(repo);
+
+        var request = ConfirmedRequest();
+        request.SyncMode = MotoSyncMode.INSERT_AND_UPDATE;
+        request.ConfirmText = MotoSyncService.UpdateConfirmationText;
+        var result = await service.ExecuteTestAsync(request);
+
+        Assert.False(result.Executed);
+        Assert.Contains(result.Plan!.Blockers, blocker => blocker.Contains("MaDK ngan", StringComparison.Ordinal));
+        Assert.Equal(1, repo.PlanCalls);
+        Assert.Equal(0, repo.ExecuteCalls);
+        Assert.Equal(0, repo.UpdateExecuteCalls);
     }
 
     private static MotoSyncTestExecuteRequest ConfirmedRequest() => new()
@@ -142,7 +235,11 @@ public sealed class MotoSyncServiceTests
         ConfirmText = MotoSyncService.ConfirmationText,
     };
 
-    private static MotoSyncPlanDto CleanPlan(long shortFullPairs = 0, long missingKhoaHoc = 0)
+    private static MotoSyncPlanDto CleanPlan(
+        long shortFullPairs = 0,
+        long missingKhoaHoc = 0,
+        long plannedUpdateNguoiLx = 0,
+        long plannedUpdateHoSo = 0)
     {
         var blockers = new List<string>();
         if (shortFullPairs > 0)
@@ -171,7 +268,9 @@ public sealed class MotoSyncServiceTests
             PlannedInsertNguoiLX = 2,
             PlannedInsertNguoiLXHoSo = missingKhoaHoc > 0 ? 1 : 2,
             PlannedInsertGiayTo = 3,
-            PlannedUpdate = 0,
+            PlannedUpdate = plannedUpdateNguoiLx + plannedUpdateHoSo,
+            PlannedUpdateNguoiLX = plannedUpdateNguoiLx,
+            PlannedUpdateNguoiLXHoSo = plannedUpdateHoSo,
             Executable = blockers.Count == 0,
             Blockers = blockers,
         };
@@ -187,17 +286,34 @@ public sealed class MotoSyncServiceTests
             ExecuteSummary = new MotoSyncExecuteSummaryDto
             {
                 Direction = plan.Direction,
+                SyncMode = MotoSyncMode.INSERT_ONLY,
                 SourceProfileCode = plan.SourceProfileCode,
                 TargetProfileCode = plan.TargetProfileCode,
                 InsertedNguoiLX = plan.PlannedInsertNguoiLX,
                 InsertedNguoiLXHoSo = plan.PlannedInsertNguoiLXHoSo,
                 InsertedGiayTo = plan.PlannedInsertGiayTo,
             };
+            UpdateSummary = new MotoSyncExecuteSummaryDto
+            {
+                Direction = plan.Direction,
+                SyncMode = MotoSyncMode.INSERT_AND_UPDATE,
+                SourceProfileCode = plan.SourceProfileCode,
+                TargetProfileCode = plan.TargetProfileCode,
+                InsertedNguoiLX = plan.PlannedInsertNguoiLX,
+                InsertedNguoiLXHoSo = plan.PlannedInsertNguoiLXHoSo,
+                InsertedGiayTo = plan.PlannedInsertGiayTo,
+                UpdatedNguoiLX = plan.PlannedUpdateNguoiLX,
+                UpdatedNguoiLXHoSo = plan.PlannedUpdateNguoiLXHoSo,
+                UpdatedRows = plan.PlannedUpdate,
+                DeletedRows = 0,
+            };
         }
 
         public int PlanCalls { get; private set; }
         public int ExecuteCalls { get; private set; }
+        public int UpdateExecuteCalls { get; private set; }
         public MotoSyncExecuteSummaryDto ExecuteSummary { get; init; }
+        public MotoSyncExecuteSummaryDto UpdateSummary { get; init; }
 
         public Task<MotoSyncPlanDto> BuildPlanAsync(
             MotoSyncPlanRequest request,
@@ -223,6 +339,9 @@ public sealed class MotoSyncServiceTests
                 PlannedInsertNguoiLXHoSo = _plan.PlannedInsertNguoiLXHoSo,
                 PlannedInsertGiayTo = _plan.PlannedInsertGiayTo,
                 PlannedUpdate = _plan.PlannedUpdate,
+                PlannedUpdateNguoiLX = _plan.PlannedUpdateNguoiLX,
+                PlannedUpdateNguoiLXHoSo = _plan.PlannedUpdateNguoiLXHoSo,
+                UpdateSamples = _plan.UpdateSamples,
                 Executable = _plan.Executable,
                 Blockers = _plan.Blockers,
                 Warnings = _plan.Warnings,
@@ -236,6 +355,14 @@ public sealed class MotoSyncServiceTests
         {
             ExecuteCalls++;
             return Task.FromResult(ExecuteSummary);
+        }
+
+        public Task<MotoSyncExecuteSummaryDto> ExecuteInsertAndUpdateAsync(
+            MotoSyncPlanRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            UpdateExecuteCalls++;
+            return Task.FromResult(UpdateSummary);
         }
     }
 }

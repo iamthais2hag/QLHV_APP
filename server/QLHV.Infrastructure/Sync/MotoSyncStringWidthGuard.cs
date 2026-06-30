@@ -9,7 +9,8 @@ public static class MotoSyncStringWidthGuard
         short sourceMaxLengthBytes,
         string targetDataType,
         short targetMaxLengthBytes,
-        long actualMaxLength)
+        long actualMaxLength,
+        string operationName = "planned insert")
     {
         var sourceLimit = ToCharacterLimit(sourceDataType, sourceMaxLengthBytes);
         var targetLimit = ToCharacterLimit(targetDataType, targetMaxLengthBytes);
@@ -28,11 +29,11 @@ public static class MotoSyncStringWidthGuard
         if (actualMaxLength > targetLimit.Value)
         {
             return MotoSyncStringWidthGuardResult.Blocker(
-                $"dbo.{tableName}.{columnName} co du lieu planned insert dai nhat {actualMaxLength} ky tu, vuot gioi han target {targetLimit.Value} ky tu (schema source {sourceLimitText}, target {targetLimit.Value}).");
+                $"dbo.{tableName}.{columnName} co du lieu {operationName} dai nhat {actualMaxLength} ky tu, vuot gioi han target {targetLimit.Value} ky tu (schema source {sourceLimitText}, target {targetLimit.Value}).");
         }
 
         return MotoSyncStringWidthGuardResult.Warning(
-            $"dbo.{tableName}.{columnName} schema source rong hon target ({sourceLimitText}>{targetLimit.Value} ky tu) nhung du lieu planned insert dai nhat {actualMaxLength} ky tu van fit target.");
+            $"dbo.{tableName}.{columnName} schema source rong hon target ({sourceLimitText}>{targetLimit.Value} ky tu) nhung du lieu {operationName} dai nhat {actualMaxLength} ky tu van fit target.");
     }
 
     public static int? ToCharacterLimit(string dataType, short maxLengthBytes)

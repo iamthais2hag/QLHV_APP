@@ -9,6 +9,13 @@ public enum MotoSyncDirection
     V2_TO_V1 = 2,
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum MotoSyncMode
+{
+    INSERT_ONLY = 1,
+    INSERT_AND_UPDATE = 2,
+}
+
 public sealed class MotoSyncPlanRequest
 {
     public MotoSyncDirection Direction { get; set; }
@@ -25,6 +32,8 @@ public sealed class MotoSyncPlanRequest
 public sealed class MotoSyncTestExecuteRequest
 {
     public MotoSyncDirection Direction { get; set; }
+
+    public MotoSyncMode SyncMode { get; set; } = MotoSyncMode.INSERT_ONLY;
 
     public string SourceProfileCode { get; set; } = string.Empty;
 
@@ -73,6 +82,12 @@ public sealed class MotoSyncPlanDto
 
     public long PlannedUpdate { get; init; }
 
+    public long PlannedUpdateNguoiLX { get; init; }
+
+    public long PlannedUpdateNguoiLXHoSo { get; init; }
+
+    public IReadOnlyList<MotoSyncUpdateSampleDto> UpdateSamples { get; init; } = Array.Empty<MotoSyncUpdateSampleDto>();
+
     public bool Executable { get; init; }
 
     public IReadOnlyList<string> Blockers { get; init; } = Array.Empty<string>();
@@ -80,6 +95,15 @@ public sealed class MotoSyncPlanDto
     public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
 
     public IReadOnlyList<SyncErrorDto> Errors { get; init; } = Array.Empty<SyncErrorDto>();
+}
+
+public sealed class MotoSyncUpdateSampleDto
+{
+    public string MaDK { get; init; } = string.Empty;
+
+    public string TableName { get; init; } = string.Empty;
+
+    public IReadOnlyList<string> ChangedColumnNames { get; init; } = Array.Empty<string>();
 }
 
 public sealed class MotoSyncExecuteResultDto
@@ -99,6 +123,8 @@ public sealed class MotoSyncExecuteSummaryDto
 {
     public MotoSyncDirection Direction { get; init; }
 
+    public MotoSyncMode SyncMode { get; init; } = MotoSyncMode.INSERT_ONLY;
+
     public string SourceProfileCode { get; init; } = string.Empty;
 
     public string TargetProfileCode { get; init; } = string.Empty;
@@ -110,6 +136,10 @@ public sealed class MotoSyncExecuteSummaryDto
     public long InsertedNguoiLXHoSo { get; init; }
 
     public long InsertedGiayTo { get; init; }
+
+    public long UpdatedNguoiLX { get; init; }
+
+    public long UpdatedNguoiLXHoSo { get; init; }
 
     public long UpdatedRows { get; init; }
 

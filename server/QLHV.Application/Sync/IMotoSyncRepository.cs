@@ -11,4 +11,8 @@ public interface IMotoSyncRepository
     Task<MotoSyncExecuteSummaryDto> ExecuteInsertOnlyAsync(
         MotoSyncPlanRequest request,
         CancellationToken cancellationToken = default);
+
+    Task<MotoSyncExecuteSummaryDto> ExecuteInsertAndUpdateAsync(
+        MotoSyncPlanRequest request,
+        CancellationToken cancellationToken = default);
 }

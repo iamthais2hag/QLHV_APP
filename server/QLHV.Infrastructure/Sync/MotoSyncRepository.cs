@@ -75,8 +75,12 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
             .Where(maDk => !targetAllSet.Contains(maDk))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        var exactOverlapMaDks = sourceMaDks
+            .Where(maDk => targetAllSet.Contains(maDk))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         var targetOnly = targetMaDksForFilter.Count(maDk => !sourceSet.Contains(maDk));
-        var exactOverlap = sourceMaDks.Count(maDk => targetAllSet.Contains(maDk));
+        var exactOverlap = exactOverlapMaDks.Length;
 
         var duplicateBusinessKeyGroups = await CountDuplicateBusinessKeysAsync(
             source,
@@ -141,6 +145,53 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
             null,
             cancellationToken);
 
+        var nguoiLxUpdatePlan = await BuildTableUpdatePlanAsync(
+            source,
+            target,
+            "NguoiLX",
+            exactOverlapMaDks,
+            request.MaKhoaHoc,
+            null,
+            cancellationToken);
+        var hoSoUpdatePlan = await BuildTableUpdatePlanAsync(
+            source,
+            target,
+            "NguoiLX_HoSo",
+            exactOverlapMaDks,
+            request.MaKhoaHoc,
+            null,
+            cancellationToken);
+
+        await AddUpdateWidthBlockersAsync(
+            source,
+            target,
+            "NguoiLX",
+            nguoiLxUpdatePlan.Columns,
+            nguoiLxUpdatePlan.Detection.UpdatedMaDks,
+            request.MaKhoaHoc,
+            blockers,
+            warnings,
+            null,
+            cancellationToken);
+        await AddUpdateWidthBlockersAsync(
+            source,
+            target,
+            "NguoiLX_HoSo",
+            hoSoUpdatePlan.Columns,
+            hoSoUpdatePlan.Detection.UpdatedMaDks,
+            request.MaKhoaHoc,
+            blockers,
+            warnings,
+            null,
+            cancellationToken);
+
+        var updateSamples = nguoiLxUpdatePlan.Detection.Samples
+            .Concat(hoSoUpdatePlan.Detection.Samples)
+            .Take(20)
+            .ToArray();
+        var plannedUpdateNguoiLx = nguoiLxUpdatePlan.Detection.UpdatedRowCount;
+        var plannedUpdateHoSo = hoSoUpdatePlan.Detection.UpdatedRowCount;
+
         return new MotoSyncPlanDto
         {
             Direction = request.Direction,
@@ -159,7 +210,10 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
             PlannedInsertNguoiLX = plannedInsertNguoiLx,
             PlannedInsertNguoiLXHoSo = plannedInsertHoSo,
             PlannedInsertGiayTo = plannedInsertGiayTo,
-            PlannedUpdate = 0,
+            PlannedUpdate = plannedUpdateNguoiLx + plannedUpdateHoSo,
+            PlannedUpdateNguoiLX = plannedUpdateNguoiLx,
+            PlannedUpdateNguoiLXHoSo = plannedUpdateHoSo,
+            UpdateSamples = updateSamples,
             Executable = blockers.Count == 0,
             Blockers = blockers,
             Warnings = warnings,
@@ -216,6 +270,7 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
             return new MotoSyncExecuteSummaryDto
             {
                 Direction = request.Direction,
+                SyncMode = MotoSyncMode.INSERT_ONLY,
                 SourceProfileCode = request.SourceProfileCode,
                 TargetProfileCode = request.TargetProfileCode,
                 MaKhoaHoc = request.MaKhoaHoc,
@@ -223,6 +278,100 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
                 InsertedNguoiLXHoSo = insertedHoSo,
                 InsertedGiayTo = insertedGiayTo,
                 UpdatedRows = 0,
+                DeletedRows = 0,
+                StartedAt = startedAt,
+                EndedAt = endedAt,
+                DurationMs = (long)(endedAt - startedAt).TotalMilliseconds,
+            };
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
+    }
+
+    public async Task<MotoSyncExecuteSummaryDto> ExecuteInsertAndUpdateAsync(
+        MotoSyncPlanRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var startedAt = DateTime.UtcNow;
+        await using var source = new SqlConnection(await ResolveConnectionStringAsync(
+            request.SourceProfileCode,
+            cancellationToken));
+        await using var target = new SqlConnection(await ResolveConnectionStringAsync(
+            request.TargetProfileCode,
+            cancellationToken));
+
+        await source.OpenAsync(cancellationToken);
+        await target.OpenAsync(cancellationToken);
+        await using var transaction = (SqlTransaction)await target.BeginTransactionAsync(cancellationToken);
+
+        try
+        {
+            var sourceMaDks = await ReadHoSoMaDksAsync(source, request.MaKhoaHoc, null, cancellationToken);
+            var targetAllHoSoMaDks = await ReadHoSoMaDksAsync(target, null, transaction, cancellationToken);
+            var targetAllSet = targetAllHoSoMaDks.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var sourceOnlyMaDks = sourceMaDks
+                .Where(maDk => !targetAllSet.Contains(maDk))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var exactOverlapMaDks = sourceMaDks
+                .Where(maDk => targetAllSet.Contains(maDk))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            var insertedNguoiLx = await BulkInsertMissingNguoiLxAsync(
+                source,
+                target,
+                transaction,
+                sourceOnlyMaDks,
+                cancellationToken);
+            var insertedHoSo = await BulkInsertMissingHoSoAsync(
+                source,
+                target,
+                transaction,
+                sourceOnlyMaDks,
+                cancellationToken);
+            var insertedGiayTo = await BulkInsertMissingGiayToAsync(
+                source,
+                target,
+                transaction,
+                sourceOnlyMaDks,
+                cancellationToken);
+
+            var updatedNguoiLx = await UpdateChangedRowsAsync(
+                source,
+                target,
+                transaction,
+                "NguoiLX",
+                exactOverlapMaDks,
+                request.MaKhoaHoc,
+                cancellationToken);
+            var updatedHoSo = await UpdateChangedRowsAsync(
+                source,
+                target,
+                transaction,
+                "NguoiLX_HoSo",
+                exactOverlapMaDks,
+                request.MaKhoaHoc,
+                cancellationToken);
+
+            await transaction.CommitAsync(cancellationToken);
+            var endedAt = DateTime.UtcNow;
+            return new MotoSyncExecuteSummaryDto
+            {
+                Direction = request.Direction,
+                SyncMode = MotoSyncMode.INSERT_AND_UPDATE,
+                SourceProfileCode = request.SourceProfileCode,
+                TargetProfileCode = request.TargetProfileCode,
+                MaKhoaHoc = request.MaKhoaHoc,
+                InsertedNguoiLX = insertedNguoiLx,
+                InsertedNguoiLXHoSo = insertedHoSo,
+                InsertedGiayTo = insertedGiayTo,
+                UpdatedNguoiLX = updatedNguoiLx,
+                UpdatedNguoiLXHoSo = updatedHoSo,
+                UpdatedRows = updatedNguoiLx + updatedHoSo,
                 DeletedRows = 0,
                 StartedAt = startedAt,
                 EndedAt = endedAt,
@@ -334,6 +483,127 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
 
         await BulkCopyAsync(target, transaction, "NguoiLXHS_GiayTo", columns, rowsToInsert, cancellationToken);
         return rowsToInsert.Rows.Count;
+    }
+
+    private async Task<long> UpdateChangedRowsAsync(
+        SqlConnection source,
+        SqlConnection target,
+        SqlTransaction transaction,
+        string tableName,
+        IReadOnlyCollection<string> overlapMaDks,
+        string? maKhoaHoc,
+        CancellationToken cancellationToken)
+    {
+        if (!MotoSyncUpdateSqlBuilder.IsSupportedUpdateTable(tableName))
+        {
+            throw new InvalidOperationException($"Bang {tableName} khong nam trong allowlist update Moto sync.");
+        }
+
+        if (MotoSyncUpdateSqlBuilder.RequiresMaKhoaHocScope(tableName) && string.IsNullOrWhiteSpace(maKhoaHoc))
+        {
+            return 0;
+        }
+
+        if (overlapMaDks.Count == 0)
+        {
+            return 0;
+        }
+
+        var updateColumns = await GetCommonUpdateColumnsAsync(source, target, tableName, transaction, cancellationToken);
+        if (updateColumns.Count == 0)
+        {
+            return 0;
+        }
+
+        var readColumns = new[] { "MaDK" }
+            .Concat(updateColumns)
+            .ToArray();
+        var sourceRows = await ReadRowsByMaDksForUpdateAsync(
+            source,
+            tableName,
+            readColumns,
+            overlapMaDks,
+            maKhoaHoc,
+            null,
+            cancellationToken);
+        var targetRows = await ReadRowsByMaDksForUpdateAsync(
+            target,
+            tableName,
+            readColumns,
+            overlapMaDks,
+            maKhoaHoc,
+            transaction,
+            cancellationToken);
+        var targetByMaDk = targetRows.Rows
+            .Cast<DataRow>()
+            .Select(row => new
+            {
+                MaDK = Convert.ToString(row["MaDK"])?.Trim() ?? string.Empty,
+                Row = row,
+            })
+            .Where(item => !string.IsNullOrWhiteSpace(item.MaDK))
+            .GroupBy(item => item.MaDK, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First().Row, StringComparer.OrdinalIgnoreCase);
+
+        long updatedRows = 0;
+        foreach (DataRow sourceRow in sourceRows.Rows)
+        {
+            var maDk = Convert.ToString(sourceRow["MaDK"])?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(maDk) || !targetByMaDk.TryGetValue(maDk, out var targetRow))
+            {
+                continue;
+            }
+
+            var changedColumns = updateColumns
+                .Where(column => !MotoSyncUpdatePlanner.ValuesEqual(sourceRow[column], targetRow[column]))
+                .ToArray();
+            if (changedColumns.Length == 0)
+            {
+                continue;
+            }
+
+            updatedRows += await UpdateOneRowAsync(
+                target,
+                transaction,
+                tableName,
+                maDk,
+                maKhoaHoc,
+                changedColumns,
+                sourceRow,
+                cancellationToken);
+        }
+
+        return updatedRows;
+    }
+
+    private async Task<int> UpdateOneRowAsync(
+        SqlConnection target,
+        SqlTransaction transaction,
+        string tableName,
+        string maDk,
+        string? maKhoaHoc,
+        IReadOnlyList<string> changedColumns,
+        DataRow sourceRow,
+        CancellationToken cancellationToken)
+    {
+        await using var command = new SqlCommand(
+            MotoSyncUpdateSqlBuilder.BuildUpdateSql(tableName, changedColumns),
+            target,
+            transaction);
+        command.CommandTimeout = _options.TimeoutSeconds;
+        for (var index = 0; index < changedColumns.Count; index++)
+        {
+            var value = sourceRow[changedColumns[index]];
+            command.Parameters.Add(new SqlParameter($"@v{index}", value == DBNull.Value ? DBNull.Value : value));
+        }
+
+        command.Parameters.Add(new SqlParameter("@MaDK", maDk));
+        if (MotoSyncUpdateSqlBuilder.RequiresMaKhoaHocScope(tableName))
+        {
+            command.Parameters.Add(new SqlParameter("@MaKhoaHoc", maKhoaHoc ?? string.Empty));
+        }
+
+        return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private async Task<string> ResolveConnectionStringAsync(string profileCode, CancellationToken cancellationToken)
@@ -479,6 +749,7 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
                     targetColumn.Name,
                     plannedMaDks,
                     null,
+                    null,
                     cancellationToken);
                 var widthResult = MotoSyncStringWidthGuard.Evaluate(
                     tableName,
@@ -487,7 +758,8 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
                     sourceColumn.MaxLength,
                     targetColumn.DataType,
                     targetColumn.MaxLength,
-                    actualMaxLength);
+                    actualMaxLength,
+                    "planned insert");
 
                 if (widthResult.IsBlocker)
                 {
@@ -497,6 +769,143 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
                 {
                     warnings.Add(widthResult.Message);
                 }
+            }
+        }
+    }
+
+    private async Task<TableUpdatePlan> BuildTableUpdatePlanAsync(
+        SqlConnection source,
+        SqlConnection target,
+        string tableName,
+        IReadOnlyCollection<string> overlapMaDks,
+        string? maKhoaHoc,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        if (!MotoSyncUpdateSqlBuilder.IsSupportedUpdateTable(tableName))
+        {
+            throw new InvalidOperationException($"Bang {tableName} khong nam trong allowlist update Moto sync.");
+        }
+
+        if (MotoSyncUpdateSqlBuilder.RequiresMaKhoaHocScope(tableName) && string.IsNullOrWhiteSpace(maKhoaHoc))
+        {
+            return new TableUpdatePlan(
+                Array.Empty<string>(),
+                new MotoSyncUpdateDetectionResult(Array.Empty<string>(), Array.Empty<MotoSyncUpdateSampleDto>()));
+        }
+
+        if (overlapMaDks.Count == 0)
+        {
+            return new TableUpdatePlan(
+                Array.Empty<string>(),
+                new MotoSyncUpdateDetectionResult(Array.Empty<string>(), Array.Empty<MotoSyncUpdateSampleDto>()));
+        }
+
+        var updateColumns = await GetCommonUpdateColumnsAsync(source, target, tableName, transaction, cancellationToken);
+        if (updateColumns.Count == 0)
+        {
+            return new TableUpdatePlan(
+                updateColumns,
+                new MotoSyncUpdateDetectionResult(Array.Empty<string>(), Array.Empty<MotoSyncUpdateSampleDto>()));
+        }
+
+        var readColumns = new[] { "MaDK" }
+            .Concat(updateColumns)
+            .ToArray();
+        var sourceRows = await ReadRowsByMaDksForUpdateAsync(
+            source,
+            tableName,
+            readColumns,
+            overlapMaDks,
+            maKhoaHoc,
+            null,
+            cancellationToken);
+        var targetRows = await ReadRowsByMaDksForUpdateAsync(
+            target,
+            tableName,
+            readColumns,
+            overlapMaDks,
+            maKhoaHoc,
+            transaction,
+            cancellationToken);
+
+        return new TableUpdatePlan(
+            updateColumns,
+            MotoSyncUpdatePlanner.Build(tableName, sourceRows, targetRows, updateColumns));
+    }
+
+    private async Task AddUpdateWidthBlockersAsync(
+        SqlConnection source,
+        SqlConnection target,
+        string tableName,
+        IReadOnlyList<string> updateColumns,
+        IReadOnlyCollection<string> plannedUpdateMaDks,
+        string? maKhoaHoc,
+        ICollection<string> blockers,
+        ICollection<string> warnings,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        if (MotoSyncUpdateSqlBuilder.RequiresMaKhoaHocScope(tableName) && string.IsNullOrWhiteSpace(maKhoaHoc))
+        {
+            return;
+        }
+
+        if (updateColumns.Count == 0 || plannedUpdateMaDks.Count == 0)
+        {
+            return;
+        }
+
+        var sourceColumns = await ReadColumnsAsync(source, tableName, null, cancellationToken);
+        var targetColumns = await ReadColumnsAsync(target, tableName, transaction, cancellationToken);
+        var sourceByName = sourceColumns.ToDictionary(c => c.Name, StringComparer.OrdinalIgnoreCase);
+        var targetByName = targetColumns.ToDictionary(c => c.Name, StringComparer.OrdinalIgnoreCase);
+        foreach (var columnName in updateColumns)
+        {
+            if (!sourceByName.TryGetValue(columnName, out var sourceColumn) ||
+                !targetByName.TryGetValue(columnName, out var targetColumn) ||
+                !IsStringType(sourceColumn.DataType) ||
+                !IsStringType(targetColumn.DataType))
+            {
+                continue;
+            }
+
+            var sourceLimit = MotoSyncStringWidthGuard.ToCharacterLimit(
+                sourceColumn.DataType,
+                sourceColumn.MaxLength);
+            var targetLimit = MotoSyncStringWidthGuard.ToCharacterLimit(
+                targetColumn.DataType,
+                targetColumn.MaxLength);
+            if (targetLimit is null || (sourceLimit is not null && sourceLimit <= targetLimit.Value))
+            {
+                continue;
+            }
+
+            var actualMaxLength = await GetMaxActualStringLengthAsync(
+                source,
+                tableName,
+                columnName,
+                plannedUpdateMaDks,
+                maKhoaHoc,
+                null,
+                cancellationToken);
+            var widthResult = MotoSyncStringWidthGuard.Evaluate(
+                tableName,
+                columnName,
+                sourceColumn.DataType,
+                sourceColumn.MaxLength,
+                targetColumn.DataType,
+                targetColumn.MaxLength,
+                actualMaxLength,
+                "planned update");
+
+            if (widthResult.IsBlocker)
+            {
+                blockers.Add(widthResult.Message);
+            }
+            else if (widthResult.IsWarning)
+            {
+                warnings.Add(widthResult.Message);
             }
         }
     }
@@ -517,6 +926,26 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
 
         return targetColumns
             .Where(c => !c.IsIdentity && !c.IsComputed && !c.IsRowVersion && sourceNames.Contains(c.Name))
+            .Select(c => c.Name)
+            .ToArray();
+    }
+
+    private async Task<IReadOnlyList<string>> GetCommonUpdateColumnsAsync(
+        SqlConnection source,
+        SqlConnection target,
+        string tableName,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        var sourceColumns = await ReadColumnsAsync(source, tableName, null, cancellationToken);
+        var targetColumns = await ReadColumnsAsync(target, tableName, transaction, cancellationToken);
+        var sourceWritable = sourceColumns
+            .Where(IsSafeUpdateColumn)
+            .Select(c => c.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return targetColumns
+            .Where(c => IsSafeUpdateColumn(c) && sourceWritable.Contains(c.Name))
             .Select(c => c.Name)
             .ToArray();
     }
@@ -677,6 +1106,7 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
         string tableName,
         string columnName,
         IReadOnlyCollection<string> maDks,
+        string? maKhoaHoc,
         SqlTransaction? transaction,
         CancellationToken cancellationToken)
     {
@@ -689,12 +1119,22 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
             }
 
             var parameters = CreateInParameters(chunk, "@p");
+            var shouldScopeByMaKhoaHoc = MotoSyncUpdateSqlBuilder.RequiresMaKhoaHocScope(tableName) &&
+                !string.IsNullOrWhiteSpace(maKhoaHoc);
+            var whereClause = shouldScopeByMaKhoaHoc
+                ? $"MaDK IN ({string.Join(", ", parameters.Select(p => p.ParameterName))}) AND MaKhoaHoc = @MaKhoaHoc"
+                : $"MaDK IN ({string.Join(", ", parameters.Select(p => p.ParameterName))})";
             await using var command = new SqlCommand(
-                $"SELECT ISNULL(MAX(LEN({Quote(columnName)})), 0) FROM dbo.{Quote(tableName)} WHERE MaDK IN ({string.Join(", ", parameters.Select(p => p.ParameterName))});",
+                $"SELECT ISNULL(MAX(LEN({Quote(columnName)})), 0) FROM dbo.{Quote(tableName)} WHERE {whereClause};",
                 connection,
                 transaction);
             command.CommandTimeout = _options.TimeoutSeconds;
             command.Parameters.AddRange(parameters.ToArray());
+            if (shouldScopeByMaKhoaHoc)
+            {
+                command.Parameters.Add(new SqlParameter("@MaKhoaHoc", maKhoaHoc ?? string.Empty));
+            }
+
             var chunkMax = Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken) ?? 0L);
             if (chunkMax > maxLength)
             {
@@ -850,6 +1290,59 @@ ORDER BY c.column_id;",
         return result ?? CreateEmptyTable(columns);
     }
 
+    private async Task<DataTable> ReadRowsByMaDksForUpdateAsync(
+        SqlConnection connection,
+        string tableName,
+        IReadOnlyList<string> columns,
+        IReadOnlyCollection<string> maDks,
+        string? maKhoaHoc,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        if (!MotoSyncUpdateSqlBuilder.IsSupportedUpdateTable(tableName))
+        {
+            throw new InvalidOperationException($"Bang {tableName} khong nam trong allowlist update Moto sync.");
+        }
+
+        if (MotoSyncUpdateSqlBuilder.RequiresMaKhoaHocScope(tableName) && string.IsNullOrWhiteSpace(maKhoaHoc))
+        {
+            return CreateEmptyTable(columns);
+        }
+
+        DataTable? result = null;
+        foreach (var chunk in maDks.Chunk(900))
+        {
+            if (chunk.Length == 0)
+            {
+                continue;
+            }
+
+            var parameters = CreateInParameters(chunk, "@p");
+            var columnList = string.Join(", ", columns.Select(Quote));
+            var whereClause = MotoSyncUpdateSqlBuilder.RequiresMaKhoaHocScope(tableName)
+                ? $"MaDK IN ({string.Join(", ", parameters.Select(p => p.ParameterName))}) AND MaKhoaHoc = @MaKhoaHoc"
+                : $"MaDK IN ({string.Join(", ", parameters.Select(p => p.ParameterName))})";
+            await using var command = new SqlCommand(
+                $"SELECT {columnList} FROM dbo.{Quote(tableName)} WHERE {whereClause};",
+                connection,
+                transaction);
+            command.CommandTimeout = _options.TimeoutSeconds;
+            command.Parameters.AddRange(parameters.ToArray());
+            if (MotoSyncUpdateSqlBuilder.RequiresMaKhoaHocScope(tableName))
+            {
+                command.Parameters.Add(new SqlParameter("@MaKhoaHoc", maKhoaHoc ?? string.Empty));
+            }
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            var chunkTable = new DataTable();
+            chunkTable.Load(reader);
+            result ??= chunkTable.Clone();
+            result.Merge(chunkTable);
+        }
+
+        return result ?? CreateEmptyTable(columns);
+    }
+
     private async Task BulkCopyAsync(
         SqlConnection target,
         SqlTransaction transaction,
@@ -929,6 +1422,23 @@ ORDER BY c.column_id;",
 
     private static bool IsStringType(string dataType)
         => dataType is "varchar" or "nvarchar" or "char" or "nchar";
+
+    private static bool IsSafeUpdateColumn(ColumnMetadata column)
+        => !column.IsIdentity &&
+           !column.IsComputed &&
+           !column.IsRowVersion &&
+           !IsBinaryType(column.DataType) &&
+           !IsKeyOrIdColumn(column.Name);
+
+    private static bool IsKeyOrIdColumn(string columnName)
+        => MotoSyncUpdateSqlBuilder.IsKeyOrScopeColumn(columnName);
+
+    private static bool IsBinaryType(string dataType)
+        => dataType is "binary" or "varbinary" or "image" or "timestamp" or "rowversion";
+
+    private sealed record TableUpdatePlan(
+        IReadOnlyList<string> Columns,
+        MotoSyncUpdateDetectionResult Detection);
 
     private sealed record ColumnMetadata(
         string Name,

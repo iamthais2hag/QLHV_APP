@@ -112,7 +112,7 @@ public sealed class DongBoV2Controller : ControllerBase
     }
 
     /// <summary>
-    /// Guarded TEST-only Moto V1/V2 insert-only sync. Requires exact confirmation and blocks dirty duplicate data.
+    /// Guarded TEST-only Moto V1/V2 sync. Defaults to insert-only; update mode requires separate confirmation.
     /// </summary>
     [HttpPost("moto/sync-test")]
     [ProducesResponseType(typeof(MotoSyncExecuteResultDto), StatusCodes.Status200OK)]
