@@ -267,6 +267,7 @@ function PlanMetrics({ plan }: { plan: MotoSyncPlan }) {
     ['plannedInsertKhoaHoc', plan.plannedInsertKhoaHoc],
     ['plannedInsertBaoCaoI', plan.plannedInsertBaoCaoI],
     ['plannedInsertNguoiLX', plan.plannedInsertNguoiLX],
+    ['plannedInsertNguoiLXGPLX', plan.plannedInsertNguoiLXGPLX],
     ['plannedInsertNguoiLXHoSo', plan.plannedInsertNguoiLXHoSo],
     ['plannedInsertGiayTo', plan.plannedInsertGiayTo],
     ['plannedUpdate', plan.plannedUpdate],
@@ -371,6 +372,7 @@ function ExecuteResult({ result }: { result: MotoSyncExecuteResult | null }) {
           <span>insertedKhoaHoc</span><strong>{formatNumber(summary.insertedKhoaHoc)}</strong>
           <span>insertedBaoCaoI</span><strong>{formatNumber(summary.insertedBaoCaoI)}</strong>
           <span>insertedNguoiLX</span><strong>{formatNumber(summary.insertedNguoiLX)}</strong>
+          <span>insertedNguoiLXGPLX</span><strong>{formatNumber(summary.insertedNguoiLXGPLX)}</strong>
           <span>insertedNguoiLXHoSo</span><strong>{formatNumber(summary.insertedNguoiLXHoSo)}</strong>
           <span>insertedGiayTo</span><strong>{formatNumber(summary.insertedGiayTo)}</strong>
           <span>updatedNguoiLX</span><strong>{formatNumber(summary.updatedNguoiLX)}</strong>

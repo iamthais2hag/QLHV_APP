@@ -13,6 +13,9 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
     private const string BaoCaoICrossCourseConflictBlocker =
         "dbo.BaoCaoI co khoa dong trung voi khoa khac trong target; khong the insert an toan cho MaKhoaHoc dang chon.";
 
+    private const string NguoiLXGplxCrossScopeConflictBlocker =
+        "dbo.NguoiLX_GPLX co khoa dong trung ngoai pham vi khoa hoc dang chon; khong the insert an toan.";
+
     private static readonly IReadOnlyList<string> SyncTables =
     [
         "NguoiLX",
@@ -48,7 +51,7 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
         await source.OpenAsync(cancellationToken);
         await target.OpenAsync(cancellationToken);
 
-        foreach (var table in SyncTables.Concat(["KhoaHoc", "BaoCaoI"]))
+        foreach (var table in SyncTables.Concat(["KhoaHoc", "BaoCaoI", "NguoiLX_GPLX"]))
         {
             if (!await TableExistsAsync(source, table, null, cancellationToken))
             {
@@ -157,6 +160,16 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
             null,
             cancellationToken);
 
+        var plannedInsertNguoiLXGplx = await BuildNguoiLXGplxInsertPlanAsync(
+            source,
+            target,
+            request.MaKhoaHoc,
+            sourceMaDks,
+            blockers,
+            warnings,
+            null,
+            cancellationToken);
+
         var targetNguoiLx = await ReadMaDkKeysAsync(target, "NguoiLX", sourceOnlyMaDks, null, cancellationToken);
         var sourceNguoiLx = await ReadMaDkKeysAsync(source, "NguoiLX", sourceOnlyMaDks, null, cancellationToken);
         var plannedInsertNguoiLx = sourceOnlyMaDks
@@ -253,6 +266,7 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
             PlannedInsertKhoaHoc = plannedInsertKhoaHoc,
             PlannedInsertBaoCaoI = plannedInsertBaoCaoI,
             PlannedInsertNguoiLX = plannedInsertNguoiLx,
+            PlannedInsertNguoiLXGPLX = plannedInsertNguoiLXGplx,
             PlannedInsertNguoiLXHoSo = plannedInsertHoSo,
             PlannedInsertGiayTo = plannedInsertGiayTo,
             PlannedUpdate = plannedUpdateNguoiLx + plannedUpdateHoSo,
@@ -315,6 +329,13 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
                 transaction,
                 sourceOnlyMaDks,
                 cancellationToken);
+            var insertedNguoiLXGplx = await BulkInsertMissingNguoiLXGplxAsync(
+                source,
+                target,
+                transaction,
+                request.MaKhoaHoc,
+                sourceMaDks,
+                cancellationToken);
             var insertedGiayTo = await BulkInsertMissingGiayToAsync(
                 source,
                 target,
@@ -334,6 +355,7 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
                 InsertedKhoaHoc = insertedKhoaHoc,
                 InsertedBaoCaoI = insertedBaoCaoI,
                 InsertedNguoiLX = insertedNguoiLx,
+                InsertedNguoiLXGPLX = insertedNguoiLXGplx,
                 InsertedNguoiLXHoSo = insertedHoSo,
                 InsertedGiayTo = insertedGiayTo,
                 UpdatedRows = 0,
@@ -404,6 +426,13 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
                 transaction,
                 sourceOnlyMaDks,
                 cancellationToken);
+            var insertedNguoiLXGplx = await BulkInsertMissingNguoiLXGplxAsync(
+                source,
+                target,
+                transaction,
+                request.MaKhoaHoc,
+                sourceMaDks,
+                cancellationToken);
             var insertedGiayTo = await BulkInsertMissingGiayToAsync(
                 source,
                 target,
@@ -440,6 +469,7 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
                 InsertedKhoaHoc = insertedKhoaHoc,
                 InsertedBaoCaoI = insertedBaoCaoI,
                 InsertedNguoiLX = insertedNguoiLx,
+                InsertedNguoiLXGPLX = insertedNguoiLXGplx,
                 InsertedNguoiLXHoSo = insertedHoSo,
                 InsertedGiayTo = insertedGiayTo,
                 UpdatedNguoiLX = updatedNguoiLx,
@@ -586,6 +616,77 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
         var targetExisting = await ReadMaDkKeysAsync(target, "NguoiLX", sourceOnlyMaDks, transaction, cancellationToken);
         var rowsToInsert = FilterRows(sourceRows, row => !targetExisting.Contains(Convert.ToString(row["MaDK"]) ?? string.Empty));
         await BulkCopyAsync(target, transaction, "NguoiLX", columns, rowsToInsert, cancellationToken);
+        return rowsToInsert.Rows.Count;
+    }
+
+    private async Task<long> BulkInsertMissingNguoiLXGplxAsync(
+        SqlConnection source,
+        SqlConnection target,
+        SqlTransaction transaction,
+        string? maKhoaHoc,
+        IReadOnlyCollection<string> selectedSourceMaDks,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(maKhoaHoc) || selectedSourceMaDks.Count == 0)
+        {
+            return 0;
+        }
+
+        var blockers = new List<string>();
+        var warnings = new List<string>();
+        var shape = await ResolveNguoiLXGplxInsertShapeAsync(
+            source,
+            target,
+            blockers,
+            warnings,
+            transaction,
+            cancellationToken);
+        if (shape is null || blockers.Count > 0)
+        {
+            throw new InvalidOperationException(string.Join(" ", blockers));
+        }
+
+        var sourceRows = await ReadNguoiLXGplxRowsAsync(
+            source,
+            shape.CommonColumns,
+            shape.Scope,
+            maKhoaHoc,
+            selectedSourceMaDks,
+            null,
+            cancellationToken);
+        if (sourceRows.Rows.Count == 0)
+        {
+            return 0;
+        }
+
+        var targetKeyRows = await ReadNguoiLXGplxRowsAsync(
+            target,
+            shape.KeyColumns,
+            shape.Scope,
+            maKhoaHoc,
+            selectedSourceMaDks,
+            transaction,
+            cancellationToken);
+        var rowsToInsert = MotoSyncNguoiLXGplxPlanner.FilterInsertRowsForSelectedScope(
+            sourceRows,
+            targetKeyRows,
+            shape.KeyColumns,
+            shape.Scope,
+            maKhoaHoc,
+            selectedSourceMaDks);
+        if (await HasNguoiLXGplxCrossScopeKeyConflictAsync(
+                target,
+                shape,
+                rowsToInsert,
+                maKhoaHoc,
+                selectedSourceMaDks,
+                transaction,
+                cancellationToken))
+        {
+            throw new InvalidOperationException(NguoiLXGplxCrossScopeConflictBlocker);
+        }
+
+        await BulkCopyAsync(target, transaction, "NguoiLX_GPLX", shape.CommonColumns, rowsToInsert, cancellationToken);
         return rowsToInsert.Rows.Count;
     }
 
@@ -1120,6 +1221,240 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
             shape.CourseColumn);
     }
 
+    private async Task<long> BuildNguoiLXGplxInsertPlanAsync(
+        SqlConnection source,
+        SqlConnection target,
+        string? maKhoaHoc,
+        IReadOnlyCollection<string> selectedSourceMaDks,
+        ICollection<string> blockers,
+        ICollection<string> warnings,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(maKhoaHoc) || selectedSourceMaDks.Count == 0)
+        {
+            return 0;
+        }
+
+        var shape = await ResolveNguoiLXGplxInsertShapeAsync(
+            source,
+            target,
+            blockers,
+            warnings,
+            transaction,
+            cancellationToken);
+        if (shape is null)
+        {
+            return 0;
+        }
+
+        var sourceRows = await ReadNguoiLXGplxRowsAsync(
+            source,
+            shape.CommonColumns,
+            shape.Scope,
+            maKhoaHoc,
+            selectedSourceMaDks,
+            null,
+            cancellationToken);
+        if (sourceRows.Rows.Count == 0)
+        {
+            return 0;
+        }
+
+        var targetKeyRows = await ReadNguoiLXGplxRowsAsync(
+            target,
+            shape.KeyColumns,
+            shape.Scope,
+            maKhoaHoc,
+            selectedSourceMaDks,
+            transaction,
+            cancellationToken);
+        var rowsWithMissingKeys = sourceRows.Rows
+            .Cast<DataRow>()
+            .Count(row => !MotoSyncNguoiLXGplxPlanner.TryBuildRowKey(row, shape.KeyColumns, out _));
+        if (rowsWithMissingKeys > 0)
+        {
+            blockers.Add($"dbo.NguoiLX_GPLX co {rowsWithMissingKeys} dong source thieu gia tri khoa dong an toan: {string.Join(", ", shape.KeyColumns)}.");
+        }
+
+        var plannedRows = MotoSyncNguoiLXGplxPlanner.FilterInsertRowsForSelectedScope(
+            sourceRows,
+            targetKeyRows,
+            shape.KeyColumns,
+            shape.Scope,
+            maKhoaHoc,
+            selectedSourceMaDks);
+        if (plannedRows.Rows.Count == 0)
+        {
+            return 0;
+        }
+
+        if (await HasNguoiLXGplxCrossScopeKeyConflictAsync(
+                target,
+                shape,
+                plannedRows,
+                maKhoaHoc,
+                selectedSourceMaDks,
+                transaction,
+                cancellationToken))
+        {
+            blockers.Add(NguoiLXGplxCrossScopeConflictBlocker);
+        }
+
+        warnings.Add($"Plan se insert {plannedRows.Rows.Count} dong dbo.NguoiLX_GPLX cho khoa {maKhoaHoc} neu execute.");
+        AddNguoiLXGplxWidthBlockers(shape, plannedRows, blockers, warnings);
+        return plannedRows.Rows.Count;
+    }
+
+    private async Task<NguoiLXGplxInsertShape?> ResolveNguoiLXGplxInsertShapeAsync(
+        SqlConnection source,
+        SqlConnection target,
+        ICollection<string> blockers,
+        ICollection<string> warnings,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        _ = warnings;
+        var sourceColumns = await ReadColumnsAsync(source, "NguoiLX_GPLX", null, cancellationToken);
+        var targetColumns = await ReadColumnsAsync(target, "NguoiLX_GPLX", transaction, cancellationToken);
+        if (sourceColumns.Count == 0 || targetColumns.Count == 0)
+        {
+            blockers.Add("Khong doc duoc metadata dbo.NguoiLX_GPLX.");
+            return null;
+        }
+
+        var scope = MotoSyncNguoiLXGplxPlanner.DetectScope(
+            sourceColumns.Select(column => column.Name),
+            targetColumns.Select(column => column.Name));
+        if (scope is null)
+        {
+            blockers.Add("dbo.NguoiLX_GPLX khong xac dinh duoc pham vi khoa hoc an toan.");
+            return null;
+        }
+
+        var commonColumns = MotoSyncInsertColumnPlanner.SelectCommonSafeInsertColumns(
+            sourceColumns.Select(ToInsertColumnInfo),
+            targetColumns.Select(ToInsertColumnInfo));
+        if (scope.CourseColumn is not null &&
+            !commonColumns.Contains(scope.CourseColumn, StringComparer.OrdinalIgnoreCase))
+        {
+            blockers.Add("dbo.NguoiLX_GPLX thieu cot khoa hoc chung an toan de insert.");
+            return null;
+        }
+
+        if (scope.UsesMaDkScope &&
+            !commonColumns.Contains("MaDK", StringComparer.OrdinalIgnoreCase))
+        {
+            blockers.Add("dbo.NguoiLX_GPLX thieu cot MaDK chung an toan de gioi han theo khoa hoc.");
+            return null;
+        }
+
+        var sourcePrimaryKey = await ReadPrimaryKeyColumnsAsync(source, "NguoiLX_GPLX", null, cancellationToken);
+        var targetPrimaryKey = await ReadPrimaryKeyColumnsAsync(target, "NguoiLX_GPLX", transaction, cancellationToken);
+        var keyColumns = MotoSyncNguoiLXGplxPlanner.ResolveRowIdentityColumns(
+            sourceColumns.Select(ToInsertColumnInfo),
+            targetColumns.Select(ToInsertColumnInfo),
+            sourcePrimaryKey,
+            targetPrimaryKey);
+        if (keyColumns.Count == 0)
+        {
+            blockers.Add("dbo.NguoiLX_GPLX chua xac dinh duoc khoa dong an toan de insert-only.");
+            return null;
+        }
+
+        var commonSet = commonColumns.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!keyColumns.All(commonSet.Contains))
+        {
+            blockers.Add($"dbo.NguoiLX_GPLX thieu cot khoa dong chung an toan: {string.Join(", ", keyColumns)}.");
+            return null;
+        }
+
+        var missingRequired = MotoSyncInsertColumnPlanner.FindMissingRequiredTargetColumns(
+            sourceColumns.Select(ToInsertColumnInfo),
+            targetColumns.Select(ToInsertColumnInfo));
+        if (missingRequired.Count > 0)
+        {
+            blockers.Add($"dbo.NguoiLX_GPLX co cot bat buoc chi co o target: {string.Join(", ", missingRequired)}.");
+        }
+
+        return new NguoiLXGplxInsertShape(
+            scope,
+            keyColumns,
+            commonColumns,
+            sourceColumns,
+            targetColumns);
+    }
+
+    private static void AddNguoiLXGplxWidthBlockers(
+        NguoiLXGplxInsertShape shape,
+        DataTable plannedRows,
+        ICollection<string> blockers,
+        ICollection<string> warnings)
+    {
+        var sourceByName = shape.SourceColumns.ToDictionary(c => c.Name, StringComparer.OrdinalIgnoreCase);
+        var targetByName = shape.TargetColumns.ToDictionary(c => c.Name, StringComparer.OrdinalIgnoreCase);
+        foreach (var columnName in shape.CommonColumns)
+        {
+            if (!sourceByName.TryGetValue(columnName, out var sourceColumn) ||
+                !targetByName.TryGetValue(columnName, out var targetColumn) ||
+                !IsStringType(sourceColumn.DataType) ||
+                !IsStringType(targetColumn.DataType))
+            {
+                continue;
+            }
+
+            var actualMaxLength = GetMaxStringLength(plannedRows, columnName);
+            var widthResult = MotoSyncStringWidthGuard.Evaluate(
+                "NguoiLX_GPLX",
+                columnName,
+                sourceColumn.DataType,
+                sourceColumn.MaxLength,
+                targetColumn.DataType,
+                targetColumn.MaxLength,
+                actualMaxLength,
+                "planned NguoiLX_GPLX insert");
+
+            if (widthResult.IsBlocker)
+            {
+                blockers.Add(widthResult.Message);
+            }
+            else if (widthResult.IsWarning)
+            {
+                warnings.Add(widthResult.Message);
+            }
+        }
+    }
+
+    private async Task<bool> HasNguoiLXGplxCrossScopeKeyConflictAsync(
+        SqlConnection target,
+        NguoiLXGplxInsertShape shape,
+        DataTable plannedRows,
+        string maKhoaHoc,
+        IReadOnlyCollection<string> selectedSourceMaDks,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        if (plannedRows.Rows.Count == 0 ||
+            MotoSyncNguoiLXGplxPlanner.IdentityIncludesScope(shape.KeyColumns, shape.Scope))
+        {
+            return false;
+        }
+
+        var targetOutsideScopeKeys = await ReadNguoiLXGplxKeyRowsOutsideScopeAsync(
+            target,
+            shape.KeyColumns,
+            shape.Scope,
+            maKhoaHoc,
+            selectedSourceMaDks,
+            transaction,
+            cancellationToken);
+        return MotoSyncNguoiLXGplxPlanner.HasCrossScopeKeyConflict(
+            plannedRows,
+            targetOutsideScopeKeys,
+            shape.KeyColumns,
+            shape.Scope);
+    }
+
     private async Task AddMappingBlockersAsync(
         SqlConnection source,
         SqlConnection target,
@@ -1606,6 +1941,111 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
         return table;
     }
 
+    private async Task<DataTable> ReadNguoiLXGplxRowsAsync(
+        SqlConnection connection,
+        IReadOnlyList<string> columns,
+        MotoSyncNguoiLXGplxScope scope,
+        string? maKhoaHoc,
+        IReadOnlyCollection<string> selectedMaDks,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        if (columns.Count == 0)
+        {
+            return CreateEmptyTable(columns);
+        }
+
+        if (scope.CourseColumn is not null)
+        {
+            var columnList = string.Join(", ", columns.Select(Quote));
+            await using var command = new SqlCommand(
+                $"SELECT {columnList} FROM dbo.NguoiLX_GPLX WHERE (@MaKhoaHoc IS NULL OR {Quote(scope.CourseColumn)} = @MaKhoaHoc);",
+                connection,
+                transaction);
+            command.CommandTimeout = _options.TimeoutSeconds;
+            command.Parameters.AddWithValue("@MaKhoaHoc", (object?)maKhoaHoc ?? DBNull.Value);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            var table = new DataTable();
+            table.Load(reader);
+            return table;
+        }
+
+        if (scope.UsesMaDkScope)
+        {
+            return await ReadRowsByMaDksAsync(
+                connection,
+                "NguoiLX_GPLX",
+                columns,
+                selectedMaDks,
+                transaction,
+                cancellationToken);
+        }
+
+        return CreateEmptyTable(columns);
+    }
+
+    private async Task<DataTable> ReadNguoiLXGplxKeyRowsOutsideScopeAsync(
+        SqlConnection connection,
+        IReadOnlyList<string> keyColumns,
+        MotoSyncNguoiLXGplxScope scope,
+        string maKhoaHoc,
+        IReadOnlyCollection<string> selectedMaDks,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        if (keyColumns.Count == 0)
+        {
+            return CreateEmptyTable(keyColumns);
+        }
+
+        if (scope.CourseColumn is not null)
+        {
+            var columnList = string.Join(", ", keyColumns.Select(Quote));
+            await using var command = new SqlCommand(
+                $"SELECT {columnList} FROM dbo.NguoiLX_GPLX WHERE {Quote(scope.CourseColumn)} IS NULL OR {Quote(scope.CourseColumn)} <> @MaKhoaHoc;",
+                connection,
+                transaction);
+            command.CommandTimeout = _options.TimeoutSeconds;
+            command.Parameters.Add(new SqlParameter("@MaKhoaHoc", maKhoaHoc));
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            var table = new DataTable();
+            table.Load(reader);
+            return table;
+        }
+
+        if (!scope.UsesMaDkScope)
+        {
+            return CreateEmptyTable(keyColumns);
+        }
+
+        var selectedMaDkSet = selectedMaDks.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var readColumns = keyColumns
+            .Concat(["MaDK"])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var columnListForAllRows = string.Join(", ", readColumns.Select(Quote));
+        await using var allRowsCommand = new SqlCommand(
+            $"SELECT {columnListForAllRows} FROM dbo.NguoiLX_GPLX;",
+            connection,
+            transaction);
+        allRowsCommand.CommandTimeout = _options.TimeoutSeconds;
+        await using var allRowsReader = await allRowsCommand.ExecuteReaderAsync(cancellationToken);
+        var allRows = new DataTable();
+        allRows.Load(allRowsReader);
+
+        var outsideRows = allRows.Clone();
+        foreach (DataRow row in allRows.Rows)
+        {
+            var maDk = Convert.ToString(row["MaDK"])?.Trim() ?? string.Empty;
+            if (!selectedMaDkSet.Contains(maDk))
+            {
+                outsideRows.ImportRow(row);
+            }
+        }
+
+        return outsideRows;
+    }
+
     private async Task<HashSet<string>> ReadMaDkKeysAsync(
         SqlConnection connection,
         string tableName,
@@ -2080,6 +2520,13 @@ ORDER BY ic.key_ordinal;",
 
     private sealed record BaoCaoIInsertShape(
         string CourseColumn,
+        IReadOnlyList<string> KeyColumns,
+        IReadOnlyList<string> CommonColumns,
+        IReadOnlyList<ColumnMetadata> SourceColumns,
+        IReadOnlyList<ColumnMetadata> TargetColumns);
+
+    private sealed record NguoiLXGplxInsertShape(
+        MotoSyncNguoiLXGplxScope Scope,
         IReadOnlyList<string> KeyColumns,
         IReadOnlyList<string> CommonColumns,
         IReadOnlyList<ColumnMetadata> SourceColumns,
