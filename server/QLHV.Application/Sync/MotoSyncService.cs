@@ -81,10 +81,10 @@ public sealed class MotoSyncService : IMotoSyncService
                 BlockedPlan(planRequest, new[] { "ConfirmText khong khop." }));
         }
 
-        var plan = await GetPlanAsync(planRequest, cancellationToken);
-        if (!plan.Executable || plan.Blockers.Count > 0 || plan.Errors.Count > 0)
+        var beforePlan = await GetPlanAsync(planRequest, cancellationToken);
+        if (!beforePlan.Executable || beforePlan.Blockers.Count > 0 || beforePlan.Errors.Count > 0)
         {
-            return BlockedExecute("Sync test bi chan vi plan co blocker.", plan);
+            return BlockedExecute("Sync test bi chan vi plan co blocker.", beforePlan);
         }
 
         try
@@ -92,6 +92,7 @@ public sealed class MotoSyncService : IMotoSyncService
             var summary = syncMode == MotoSyncMode.INSERT_AND_UPDATE
                 ? await _repository.ExecuteInsertAndUpdateAsync(planRequest, cancellationToken)
                 : await _repository.ExecuteInsertOnlyAsync(planRequest, cancellationToken);
+            var afterPlan = await GetPlanAsync(planRequest, cancellationToken);
             return new MotoSyncExecuteResultDto
             {
                 Executed = true,
@@ -100,7 +101,10 @@ public sealed class MotoSyncService : IMotoSyncService
                     ? "Moto sync TEST insert-and-update hoan tat."
                     : "Moto sync TEST insert-only hoan tat.",
                 Summary = summary,
-                Plan = plan,
+                Plan = beforePlan,
+                BeforePlan = beforePlan,
+                AfterPlan = afterPlan,
+                HasRemainingWork = HasRemainingWork(afterPlan),
             };
         }
         catch (Exception ex)
@@ -110,7 +114,8 @@ public sealed class MotoSyncService : IMotoSyncService
                 Executed = true,
                 Status = "Loi",
                 Message = $"Moto sync TEST that bai va da rollback transaction. Chi tiet: {ex.GetType().Name}.",
-                Plan = plan,
+                Plan = beforePlan,
+                BeforePlan = beforePlan,
             };
         }
     }
@@ -187,5 +192,17 @@ public sealed class MotoSyncService : IMotoSyncService
         Status = "BiChan",
         Message = message,
         Plan = plan,
+        BeforePlan = plan,
     };
+
+    private static bool HasRemainingWork(MotoSyncPlanDto afterPlan)
+        => afterPlan.PlannedInsertKhoaHoc > 0 ||
+           afterPlan.PlannedInsertNguoiLX > 0 ||
+           afterPlan.PlannedInsertNguoiLXHoSo > 0 ||
+           afterPlan.PlannedInsertGiayTo > 0 ||
+           afterPlan.PlannedUpdate > 0 ||
+           afterPlan.PlannedUpdateNguoiLX > 0 ||
+           afterPlan.PlannedUpdateNguoiLXHoSo > 0 ||
+           afterPlan.Blockers.Count > 0 ||
+           afterPlan.Errors.Count > 0;
 }

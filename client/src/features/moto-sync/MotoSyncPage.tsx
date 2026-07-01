@@ -378,6 +378,20 @@ function ExecuteResult({ result }: { result: MotoSyncExecuteResult | null }) {
           <span>durationMs</span><strong>{formatNumber(summary.durationMs)}</strong>
         </div>
       )}
+      {result.afterPlan && (
+        <div className="moto-sync-after-plan">
+          <SectionTitle title="Kế hoạch sau thực thi" hint={result.hasRemainingWork ? 'Cần kiểm tra lại' : 'Đã sạch'} />
+          <div className={`moto-sync-message-list moto-sync-message-list--${result.hasRemainingWork ? 'warning' : 'success'}`}>
+            {result.hasRemainingWork
+              ? 'Sau thực thi vẫn còn dữ liệu cần xử lý. Vui lòng lập kế hoạch lại để kiểm tra.'
+              : 'Sau thực thi không còn dữ liệu cần đồng bộ cho khóa này.'}
+          </div>
+          <PlanMetrics plan={result.afterPlan} />
+          <MessageList title="Blockers sau thực thi" items={result.afterPlan.blockers} variant="error" />
+          <MessageList title="Warnings sau thực thi" items={result.afterPlan.warnings} variant="warning" />
+          <ErrorList errors={result.afterPlan.errors} />
+        </div>
+      )}
     </div>
   );
 }

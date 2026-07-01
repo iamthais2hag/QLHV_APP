@@ -119,6 +119,12 @@ public sealed class MotoSyncExecuteResultDto
     public MotoSyncExecuteSummaryDto? Summary { get; init; }
 
     public MotoSyncPlanDto? Plan { get; init; }
+
+    public MotoSyncPlanDto? BeforePlan { get; init; }
+
+    public MotoSyncPlanDto? AfterPlan { get; init; }
+
+    public bool HasRemainingWork { get; init; }
 }
 
 public sealed class MotoSyncExecuteSummaryDto

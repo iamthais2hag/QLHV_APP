@@ -114,9 +114,77 @@ public sealed class MotoSyncServiceTests
         Assert.Equal(1L, result.Plan.PlannedInsertKhoaHoc);
         Assert.Equal(1L, result.Summary!.InsertedKhoaHoc);
         Assert.Empty(result.Plan.Blockers);
-        Assert.Equal(1, repo.PlanCalls);
+        Assert.Equal(2, repo.PlanCalls);
         Assert.Equal(1, repo.ExecuteCalls);
         Assert.Equal(0, repo.UpdateExecuteCalls);
+    }
+
+    [Fact]
+    public async Task Execute_success_returns_before_plan_after_plan_and_keeps_old_plan_as_before_plan()
+    {
+        var beforePlan = CleanPlan(plannedInsertKhoaHoc: 1);
+        var afterPlan = CleanPlan(
+            plannedInsertNguoiLx: 0,
+            plannedInsertHoSo: 0,
+            plannedInsertGiayTo: 0);
+        var repo = new FakeMotoSyncRepository(beforePlan)
+        {
+            AfterPlan = afterPlan,
+        };
+        var service = new MotoSyncService(repo);
+
+        var result = await service.ExecuteTestAsync(ConfirmedRequest());
+
+        Assert.True(result.Executed);
+        Assert.Same(result.BeforePlan, result.Plan);
+        Assert.NotNull(result.BeforePlan);
+        Assert.NotNull(result.AfterPlan);
+        Assert.Equal(1L, result.BeforePlan!.PlannedInsertKhoaHoc);
+        Assert.Equal(0L, result.AfterPlan!.PlannedInsertKhoaHoc);
+        Assert.False(result.HasRemainingWork);
+        Assert.Equal(2, repo.PlanCalls);
+    }
+
+    [Fact]
+    public async Task Execute_success_sets_has_remaining_work_when_after_plan_still_has_planned_work()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan())
+        {
+            AfterPlan = CleanPlan(
+                plannedInsertNguoiLx: 0,
+                plannedInsertHoSo: 0,
+                plannedInsertGiayTo: 0,
+                plannedUpdateNguoiLx: 1),
+        };
+        var service = new MotoSyncService(repo);
+
+        var result = await service.ExecuteTestAsync(ConfirmedRequest());
+
+        Assert.True(result.Executed);
+        Assert.True(result.HasRemainingWork);
+        Assert.Equal(1L, result.AfterPlan!.PlannedUpdate);
+        Assert.Equal(2, repo.PlanCalls);
+    }
+
+    [Fact]
+    public async Task Execute_success_sets_has_remaining_work_when_after_plan_has_blockers()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan())
+        {
+            AfterPlan = CleanPlan(
+                shortFullPairs: 1,
+                plannedInsertNguoiLx: 0,
+                plannedInsertHoSo: 0,
+                plannedInsertGiayTo: 0),
+        };
+        var service = new MotoSyncService(repo);
+
+        var result = await service.ExecuteTestAsync(ConfirmedRequest());
+
+        Assert.True(result.Executed);
+        Assert.True(result.HasRemainingWork);
+        Assert.NotEmpty(result.AfterPlan!.Blockers);
+        Assert.Equal(2, repo.PlanCalls);
     }
 
     [Fact]
@@ -174,7 +242,7 @@ public sealed class MotoSyncServiceTests
         Assert.Equal(3, result.Summary.InsertedGiayTo);
         Assert.Equal(0, result.Summary.UpdatedRows);
         Assert.Equal(0, result.Summary.DeletedRows);
-        Assert.Equal(1, repo.PlanCalls);
+        Assert.Equal(2, repo.PlanCalls);
         Assert.Equal(1, repo.ExecuteCalls);
         Assert.Equal(0, repo.UpdateExecuteCalls);
     }
@@ -226,7 +294,7 @@ public sealed class MotoSyncServiceTests
         Assert.Equal(1, result.Summary.UpdatedNguoiLXHoSo);
         Assert.Equal(2, result.Summary.UpdatedRows);
         Assert.Equal(0, result.Summary.DeletedRows);
-        Assert.Equal(1, repo.PlanCalls);
+        Assert.Equal(2, repo.PlanCalls);
         Assert.Equal(0, repo.ExecuteCalls);
         Assert.Equal(1, repo.UpdateExecuteCalls);
     }
@@ -262,6 +330,9 @@ public sealed class MotoSyncServiceTests
         long missingKhoaHoc = 0,
         long plannedInsertKhoaHoc = 0,
         bool missingKhoaHocIsBlocker = true,
+        long plannedInsertNguoiLx = 2,
+        long plannedInsertHoSo = 2,
+        long plannedInsertGiayTo = 3,
         long plannedUpdateNguoiLx = 0,
         long plannedUpdateHoSo = 0)
     {
@@ -290,9 +361,9 @@ public sealed class MotoSyncServiceTests
             ShortFullMaDkPairs = shortFullPairs,
             MissingKhoaHocDependencies = missingKhoaHoc,
             PlannedInsertKhoaHoc = plannedInsertKhoaHoc,
-            PlannedInsertNguoiLX = 2,
-            PlannedInsertNguoiLXHoSo = missingKhoaHoc > 0 ? 1 : 2,
-            PlannedInsertGiayTo = 3,
+            PlannedInsertNguoiLX = plannedInsertNguoiLx,
+            PlannedInsertNguoiLXHoSo = missingKhoaHoc > 0 ? 1 : plannedInsertHoSo,
+            PlannedInsertGiayTo = plannedInsertGiayTo,
             PlannedUpdate = plannedUpdateNguoiLx + plannedUpdateHoSo,
             PlannedUpdateNguoiLX = plannedUpdateNguoiLx,
             PlannedUpdateNguoiLXHoSo = plannedUpdateHoSo,
@@ -341,12 +412,14 @@ public sealed class MotoSyncServiceTests
         public int UpdateExecuteCalls { get; private set; }
         public MotoSyncExecuteSummaryDto ExecuteSummary { get; init; }
         public MotoSyncExecuteSummaryDto UpdateSummary { get; init; }
+        public MotoSyncPlanDto? AfterPlan { get; init; }
 
         public Task<MotoSyncPlanDto> BuildPlanAsync(
             MotoSyncPlanRequest request,
             CancellationToken cancellationToken = default)
         {
             PlanCalls++;
+            var plan = PlanCalls > 1 && AfterPlan is not null ? AfterPlan : _plan;
             return Task.FromResult(new MotoSyncPlanDto
             {
                 Direction = request.Direction,
@@ -354,26 +427,26 @@ public sealed class MotoSyncServiceTests
                 TargetProfileCode = request.TargetProfileCode,
                 MaKhoaHoc = request.MaKhoaHoc,
                 AllowDirtyData = request.AllowDirtyData,
-                SourceRows = _plan.SourceRows,
-                TargetRows = _plan.TargetRows,
-                ExactMaDkOverlap = _plan.ExactMaDkOverlap,
-                SourceOnly = _plan.SourceOnly,
-                TargetOnly = _plan.TargetOnly,
-                DuplicateBusinessKeyGroups = _plan.DuplicateBusinessKeyGroups,
-                ShortFullMaDkPairs = _plan.ShortFullMaDkPairs,
-                MissingKhoaHocDependencies = _plan.MissingKhoaHocDependencies,
-                PlannedInsertKhoaHoc = _plan.PlannedInsertKhoaHoc,
-                PlannedInsertNguoiLX = _plan.PlannedInsertNguoiLX,
-                PlannedInsertNguoiLXHoSo = _plan.PlannedInsertNguoiLXHoSo,
-                PlannedInsertGiayTo = _plan.PlannedInsertGiayTo,
-                PlannedUpdate = _plan.PlannedUpdate,
-                PlannedUpdateNguoiLX = _plan.PlannedUpdateNguoiLX,
-                PlannedUpdateNguoiLXHoSo = _plan.PlannedUpdateNguoiLXHoSo,
-                UpdateSamples = _plan.UpdateSamples,
-                Executable = _plan.Executable,
-                Blockers = _plan.Blockers,
-                Warnings = _plan.Warnings,
-                Errors = _plan.Errors,
+                SourceRows = plan.SourceRows,
+                TargetRows = plan.TargetRows,
+                ExactMaDkOverlap = plan.ExactMaDkOverlap,
+                SourceOnly = plan.SourceOnly,
+                TargetOnly = plan.TargetOnly,
+                DuplicateBusinessKeyGroups = plan.DuplicateBusinessKeyGroups,
+                ShortFullMaDkPairs = plan.ShortFullMaDkPairs,
+                MissingKhoaHocDependencies = plan.MissingKhoaHocDependencies,
+                PlannedInsertKhoaHoc = plan.PlannedInsertKhoaHoc,
+                PlannedInsertNguoiLX = plan.PlannedInsertNguoiLX,
+                PlannedInsertNguoiLXHoSo = plan.PlannedInsertNguoiLXHoSo,
+                PlannedInsertGiayTo = plan.PlannedInsertGiayTo,
+                PlannedUpdate = plan.PlannedUpdate,
+                PlannedUpdateNguoiLX = plan.PlannedUpdateNguoiLX,
+                PlannedUpdateNguoiLXHoSo = plan.PlannedUpdateNguoiLXHoSo,
+                UpdateSamples = plan.UpdateSamples,
+                Executable = plan.Executable,
+                Blockers = plan.Blockers,
+                Warnings = plan.Warnings,
+                Errors = plan.Errors,
             });
         }
 

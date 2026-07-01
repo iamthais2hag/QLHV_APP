@@ -85,4 +85,7 @@ export interface MotoSyncExecuteResult {
   message: string;
   summary: MotoSyncExecuteSummary | null;
   plan: MotoSyncPlan | null;
+  beforePlan: MotoSyncPlan | null;
+  afterPlan: MotoSyncPlan | null;
+  hasRemainingWork: boolean;
 }
