@@ -98,6 +98,28 @@ public sealed class MotoSyncServiceTests
     }
 
     [Fact]
+    public async Task Execute_allows_missing_khoa_hoc_dependency_when_plan_can_insert_khoa_hoc()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan(
+            missingKhoaHoc: 1,
+            plannedInsertKhoaHoc: 1,
+            missingKhoaHocIsBlocker: false));
+        var service = new MotoSyncService(repo);
+
+        var result = await service.ExecuteTestAsync(ConfirmedRequest());
+
+        Assert.True(result.Executed);
+        Assert.Equal("ThanhCong", result.Status);
+        Assert.NotNull(result.Plan);
+        Assert.Equal(1L, result.Plan.PlannedInsertKhoaHoc);
+        Assert.Equal(1L, result.Summary!.InsertedKhoaHoc);
+        Assert.Empty(result.Plan.Blockers);
+        Assert.Equal(1, repo.PlanCalls);
+        Assert.Equal(1, repo.ExecuteCalls);
+        Assert.Equal(0, repo.UpdateExecuteCalls);
+    }
+
+    [Fact]
     public async Task Clean_insert_only_plan_is_executable()
     {
         var repo = new FakeMotoSyncRepository(CleanPlan());
@@ -238,6 +260,8 @@ public sealed class MotoSyncServiceTests
     private static MotoSyncPlanDto CleanPlan(
         long shortFullPairs = 0,
         long missingKhoaHoc = 0,
+        long plannedInsertKhoaHoc = 0,
+        bool missingKhoaHocIsBlocker = true,
         long plannedUpdateNguoiLx = 0,
         long plannedUpdateHoSo = 0)
     {
@@ -247,7 +271,7 @@ public sealed class MotoSyncServiceTests
             blockers.Add($"Nguon co {shortFullPairs} cap MaDK ngan/day du nghi duplicate.");
         }
 
-        if (missingKhoaHoc > 0)
+        if (missingKhoaHoc > 0 && missingKhoaHocIsBlocker)
         {
             blockers.Add($"Target thieu {missingKhoaHoc} MaKhoaHoc dependency. Task nay khong tu tao KhoaHoc.");
         }
@@ -265,6 +289,7 @@ public sealed class MotoSyncServiceTests
             DuplicateBusinessKeyGroups = 0,
             ShortFullMaDkPairs = shortFullPairs,
             MissingKhoaHocDependencies = missingKhoaHoc,
+            PlannedInsertKhoaHoc = plannedInsertKhoaHoc,
             PlannedInsertNguoiLX = 2,
             PlannedInsertNguoiLXHoSo = missingKhoaHoc > 0 ? 1 : 2,
             PlannedInsertGiayTo = 3,
@@ -289,6 +314,7 @@ public sealed class MotoSyncServiceTests
                 SyncMode = MotoSyncMode.INSERT_ONLY,
                 SourceProfileCode = plan.SourceProfileCode,
                 TargetProfileCode = plan.TargetProfileCode,
+                InsertedKhoaHoc = plan.PlannedInsertKhoaHoc,
                 InsertedNguoiLX = plan.PlannedInsertNguoiLX,
                 InsertedNguoiLXHoSo = plan.PlannedInsertNguoiLXHoSo,
                 InsertedGiayTo = plan.PlannedInsertGiayTo,
@@ -299,6 +325,7 @@ public sealed class MotoSyncServiceTests
                 SyncMode = MotoSyncMode.INSERT_AND_UPDATE,
                 SourceProfileCode = plan.SourceProfileCode,
                 TargetProfileCode = plan.TargetProfileCode,
+                InsertedKhoaHoc = plan.PlannedInsertKhoaHoc,
                 InsertedNguoiLX = plan.PlannedInsertNguoiLX,
                 InsertedNguoiLXHoSo = plan.PlannedInsertNguoiLXHoSo,
                 InsertedGiayTo = plan.PlannedInsertGiayTo,
@@ -335,6 +362,7 @@ public sealed class MotoSyncServiceTests
                 DuplicateBusinessKeyGroups = _plan.DuplicateBusinessKeyGroups,
                 ShortFullMaDkPairs = _plan.ShortFullMaDkPairs,
                 MissingKhoaHocDependencies = _plan.MissingKhoaHocDependencies,
+                PlannedInsertKhoaHoc = _plan.PlannedInsertKhoaHoc,
                 PlannedInsertNguoiLX = _plan.PlannedInsertNguoiLX,
                 PlannedInsertNguoiLXHoSo = _plan.PlannedInsertNguoiLXHoSo,
                 PlannedInsertGiayTo = _plan.PlannedInsertGiayTo,

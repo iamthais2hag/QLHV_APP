@@ -108,26 +108,57 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
             warnings.Add("AllowDirtyData chi de preview; duplicate blockers van chan execute trong task nay.");
         }
 
+        var sourceKhoaHoc = await ReadKhoaHocKeysAsync(source, null, cancellationToken);
         var targetKhoaHoc = await ReadKhoaHocKeysAsync(target, null, cancellationToken);
+        var plannedInsertKhoaHoc = !string.IsNullOrWhiteSpace(request.MaKhoaHoc) &&
+                                   sourceKhoaHoc.Contains(request.MaKhoaHoc) &&
+                                   !targetKhoaHoc.Contains(request.MaKhoaHoc)
+            ? 1
+            : 0;
         var sourceOnlyKhoaHoc = await ReadHoSoKhoaHocByMaDksAsync(source, sourceOnlyMaDks, cancellationToken);
-        var missingKhoaHocDependencies = sourceOnlyKhoaHoc
+        var missingKhoaHocValues = sourceOnlyKhoaHoc
             .Values
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Count(value => !targetKhoaHoc.Contains(value));
-        if (missingKhoaHocDependencies > 0)
+            .Where(value => !targetKhoaHoc.Contains(value))
+            .ToArray();
+        var missingKhoaHocDependencies = missingKhoaHocValues.Length;
+        var unresolvedMissingKhoaHoc = missingKhoaHocValues
+            .Where(value => plannedInsertKhoaHoc == 0 ||
+                            !string.Equals(value, request.MaKhoaHoc, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (unresolvedMissingKhoaHoc.Length > 0)
         {
-            blockers.Add($"Target thieu {missingKhoaHocDependencies} MaKhoaHoc dependency. Task nay khong tu tao KhoaHoc.");
+            blockers.Add($"Target thieu {unresolvedMissingKhoaHoc.Length} MaKhoaHoc dependency chua the tu them an toan.");
+        }
+
+        if (plannedInsertKhoaHoc > 0)
+        {
+            warnings.Add($"Target thieu KhoaHoc {request.MaKhoaHoc}; plan se insert dbo.KhoaHoc truoc hoc vien neu execute.");
+            await AddKhoaHocInsertBlockersAsync(
+                source,
+                target,
+                request.MaKhoaHoc!,
+                blockers,
+                warnings,
+                null,
+                cancellationToken);
         }
 
         var targetNguoiLx = await ReadMaDkKeysAsync(target, "NguoiLX", sourceOnlyMaDks, null, cancellationToken);
         var sourceNguoiLx = await ReadMaDkKeysAsync(source, "NguoiLX", sourceOnlyMaDks, null, cancellationToken);
         var plannedInsertNguoiLx = sourceOnlyMaDks
             .Count(maDk => sourceNguoiLx.Contains(maDk) && !targetNguoiLx.Contains(maDk));
+        var availableKhoaHocForPlan = targetKhoaHoc.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (plannedInsertKhoaHoc > 0 && !string.IsNullOrWhiteSpace(request.MaKhoaHoc))
+        {
+            availableKhoaHocForPlan.Add(request.MaKhoaHoc);
+        }
+
         var plannedInsertHoSo = sourceOnlyMaDks
             .Count(maDk => sourceOnlyKhoaHoc.TryGetValue(maDk, out var maKhoaHoc) &&
                             !string.IsNullOrWhiteSpace(maKhoaHoc) &&
-                            targetKhoaHoc.Contains(maKhoaHoc));
+                            availableKhoaHocForPlan.Contains(maKhoaHoc));
 
         var sourceGiayToKeys = await ReadGiayToKeysAsync(source, sourceOnlyMaDks, null, cancellationToken);
         var targetGiayToKeys = await ReadGiayToKeysAsync(target, sourceOnlyMaDks, null, cancellationToken);
@@ -207,6 +238,7 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
             DuplicateBusinessKeyGroups = duplicateBusinessKeyGroups,
             ShortFullMaDkPairs = shortFullMaDkPairs,
             MissingKhoaHocDependencies = missingKhoaHocDependencies,
+            PlannedInsertKhoaHoc = plannedInsertKhoaHoc,
             PlannedInsertNguoiLX = plannedInsertNguoiLx,
             PlannedInsertNguoiLXHoSo = plannedInsertHoSo,
             PlannedInsertGiayTo = plannedInsertGiayTo,
@@ -246,6 +278,12 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
 
+            var insertedKhoaHoc = await BulkInsertMissingKhoaHocAsync(
+                source,
+                target,
+                transaction,
+                request.MaKhoaHoc,
+                cancellationToken);
             var insertedNguoiLx = await BulkInsertMissingNguoiLxAsync(
                 source,
                 target,
@@ -274,6 +312,7 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
                 SourceProfileCode = request.SourceProfileCode,
                 TargetProfileCode = request.TargetProfileCode,
                 MaKhoaHoc = request.MaKhoaHoc,
+                InsertedKhoaHoc = insertedKhoaHoc,
                 InsertedNguoiLX = insertedNguoiLx,
                 InsertedNguoiLXHoSo = insertedHoSo,
                 InsertedGiayTo = insertedGiayTo,
@@ -321,6 +360,12 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
 
+            var insertedKhoaHoc = await BulkInsertMissingKhoaHocAsync(
+                source,
+                target,
+                transaction,
+                request.MaKhoaHoc,
+                cancellationToken);
             var insertedNguoiLx = await BulkInsertMissingNguoiLxAsync(
                 source,
                 target,
@@ -366,6 +411,7 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
                 SourceProfileCode = request.SourceProfileCode,
                 TargetProfileCode = request.TargetProfileCode,
                 MaKhoaHoc = request.MaKhoaHoc,
+                InsertedKhoaHoc = insertedKhoaHoc,
                 InsertedNguoiLX = insertedNguoiLx,
                 InsertedNguoiLXHoSo = insertedHoSo,
                 InsertedGiayTo = insertedGiayTo,
@@ -383,6 +429,46 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
             await transaction.RollbackAsync(cancellationToken);
             throw;
         }
+    }
+
+    private async Task<long> BulkInsertMissingKhoaHocAsync(
+        SqlConnection source,
+        SqlConnection target,
+        SqlTransaction transaction,
+        string? maKhoaHoc,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(maKhoaHoc))
+        {
+            return 0;
+        }
+
+        var targetKhoaHoc = await ReadKhoaHocKeysAsync(target, transaction, cancellationToken);
+        if (targetKhoaHoc.Contains(maKhoaHoc))
+        {
+            return 0;
+        }
+
+        var sourceKhoaHoc = await ReadKhoaHocKeysAsync(source, null, cancellationToken);
+        if (!sourceKhoaHoc.Contains(maKhoaHoc))
+        {
+            return 0;
+        }
+
+        var columns = await GetCommonSafeInsertColumnsAsync(source, target, "KhoaHoc", transaction, cancellationToken);
+        if (!columns.Contains("MaKH", StringComparer.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Khong the insert dbo.KhoaHoc vi thieu cot MaKH chung an toan.");
+        }
+
+        var sourceRows = await ReadKhoaHocRowAsync(source, columns, maKhoaHoc, null, cancellationToken);
+        if (sourceRows.Rows.Count == 0)
+        {
+            return 0;
+        }
+
+        await BulkCopyAsync(target, transaction, "KhoaHoc", columns, sourceRows, cancellationToken);
+        return sourceRows.Rows.Count;
     }
 
     private async Task<long> BulkInsertMissingNguoiLxAsync(
@@ -638,6 +724,89 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
         Blockers = blockers,
         Warnings = warnings,
     };
+
+    private async Task AddKhoaHocInsertBlockersAsync(
+        SqlConnection source,
+        SqlConnection target,
+        string maKhoaHoc,
+        ICollection<string> blockers,
+        ICollection<string> warnings,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        var sourceColumns = await ReadColumnsAsync(source, "KhoaHoc", null, cancellationToken);
+        var targetColumns = await ReadColumnsAsync(target, "KhoaHoc", transaction, cancellationToken);
+        if (sourceColumns.Count == 0 || targetColumns.Count == 0)
+        {
+            blockers.Add("Khong doc duoc metadata dbo.KhoaHoc.");
+            return;
+        }
+
+        var commonColumns = MotoSyncInsertColumnPlanner.SelectCommonSafeInsertColumns(
+            sourceColumns.Select(ToInsertColumnInfo),
+            targetColumns.Select(ToInsertColumnInfo));
+        if (!commonColumns.Contains("MaKH", StringComparer.OrdinalIgnoreCase))
+        {
+            blockers.Add("dbo.KhoaHoc thieu cot MaKH chung an toan de insert.");
+        }
+
+        var missingRequired = MotoSyncInsertColumnPlanner.FindMissingRequiredTargetColumns(
+            sourceColumns.Select(ToInsertColumnInfo),
+            targetColumns.Select(ToInsertColumnInfo));
+        if (missingRequired.Count > 0)
+        {
+            blockers.Add($"dbo.KhoaHoc co cot bat buoc chi co o target: {string.Join(", ", missingRequired)}.");
+        }
+
+        var sourceByName = sourceColumns.ToDictionary(c => c.Name, StringComparer.OrdinalIgnoreCase);
+        var targetByName = targetColumns.ToDictionary(c => c.Name, StringComparer.OrdinalIgnoreCase);
+        foreach (var columnName in commonColumns)
+        {
+            if (!sourceByName.TryGetValue(columnName, out var sourceColumn) ||
+                !targetByName.TryGetValue(columnName, out var targetColumn) ||
+                !IsStringType(sourceColumn.DataType) ||
+                !IsStringType(targetColumn.DataType))
+            {
+                continue;
+            }
+
+            var sourceLimit = MotoSyncStringWidthGuard.ToCharacterLimit(
+                sourceColumn.DataType,
+                sourceColumn.MaxLength);
+            var targetLimit = MotoSyncStringWidthGuard.ToCharacterLimit(
+                targetColumn.DataType,
+                targetColumn.MaxLength);
+            if (targetLimit is null || (sourceLimit is not null && sourceLimit <= targetLimit.Value))
+            {
+                continue;
+            }
+
+            var actualMaxLength = await GetMaxActualStringLengthByKhoaHocAsync(
+                source,
+                columnName,
+                maKhoaHoc,
+                null,
+                cancellationToken);
+            var widthResult = MotoSyncStringWidthGuard.Evaluate(
+                "KhoaHoc",
+                columnName,
+                sourceColumn.DataType,
+                sourceColumn.MaxLength,
+                targetColumn.DataType,
+                targetColumn.MaxLength,
+                actualMaxLength,
+                "planned KhoaHoc insert");
+
+            if (widthResult.IsBlocker)
+            {
+                blockers.Add(widthResult.Message);
+            }
+            else if (widthResult.IsWarning)
+            {
+                warnings.Add(widthResult.Message);
+            }
+        }
+    }
 
     private async Task AddMappingBlockersAsync(
         SqlConnection source,
@@ -930,6 +1099,20 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
             .ToArray();
     }
 
+    private async Task<IReadOnlyList<string>> GetCommonSafeInsertColumnsAsync(
+        SqlConnection source,
+        SqlConnection target,
+        string tableName,
+        SqlTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        var sourceColumns = await ReadColumnsAsync(source, tableName, null, cancellationToken);
+        var targetColumns = await ReadColumnsAsync(target, tableName, transaction, cancellationToken);
+        return MotoSyncInsertColumnPlanner.SelectCommonSafeInsertColumns(
+            sourceColumns.Select(ToInsertColumnInfo),
+            targetColumns.Select(ToInsertColumnInfo));
+    }
+
     private async Task<IReadOnlyList<string>> GetCommonUpdateColumnsAsync(
         SqlConnection source,
         SqlConnection target,
@@ -1039,6 +1222,26 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
         return values.ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
+    private async Task<DataTable> ReadKhoaHocRowAsync(
+        SqlConnection connection,
+        IReadOnlyList<string> columns,
+        string maKhoaHoc,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        var columnList = string.Join(", ", columns.Select(Quote));
+        await using var command = new SqlCommand(
+            $"SELECT {columnList} FROM dbo.KhoaHoc WHERE MaKH = @MaKhoaHoc;",
+            connection,
+            transaction);
+        command.CommandTimeout = _options.TimeoutSeconds;
+        command.Parameters.Add(new SqlParameter("@MaKhoaHoc", maKhoaHoc));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var table = new DataTable();
+        table.Load(reader);
+        return table;
+    }
+
     private async Task<HashSet<string>> ReadMaDkKeysAsync(
         SqlConnection connection,
         string tableName,
@@ -1143,6 +1346,22 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
         }
 
         return maxLength;
+    }
+
+    private async Task<long> GetMaxActualStringLengthByKhoaHocAsync(
+        SqlConnection connection,
+        string columnName,
+        string maKhoaHoc,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        await using var command = new SqlCommand(
+            $"SELECT ISNULL(MAX(LEN({Quote(columnName)})), 0) FROM dbo.KhoaHoc WHERE MaKH = @MaKhoaHoc;",
+            connection,
+            transaction);
+        command.CommandTimeout = _options.TimeoutSeconds;
+        command.Parameters.Add(new SqlParameter("@MaKhoaHoc", maKhoaHoc));
+        return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken) ?? 0L);
     }
 
     private async Task<long> CountDuplicateBusinessKeysAsync(
@@ -1435,6 +1654,15 @@ ORDER BY c.column_id;",
 
     private static bool IsBinaryType(string dataType)
         => dataType is "binary" or "varbinary" or "image" or "timestamp" or "rowversion";
+
+    private static MotoSyncInsertColumnInfo ToInsertColumnInfo(ColumnMetadata column) => new(
+        column.Name,
+        column.DataType,
+        column.IsNullable,
+        column.IsIdentity,
+        column.IsComputed,
+        column.IsRowVersion,
+        column.HasDefault);
 
     private sealed record TableUpdatePlan(
         IReadOnlyList<string> Columns,

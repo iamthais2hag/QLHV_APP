@@ -264,6 +264,7 @@ function PlanMetrics({ plan }: { plan: MotoSyncPlan }) {
     ['exactMaDkOverlap', plan.exactMaDkOverlap],
     ['sourceOnly', plan.sourceOnly],
     ['targetOnly', plan.targetOnly],
+    ['plannedInsertKhoaHoc', plan.plannedInsertKhoaHoc],
     ['plannedInsertNguoiLX', plan.plannedInsertNguoiLX],
     ['plannedInsertNguoiLXHoSo', plan.plannedInsertNguoiLXHoSo],
     ['plannedInsertGiayTo', plan.plannedInsertGiayTo],
@@ -366,6 +367,7 @@ function ExecuteResult({ result }: { result: MotoSyncExecuteResult | null }) {
       <p>{result.message}</p>
       {summary && (
         <div className="moto-sync-result-grid">
+          <span>insertedKhoaHoc</span><strong>{formatNumber(summary.insertedKhoaHoc)}</strong>
           <span>insertedNguoiLX</span><strong>{formatNumber(summary.insertedNguoiLX)}</strong>
           <span>insertedNguoiLXHoSo</span><strong>{formatNumber(summary.insertedNguoiLXHoSo)}</strong>
           <span>insertedGiayTo</span><strong>{formatNumber(summary.insertedGiayTo)}</strong>
