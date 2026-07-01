@@ -197,6 +197,7 @@ public sealed class MotoSyncService : IMotoSyncService
 
     private static bool HasRemainingWork(MotoSyncPlanDto afterPlan)
         => afterPlan.PlannedInsertKhoaHoc > 0 ||
+           afterPlan.PlannedInsertBaoCaoI > 0 ||
            afterPlan.PlannedInsertNguoiLX > 0 ||
            afterPlan.PlannedInsertNguoiLXHoSo > 0 ||
            afterPlan.PlannedInsertGiayTo > 0 ||

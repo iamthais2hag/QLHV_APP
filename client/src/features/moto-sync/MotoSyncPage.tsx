@@ -265,6 +265,7 @@ function PlanMetrics({ plan }: { plan: MotoSyncPlan }) {
     ['sourceOnly', plan.sourceOnly],
     ['targetOnly', plan.targetOnly],
     ['plannedInsertKhoaHoc', plan.plannedInsertKhoaHoc],
+    ['plannedInsertBaoCaoI', plan.plannedInsertBaoCaoI],
     ['plannedInsertNguoiLX', plan.plannedInsertNguoiLX],
     ['plannedInsertNguoiLXHoSo', plan.plannedInsertNguoiLXHoSo],
     ['plannedInsertGiayTo', plan.plannedInsertGiayTo],
@@ -368,6 +369,7 @@ function ExecuteResult({ result }: { result: MotoSyncExecuteResult | null }) {
       {summary && (
         <div className="moto-sync-result-grid">
           <span>insertedKhoaHoc</span><strong>{formatNumber(summary.insertedKhoaHoc)}</strong>
+          <span>insertedBaoCaoI</span><strong>{formatNumber(summary.insertedBaoCaoI)}</strong>
           <span>insertedNguoiLX</span><strong>{formatNumber(summary.insertedNguoiLX)}</strong>
           <span>insertedNguoiLXHoSo</span><strong>{formatNumber(summary.insertedNguoiLXHoSo)}</strong>
           <span>insertedGiayTo</span><strong>{formatNumber(summary.insertedGiayTo)}</strong>
