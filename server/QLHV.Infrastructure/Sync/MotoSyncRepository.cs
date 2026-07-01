@@ -10,6 +10,9 @@ namespace QLHV.Infrastructure.Sync;
 
 public sealed class MotoSyncRepository : IMotoSyncRepository
 {
+    private const string BaoCaoICrossCourseConflictBlocker =
+        "dbo.BaoCaoI co khoa dong trung voi khoa khac trong target; khong the insert an toan cho MaKhoaHoc dang chon.";
+
     private static readonly IReadOnlyList<string> SyncTables =
     [
         "NguoiLX",
@@ -45,7 +48,7 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
         await source.OpenAsync(cancellationToken);
         await target.OpenAsync(cancellationToken);
 
-        foreach (var table in SyncTables.Append("KhoaHoc"))
+        foreach (var table in SyncTables.Concat(["KhoaHoc", "BaoCaoI"]))
         {
             if (!await TableExistsAsync(source, table, null, cancellationToken))
             {
@@ -145,6 +148,15 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
                 cancellationToken);
         }
 
+        var plannedInsertBaoCaoI = await BuildBaoCaoIInsertPlanAsync(
+            source,
+            target,
+            request.MaKhoaHoc,
+            blockers,
+            warnings,
+            null,
+            cancellationToken);
+
         var targetNguoiLx = await ReadMaDkKeysAsync(target, "NguoiLX", sourceOnlyMaDks, null, cancellationToken);
         var sourceNguoiLx = await ReadMaDkKeysAsync(source, "NguoiLX", sourceOnlyMaDks, null, cancellationToken);
         var plannedInsertNguoiLx = sourceOnlyMaDks
@@ -239,6 +251,7 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
             ShortFullMaDkPairs = shortFullMaDkPairs,
             MissingKhoaHocDependencies = missingKhoaHocDependencies,
             PlannedInsertKhoaHoc = plannedInsertKhoaHoc,
+            PlannedInsertBaoCaoI = plannedInsertBaoCaoI,
             PlannedInsertNguoiLX = plannedInsertNguoiLx,
             PlannedInsertNguoiLXHoSo = plannedInsertHoSo,
             PlannedInsertGiayTo = plannedInsertGiayTo,
@@ -284,6 +297,12 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
                 transaction,
                 request.MaKhoaHoc,
                 cancellationToken);
+            var insertedBaoCaoI = await BulkInsertMissingBaoCaoIAsync(
+                source,
+                target,
+                transaction,
+                request.MaKhoaHoc,
+                cancellationToken);
             var insertedNguoiLx = await BulkInsertMissingNguoiLxAsync(
                 source,
                 target,
@@ -313,6 +332,7 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
                 TargetProfileCode = request.TargetProfileCode,
                 MaKhoaHoc = request.MaKhoaHoc,
                 InsertedKhoaHoc = insertedKhoaHoc,
+                InsertedBaoCaoI = insertedBaoCaoI,
                 InsertedNguoiLX = insertedNguoiLx,
                 InsertedNguoiLXHoSo = insertedHoSo,
                 InsertedGiayTo = insertedGiayTo,
@@ -366,6 +386,12 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
                 transaction,
                 request.MaKhoaHoc,
                 cancellationToken);
+            var insertedBaoCaoI = await BulkInsertMissingBaoCaoIAsync(
+                source,
+                target,
+                transaction,
+                request.MaKhoaHoc,
+                cancellationToken);
             var insertedNguoiLx = await BulkInsertMissingNguoiLxAsync(
                 source,
                 target,
@@ -412,6 +438,7 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
                 TargetProfileCode = request.TargetProfileCode,
                 MaKhoaHoc = request.MaKhoaHoc,
                 InsertedKhoaHoc = insertedKhoaHoc,
+                InsertedBaoCaoI = insertedBaoCaoI,
                 InsertedNguoiLX = insertedNguoiLx,
                 InsertedNguoiLXHoSo = insertedHoSo,
                 InsertedGiayTo = insertedGiayTo,
@@ -469,6 +496,72 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
 
         await BulkCopyAsync(target, transaction, "KhoaHoc", columns, sourceRows, cancellationToken);
         return sourceRows.Rows.Count;
+    }
+
+    private async Task<long> BulkInsertMissingBaoCaoIAsync(
+        SqlConnection source,
+        SqlConnection target,
+        SqlTransaction transaction,
+        string? maKhoaHoc,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(maKhoaHoc))
+        {
+            return 0;
+        }
+
+        var blockers = new List<string>();
+        var warnings = new List<string>();
+        var shape = await ResolveBaoCaoIInsertShapeAsync(
+            source,
+            target,
+            blockers,
+            warnings,
+            transaction,
+            cancellationToken);
+        if (shape is null || blockers.Count > 0)
+        {
+            throw new InvalidOperationException(string.Join(" ", blockers));
+        }
+
+        var sourceRows = await ReadBaoCaoIRowsAsync(
+            source,
+            shape.CommonColumns,
+            shape.CourseColumn,
+            maKhoaHoc,
+            null,
+            cancellationToken);
+        if (sourceRows.Rows.Count == 0)
+        {
+            return 0;
+        }
+
+        var targetKeyRows = await ReadBaoCaoIRowsAsync(
+            target,
+            shape.KeyColumns,
+            shape.CourseColumn,
+            maKhoaHoc,
+            transaction,
+            cancellationToken);
+        var rowsToInsert = MotoSyncBaoCaoIPlanner.FilterInsertRowsForSelectedCourse(
+            sourceRows,
+            targetKeyRows,
+            shape.KeyColumns,
+            shape.CourseColumn,
+            maKhoaHoc);
+        if (await HasBaoCaoICrossCourseKeyConflictAsync(
+                target,
+                shape,
+                rowsToInsert,
+                maKhoaHoc,
+                transaction,
+                cancellationToken))
+        {
+            throw new InvalidOperationException(BaoCaoICrossCourseConflictBlocker);
+        }
+
+        await BulkCopyAsync(target, transaction, "BaoCaoI", shape.CommonColumns, rowsToInsert, cancellationToken);
+        return rowsToInsert.Rows.Count;
     }
 
     private async Task<long> BulkInsertMissingNguoiLxAsync(
@@ -806,6 +899,225 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
                 warnings.Add(widthResult.Message);
             }
         }
+    }
+
+    private async Task<long> BuildBaoCaoIInsertPlanAsync(
+        SqlConnection source,
+        SqlConnection target,
+        string? maKhoaHoc,
+        ICollection<string> blockers,
+        ICollection<string> warnings,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(maKhoaHoc))
+        {
+            return 0;
+        }
+
+        var shape = await ResolveBaoCaoIInsertShapeAsync(
+            source,
+            target,
+            blockers,
+            warnings,
+            transaction,
+            cancellationToken);
+        if (shape is null)
+        {
+            return 0;
+        }
+
+        var sourceRows = await ReadBaoCaoIRowsAsync(
+            source,
+            shape.CommonColumns,
+            shape.CourseColumn,
+            maKhoaHoc,
+            null,
+            cancellationToken);
+        if (sourceRows.Rows.Count == 0)
+        {
+            return 0;
+        }
+
+        var targetKeyRows = await ReadBaoCaoIRowsAsync(
+            target,
+            shape.KeyColumns,
+            shape.CourseColumn,
+            maKhoaHoc,
+            transaction,
+            cancellationToken);
+        var rowsWithMissingKeys = sourceRows.Rows
+            .Cast<DataRow>()
+            .Count(row => !MotoSyncBaoCaoIPlanner.TryBuildRowKey(row, shape.KeyColumns, out _));
+        if (rowsWithMissingKeys > 0)
+        {
+            blockers.Add($"dbo.BaoCaoI co {rowsWithMissingKeys} dong source thieu gia tri khoa dong an toan: {string.Join(", ", shape.KeyColumns)}.");
+        }
+
+        var plannedRows = MotoSyncBaoCaoIPlanner.FilterInsertRowsForSelectedCourse(
+            sourceRows,
+            targetKeyRows,
+            shape.KeyColumns,
+            shape.CourseColumn,
+            maKhoaHoc);
+        if (plannedRows.Rows.Count == 0)
+        {
+            return 0;
+        }
+
+        if (await HasBaoCaoICrossCourseKeyConflictAsync(
+                target,
+                shape,
+                plannedRows,
+                maKhoaHoc,
+                transaction,
+                cancellationToken))
+        {
+            blockers.Add(BaoCaoICrossCourseConflictBlocker);
+        }
+
+        warnings.Add($"Plan se insert {plannedRows.Rows.Count} dong dbo.BaoCaoI cho khoa {maKhoaHoc} neu execute.");
+        AddBaoCaoIWidthBlockers(shape, plannedRows, blockers, warnings);
+        return plannedRows.Rows.Count;
+    }
+
+    private async Task<BaoCaoIInsertShape?> ResolveBaoCaoIInsertShapeAsync(
+        SqlConnection source,
+        SqlConnection target,
+        ICollection<string> blockers,
+        ICollection<string> warnings,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        _ = warnings;
+        var sourceColumns = await ReadColumnsAsync(source, "BaoCaoI", null, cancellationToken);
+        var targetColumns = await ReadColumnsAsync(target, "BaoCaoI", transaction, cancellationToken);
+        if (sourceColumns.Count == 0 || targetColumns.Count == 0)
+        {
+            blockers.Add("Khong doc duoc metadata dbo.BaoCaoI.");
+            return null;
+        }
+
+        var courseColumn = MotoSyncBaoCaoIPlanner.DetectCourseScopeColumn(
+            sourceColumns.Select(column => column.Name),
+            targetColumns.Select(column => column.Name));
+        if (courseColumn is null)
+        {
+            blockers.Add("dbo.BaoCaoI khong co cot khoa hoc duoc ho tro de loc theo MaKhoaHoc.");
+            return null;
+        }
+
+        var commonColumns = MotoSyncInsertColumnPlanner.SelectCommonSafeInsertColumns(
+            sourceColumns.Select(ToInsertColumnInfo),
+            targetColumns.Select(ToInsertColumnInfo));
+        if (!commonColumns.Contains(courseColumn, StringComparer.OrdinalIgnoreCase))
+        {
+            blockers.Add("dbo.BaoCaoI thieu cot khoa hoc chung an toan de insert.");
+            return null;
+        }
+
+        var sourcePrimaryKey = await ReadPrimaryKeyColumnsAsync(source, "BaoCaoI", null, cancellationToken);
+        var targetPrimaryKey = await ReadPrimaryKeyColumnsAsync(target, "BaoCaoI", transaction, cancellationToken);
+        var keyColumns = MotoSyncBaoCaoIPlanner.ResolveRowIdentityColumns(
+            sourceColumns.Select(ToInsertColumnInfo),
+            targetColumns.Select(ToInsertColumnInfo),
+            sourcePrimaryKey,
+            targetPrimaryKey);
+        if (keyColumns.Count == 0)
+        {
+            blockers.Add("dbo.BaoCaoI chua xac dinh duoc khoa dong an toan de insert-only.");
+            return null;
+        }
+
+        var commonSet = commonColumns.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!keyColumns.All(commonSet.Contains))
+        {
+            blockers.Add($"dbo.BaoCaoI thieu cot khoa dong chung an toan: {string.Join(", ", keyColumns)}.");
+            return null;
+        }
+
+        var missingRequired = MotoSyncInsertColumnPlanner.FindMissingRequiredTargetColumns(
+            sourceColumns.Select(ToInsertColumnInfo),
+            targetColumns.Select(ToInsertColumnInfo));
+        if (missingRequired.Count > 0)
+        {
+            blockers.Add($"dbo.BaoCaoI co cot bat buoc chi co o target: {string.Join(", ", missingRequired)}.");
+        }
+
+        return new BaoCaoIInsertShape(
+            courseColumn,
+            keyColumns,
+            commonColumns,
+            sourceColumns,
+            targetColumns);
+    }
+
+    private static void AddBaoCaoIWidthBlockers(
+        BaoCaoIInsertShape shape,
+        DataTable plannedRows,
+        ICollection<string> blockers,
+        ICollection<string> warnings)
+    {
+        var sourceByName = shape.SourceColumns.ToDictionary(c => c.Name, StringComparer.OrdinalIgnoreCase);
+        var targetByName = shape.TargetColumns.ToDictionary(c => c.Name, StringComparer.OrdinalIgnoreCase);
+        foreach (var columnName in shape.CommonColumns)
+        {
+            if (!sourceByName.TryGetValue(columnName, out var sourceColumn) ||
+                !targetByName.TryGetValue(columnName, out var targetColumn) ||
+                !IsStringType(sourceColumn.DataType) ||
+                !IsStringType(targetColumn.DataType))
+            {
+                continue;
+            }
+
+            var actualMaxLength = GetMaxStringLength(plannedRows, columnName);
+            var widthResult = MotoSyncStringWidthGuard.Evaluate(
+                "BaoCaoI",
+                columnName,
+                sourceColumn.DataType,
+                sourceColumn.MaxLength,
+                targetColumn.DataType,
+                targetColumn.MaxLength,
+                actualMaxLength,
+                "planned BaoCaoI insert");
+
+            if (widthResult.IsBlocker)
+            {
+                blockers.Add(widthResult.Message);
+            }
+            else if (widthResult.IsWarning)
+            {
+                warnings.Add(widthResult.Message);
+            }
+        }
+    }
+
+    private async Task<bool> HasBaoCaoICrossCourseKeyConflictAsync(
+        SqlConnection target,
+        BaoCaoIInsertShape shape,
+        DataTable plannedRows,
+        string maKhoaHoc,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        if (plannedRows.Rows.Count == 0 ||
+            MotoSyncBaoCaoIPlanner.IdentityIncludesCourseScope(shape.KeyColumns, shape.CourseColumn))
+        {
+            return false;
+        }
+
+        var targetOutsideCourseKeys = await ReadBaoCaoIKeyRowsOutsideCourseAsync(
+            target,
+            shape.KeyColumns,
+            shape.CourseColumn,
+            maKhoaHoc,
+            transaction,
+            cancellationToken);
+        return MotoSyncBaoCaoIPlanner.HasCrossCourseKeyConflict(
+            plannedRows,
+            targetOutsideCourseKeys,
+            shape.KeyColumns,
+            shape.CourseColumn);
     }
 
     private async Task AddMappingBlockersAsync(
@@ -1242,6 +1554,58 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
         return table;
     }
 
+    private async Task<DataTable> ReadBaoCaoIRowsAsync(
+        SqlConnection connection,
+        IReadOnlyList<string> columns,
+        string courseColumn,
+        string? maKhoaHoc,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        if (columns.Count == 0)
+        {
+            return CreateEmptyTable(columns);
+        }
+
+        var columnList = string.Join(", ", columns.Select(Quote));
+        await using var command = new SqlCommand(
+            $"SELECT {columnList} FROM dbo.BaoCaoI WHERE (@MaKhoaHoc IS NULL OR {Quote(courseColumn)} = @MaKhoaHoc);",
+            connection,
+            transaction);
+        command.CommandTimeout = _options.TimeoutSeconds;
+        command.Parameters.AddWithValue("@MaKhoaHoc", (object?)maKhoaHoc ?? DBNull.Value);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var table = new DataTable();
+        table.Load(reader);
+        return table;
+    }
+
+    private async Task<DataTable> ReadBaoCaoIKeyRowsOutsideCourseAsync(
+        SqlConnection connection,
+        IReadOnlyList<string> keyColumns,
+        string courseColumn,
+        string maKhoaHoc,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        if (keyColumns.Count == 0)
+        {
+            return CreateEmptyTable(keyColumns);
+        }
+
+        var columnList = string.Join(", ", keyColumns.Select(Quote));
+        await using var command = new SqlCommand(
+            $"SELECT {columnList} FROM dbo.BaoCaoI WHERE {Quote(courseColumn)} IS NULL OR {Quote(courseColumn)} <> @MaKhoaHoc;",
+            connection,
+            transaction);
+        command.CommandTimeout = _options.TimeoutSeconds;
+        command.Parameters.Add(new SqlParameter("@MaKhoaHoc", maKhoaHoc));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var table = new DataTable();
+        table.Load(reader);
+        return table;
+    }
+
     private async Task<HashSet<string>> ReadMaDkKeysAsync(
         SqlConnection connection,
         string tableName,
@@ -1475,6 +1839,32 @@ ORDER BY c.column_id;",
         return columns;
     }
 
+    private async Task<IReadOnlyList<string>> ReadPrimaryKeyColumnsAsync(
+        SqlConnection connection,
+        string tableName,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        await using var command = new SqlCommand(
+            @"
+SELECT c.name
+FROM sys.key_constraints kc
+JOIN sys.index_columns ic
+    ON ic.object_id = kc.parent_object_id
+   AND ic.index_id = kc.unique_index_id
+JOIN sys.columns c
+    ON c.object_id = ic.object_id
+   AND c.column_id = ic.column_id
+WHERE kc.parent_object_id = OBJECT_ID(N'dbo.' + @TableName)
+  AND kc.type = N'PK'
+ORDER BY ic.key_ordinal;",
+            connection,
+            transaction);
+        command.CommandTimeout = _options.TimeoutSeconds;
+        command.Parameters.AddWithValue("@TableName", tableName);
+        return await ReadStringListAsync(command, cancellationToken);
+    }
+
     private async Task<DataTable> ReadRowsByMaDksAsync(
         SqlConnection connection,
         string tableName,
@@ -1603,6 +1993,26 @@ ORDER BY c.column_id;",
         return result;
     }
 
+    private static long GetMaxStringLength(DataTable rows, string columnName)
+    {
+        long maxLength = 0;
+        foreach (DataRow row in rows.Rows)
+        {
+            if (row[columnName] == DBNull.Value)
+            {
+                continue;
+            }
+
+            var value = Convert.ToString(row[columnName]) ?? string.Empty;
+            if (value.Length > maxLength)
+            {
+                maxLength = value.Length;
+            }
+        }
+
+        return maxLength;
+    }
+
     private static DataTable CreateEmptyTable(IReadOnlyList<string> columns)
     {
         var table = new DataTable();
@@ -1667,6 +2077,13 @@ ORDER BY c.column_id;",
     private sealed record TableUpdatePlan(
         IReadOnlyList<string> Columns,
         MotoSyncUpdateDetectionResult Detection);
+
+    private sealed record BaoCaoIInsertShape(
+        string CourseColumn,
+        IReadOnlyList<string> KeyColumns,
+        IReadOnlyList<string> CommonColumns,
+        IReadOnlyList<ColumnMetadata> SourceColumns,
+        IReadOnlyList<ColumnMetadata> TargetColumns);
 
     private sealed record ColumnMetadata(
         string Name,

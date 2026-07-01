@@ -151,6 +151,7 @@ public sealed class MotoSyncServiceTests
         var repo = new FakeMotoSyncRepository(CleanPlan())
         {
             AfterPlan = CleanPlan(
+                plannedInsertBaoCaoI: 0,
                 plannedInsertNguoiLx: 0,
                 plannedInsertHoSo: 0,
                 plannedInsertGiayTo: 0,
@@ -163,6 +164,27 @@ public sealed class MotoSyncServiceTests
         Assert.True(result.Executed);
         Assert.True(result.HasRemainingWork);
         Assert.Equal(1L, result.AfterPlan!.PlannedUpdate);
+        Assert.Equal(2, repo.PlanCalls);
+    }
+
+    [Fact]
+    public async Task Execute_success_sets_has_remaining_work_when_after_plan_still_has_baocao_i_insert()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan())
+        {
+            AfterPlan = CleanPlan(
+                plannedInsertBaoCaoI: 1,
+                plannedInsertNguoiLx: 0,
+                plannedInsertHoSo: 0,
+                plannedInsertGiayTo: 0),
+        };
+        var service = new MotoSyncService(repo);
+
+        var result = await service.ExecuteTestAsync(ConfirmedRequest());
+
+        Assert.True(result.Executed);
+        Assert.True(result.HasRemainingWork);
+        Assert.Equal(1L, result.AfterPlan!.PlannedInsertBaoCaoI);
         Assert.Equal(2, repo.PlanCalls);
     }
 
@@ -223,6 +245,7 @@ public sealed class MotoSyncServiceTests
                 Direction = MotoSyncDirection.V1_TO_V2,
                 SourceProfileCode = "CSDT_V1",
                 TargetProfileCode = "CSDT_V2",
+                InsertedBaoCaoI = 1,
                 InsertedNguoiLX = 2,
                 InsertedNguoiLXHoSo = 2,
                 InsertedGiayTo = 3,
@@ -237,6 +260,7 @@ public sealed class MotoSyncServiceTests
         Assert.True(result.Executed);
         Assert.Equal("ThanhCong", result.Status);
         Assert.NotNull(result.Summary);
+        Assert.Equal(1, result.Summary.InsertedBaoCaoI);
         Assert.Equal(2, result.Summary.InsertedNguoiLX);
         Assert.Equal(2, result.Summary.InsertedNguoiLXHoSo);
         Assert.Equal(3, result.Summary.InsertedGiayTo);
@@ -329,6 +353,7 @@ public sealed class MotoSyncServiceTests
         long shortFullPairs = 0,
         long missingKhoaHoc = 0,
         long plannedInsertKhoaHoc = 0,
+        long plannedInsertBaoCaoI = 0,
         bool missingKhoaHocIsBlocker = true,
         long plannedInsertNguoiLx = 2,
         long plannedInsertHoSo = 2,
@@ -361,6 +386,7 @@ public sealed class MotoSyncServiceTests
             ShortFullMaDkPairs = shortFullPairs,
             MissingKhoaHocDependencies = missingKhoaHoc,
             PlannedInsertKhoaHoc = plannedInsertKhoaHoc,
+            PlannedInsertBaoCaoI = plannedInsertBaoCaoI,
             PlannedInsertNguoiLX = plannedInsertNguoiLx,
             PlannedInsertNguoiLXHoSo = missingKhoaHoc > 0 ? 1 : plannedInsertHoSo,
             PlannedInsertGiayTo = plannedInsertGiayTo,
@@ -386,6 +412,7 @@ public sealed class MotoSyncServiceTests
                 SourceProfileCode = plan.SourceProfileCode,
                 TargetProfileCode = plan.TargetProfileCode,
                 InsertedKhoaHoc = plan.PlannedInsertKhoaHoc,
+                InsertedBaoCaoI = plan.PlannedInsertBaoCaoI,
                 InsertedNguoiLX = plan.PlannedInsertNguoiLX,
                 InsertedNguoiLXHoSo = plan.PlannedInsertNguoiLXHoSo,
                 InsertedGiayTo = plan.PlannedInsertGiayTo,
@@ -397,6 +424,7 @@ public sealed class MotoSyncServiceTests
                 SourceProfileCode = plan.SourceProfileCode,
                 TargetProfileCode = plan.TargetProfileCode,
                 InsertedKhoaHoc = plan.PlannedInsertKhoaHoc,
+                InsertedBaoCaoI = plan.PlannedInsertBaoCaoI,
                 InsertedNguoiLX = plan.PlannedInsertNguoiLX,
                 InsertedNguoiLXHoSo = plan.PlannedInsertNguoiLXHoSo,
                 InsertedGiayTo = plan.PlannedInsertGiayTo,
@@ -436,6 +464,7 @@ public sealed class MotoSyncServiceTests
                 ShortFullMaDkPairs = plan.ShortFullMaDkPairs,
                 MissingKhoaHocDependencies = plan.MissingKhoaHocDependencies,
                 PlannedInsertKhoaHoc = plan.PlannedInsertKhoaHoc,
+                PlannedInsertBaoCaoI = plan.PlannedInsertBaoCaoI,
                 PlannedInsertNguoiLX = plan.PlannedInsertNguoiLX,
                 PlannedInsertNguoiLXHoSo = plan.PlannedInsertNguoiLXHoSo,
                 PlannedInsertGiayTo = plan.PlannedInsertGiayTo,

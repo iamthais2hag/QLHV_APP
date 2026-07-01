@@ -77,6 +77,24 @@ public sealed class MotoSyncStringWidthGuardTests
     }
 
     [Fact]
+    public void BaoCaoI_planned_insert_uses_same_data_aware_width_guard()
+    {
+        var result = MotoSyncStringWidthGuard.Evaluate(
+            "BaoCaoI",
+            "SoBaoCao",
+            "nvarchar",
+            60,
+            "nvarchar",
+            40,
+            actualMaxLength: 21,
+            operationName: "planned BaoCaoI insert");
+
+        Assert.True(result.IsBlocker);
+        Assert.Contains("dbo.BaoCaoI.SoBaoCao", result.Message);
+        Assert.Contains("planned BaoCaoI insert", result.Message);
+    }
+
+    [Fact]
     public void Converts_nvarchar_max_length_bytes_to_character_limit()
     {
         Assert.Equal(30, MotoSyncStringWidthGuard.ToCharacterLimit("nvarchar", 60));

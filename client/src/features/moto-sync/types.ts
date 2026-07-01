@@ -47,6 +47,7 @@ export interface MotoSyncPlan {
   shortFullMaDkPairs: number;
   missingKhoaHocDependencies: number;
   plannedInsertKhoaHoc: number;
+  plannedInsertBaoCaoI: number;
   plannedInsertNguoiLX: number;
   plannedInsertNguoiLXHoSo: number;
   plannedInsertGiayTo: number;
@@ -67,6 +68,7 @@ export interface MotoSyncExecuteSummary {
   targetProfileCode: string;
   maKhoaHoc: string | null;
   insertedKhoaHoc: number;
+  insertedBaoCaoI: number;
   insertedNguoiLX: number;
   insertedNguoiLXHoSo: number;
   insertedGiayTo: number;
