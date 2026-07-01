@@ -95,6 +95,24 @@ public sealed class MotoSyncStringWidthGuardTests
     }
 
     [Fact]
+    public void NguoiLX_GPLX_planned_insert_uses_same_data_aware_width_guard()
+    {
+        var result = MotoSyncStringWidthGuard.Evaluate(
+            "NguoiLX_GPLX",
+            "SoGPLX",
+            "nvarchar",
+            60,
+            "nvarchar",
+            40,
+            actualMaxLength: 21,
+            operationName: "planned NguoiLX_GPLX insert");
+
+        Assert.True(result.IsBlocker);
+        Assert.Contains("dbo.NguoiLX_GPLX.SoGPLX", result.Message);
+        Assert.Contains("planned NguoiLX_GPLX insert", result.Message);
+    }
+
+    [Fact]
     public void Converts_nvarchar_max_length_bytes_to_character_limit()
     {
         Assert.Equal(30, MotoSyncStringWidthGuard.ToCharacterLimit("nvarchar", 60));

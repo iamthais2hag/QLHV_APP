@@ -80,6 +80,8 @@ public sealed class MotoSyncPlanDto
 
     public long PlannedInsertNguoiLX { get; init; }
 
+    public long PlannedInsertNguoiLXGPLX { get; init; }
+
     public long PlannedInsertNguoiLXHoSo { get; init; }
 
     public long PlannedInsertGiayTo { get; init; }
@@ -146,6 +148,8 @@ public sealed class MotoSyncExecuteSummaryDto
     public long InsertedBaoCaoI { get; init; }
 
     public long InsertedNguoiLX { get; init; }
+
+    public long InsertedNguoiLXGPLX { get; init; }
 
     public long InsertedNguoiLXHoSo { get; init; }
 

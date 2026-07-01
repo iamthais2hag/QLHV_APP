@@ -49,6 +49,7 @@ export interface MotoSyncPlan {
   plannedInsertKhoaHoc: number;
   plannedInsertBaoCaoI: number;
   plannedInsertNguoiLX: number;
+  plannedInsertNguoiLXGPLX: number;
   plannedInsertNguoiLXHoSo: number;
   plannedInsertGiayTo: number;
   plannedUpdate: number;
@@ -70,6 +71,7 @@ export interface MotoSyncExecuteSummary {
   insertedKhoaHoc: number;
   insertedBaoCaoI: number;
   insertedNguoiLX: number;
+  insertedNguoiLXGPLX: number;
   insertedNguoiLXHoSo: number;
   insertedGiayTo: number;
   updatedNguoiLX: number;

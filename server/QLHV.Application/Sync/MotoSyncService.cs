@@ -199,6 +199,7 @@ public sealed class MotoSyncService : IMotoSyncService
         => afterPlan.PlannedInsertKhoaHoc > 0 ||
            afterPlan.PlannedInsertBaoCaoI > 0 ||
            afterPlan.PlannedInsertNguoiLX > 0 ||
+           afterPlan.PlannedInsertNguoiLXGPLX > 0 ||
            afterPlan.PlannedInsertNguoiLXHoSo > 0 ||
            afterPlan.PlannedInsertGiayTo > 0 ||
            afterPlan.PlannedUpdate > 0 ||

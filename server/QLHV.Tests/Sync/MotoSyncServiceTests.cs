@@ -189,6 +189,27 @@ public sealed class MotoSyncServiceTests
     }
 
     [Fact]
+    public async Task Execute_success_sets_has_remaining_work_when_after_plan_still_has_nguoilx_gplx_insert()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan())
+        {
+            AfterPlan = CleanPlan(
+                plannedInsertNguoiLXGplx: 1,
+                plannedInsertNguoiLx: 0,
+                plannedInsertHoSo: 0,
+                plannedInsertGiayTo: 0),
+        };
+        var service = new MotoSyncService(repo);
+
+        var result = await service.ExecuteTestAsync(ConfirmedRequest());
+
+        Assert.True(result.Executed);
+        Assert.True(result.HasRemainingWork);
+        Assert.Equal(1L, result.AfterPlan!.PlannedInsertNguoiLXGPLX);
+        Assert.Equal(2, repo.PlanCalls);
+    }
+
+    [Fact]
     public async Task Execute_success_sets_has_remaining_work_when_after_plan_has_blockers()
     {
         var repo = new FakeMotoSyncRepository(CleanPlan())
@@ -247,6 +268,7 @@ public sealed class MotoSyncServiceTests
                 TargetProfileCode = "CSDT_V2",
                 InsertedBaoCaoI = 1,
                 InsertedNguoiLX = 2,
+                InsertedNguoiLXGPLX = 1,
                 InsertedNguoiLXHoSo = 2,
                 InsertedGiayTo = 3,
                 UpdatedRows = 0,
@@ -262,6 +284,7 @@ public sealed class MotoSyncServiceTests
         Assert.NotNull(result.Summary);
         Assert.Equal(1, result.Summary.InsertedBaoCaoI);
         Assert.Equal(2, result.Summary.InsertedNguoiLX);
+        Assert.Equal(1, result.Summary.InsertedNguoiLXGPLX);
         Assert.Equal(2, result.Summary.InsertedNguoiLXHoSo);
         Assert.Equal(3, result.Summary.InsertedGiayTo);
         Assert.Equal(0, result.Summary.UpdatedRows);
@@ -354,6 +377,7 @@ public sealed class MotoSyncServiceTests
         long missingKhoaHoc = 0,
         long plannedInsertKhoaHoc = 0,
         long plannedInsertBaoCaoI = 0,
+        long plannedInsertNguoiLXGplx = 0,
         bool missingKhoaHocIsBlocker = true,
         long plannedInsertNguoiLx = 2,
         long plannedInsertHoSo = 2,
@@ -388,6 +412,7 @@ public sealed class MotoSyncServiceTests
             PlannedInsertKhoaHoc = plannedInsertKhoaHoc,
             PlannedInsertBaoCaoI = plannedInsertBaoCaoI,
             PlannedInsertNguoiLX = plannedInsertNguoiLx,
+            PlannedInsertNguoiLXGPLX = plannedInsertNguoiLXGplx,
             PlannedInsertNguoiLXHoSo = missingKhoaHoc > 0 ? 1 : plannedInsertHoSo,
             PlannedInsertGiayTo = plannedInsertGiayTo,
             PlannedUpdate = plannedUpdateNguoiLx + plannedUpdateHoSo,
@@ -414,6 +439,7 @@ public sealed class MotoSyncServiceTests
                 InsertedKhoaHoc = plan.PlannedInsertKhoaHoc,
                 InsertedBaoCaoI = plan.PlannedInsertBaoCaoI,
                 InsertedNguoiLX = plan.PlannedInsertNguoiLX,
+                InsertedNguoiLXGPLX = plan.PlannedInsertNguoiLXGPLX,
                 InsertedNguoiLXHoSo = plan.PlannedInsertNguoiLXHoSo,
                 InsertedGiayTo = plan.PlannedInsertGiayTo,
             };
@@ -426,6 +452,7 @@ public sealed class MotoSyncServiceTests
                 InsertedKhoaHoc = plan.PlannedInsertKhoaHoc,
                 InsertedBaoCaoI = plan.PlannedInsertBaoCaoI,
                 InsertedNguoiLX = plan.PlannedInsertNguoiLX,
+                InsertedNguoiLXGPLX = plan.PlannedInsertNguoiLXGPLX,
                 InsertedNguoiLXHoSo = plan.PlannedInsertNguoiLXHoSo,
                 InsertedGiayTo = plan.PlannedInsertGiayTo,
                 UpdatedNguoiLX = plan.PlannedUpdateNguoiLX,
@@ -466,6 +493,7 @@ public sealed class MotoSyncServiceTests
                 PlannedInsertKhoaHoc = plan.PlannedInsertKhoaHoc,
                 PlannedInsertBaoCaoI = plan.PlannedInsertBaoCaoI,
                 PlannedInsertNguoiLX = plan.PlannedInsertNguoiLX,
+                PlannedInsertNguoiLXGPLX = plan.PlannedInsertNguoiLXGPLX,
                 PlannedInsertNguoiLXHoSo = plan.PlannedInsertNguoiLXHoSo,
                 PlannedInsertGiayTo = plan.PlannedInsertGiayTo,
                 PlannedUpdate = plan.PlannedUpdate,
