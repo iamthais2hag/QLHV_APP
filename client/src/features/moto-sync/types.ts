@@ -46,6 +46,7 @@ export interface MotoSyncPlan {
   duplicateBusinessKeyGroups: number;
   shortFullMaDkPairs: number;
   missingKhoaHocDependencies: number;
+  plannedInsertKhoaHoc: number;
   plannedInsertNguoiLX: number;
   plannedInsertNguoiLXHoSo: number;
   plannedInsertGiayTo: number;
@@ -65,6 +66,7 @@ export interface MotoSyncExecuteSummary {
   sourceProfileCode: string;
   targetProfileCode: string;
   maKhoaHoc: string | null;
+  insertedKhoaHoc: number;
   insertedNguoiLX: number;
   insertedNguoiLXHoSo: number;
   insertedGiayTo: number;

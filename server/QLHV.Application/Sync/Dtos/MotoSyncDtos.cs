@@ -74,6 +74,8 @@ public sealed class MotoSyncPlanDto
 
     public long MissingKhoaHocDependencies { get; init; }
 
+    public long PlannedInsertKhoaHoc { get; init; }
+
     public long PlannedInsertNguoiLX { get; init; }
 
     public long PlannedInsertNguoiLXHoSo { get; init; }
@@ -130,6 +132,8 @@ public sealed class MotoSyncExecuteSummaryDto
     public string TargetProfileCode { get; init; } = string.Empty;
 
     public string? MaKhoaHoc { get; init; }
+
+    public long InsertedKhoaHoc { get; init; }
 
     public long InsertedNguoiLX { get; init; }
 
