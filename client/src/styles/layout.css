@@ -1879,6 +1879,12 @@
   color: #7c4a03;
 }
 
+.moto-sync-message-list--success {
+  border: 1px solid #b8e0c3;
+  background: #f0fbf4;
+  color: #116329;
+}
+
 .moto-sync-samples {
   margin-top: 16px;
 }
@@ -1954,6 +1960,21 @@
 
 .moto-sync-result-grid span {
   color: var(--tc-text-muted);
+}
+
+.moto-sync-history {
+  min-width: 0;
+}
+
+.table--moto-sync-history {
+  min-width: 1040px;
+  font-size: 13px;
+}
+
+.table--moto-sync-history th,
+.table--moto-sync-history td {
+  vertical-align: middle;
+  white-space: nowrap;
 }
 
 @media (max-width: 1100px) {

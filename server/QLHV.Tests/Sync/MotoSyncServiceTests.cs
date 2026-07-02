@@ -231,6 +231,102 @@ public sealed class MotoSyncServiceTests
     }
 
     [Fact]
+    public async Task Successful_insert_only_writes_run_history()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan(plannedInsertKhoaHoc: 1));
+        var history = new FakeMotoSyncRunHistoryRepository();
+        var service = new MotoSyncService(repo, history);
+
+        var result = await service.ExecuteTestAsync(ConfirmedRequest());
+
+        Assert.True(result.Executed);
+        var entry = Assert.Single(history.Entries);
+        Assert.Equal(MotoSyncMode.INSERT_ONLY, entry.SyncMode);
+        Assert.True(entry.ConfirmTextMatched);
+        Assert.True(entry.Executed);
+        Assert.Equal("ThanhCong", entry.Status);
+        Assert.Equal(1, entry.InsertedKhoaHoc);
+        Assert.NotNull(entry.BeforePlanJson);
+        Assert.NotNull(entry.AfterPlanJson);
+    }
+
+    [Fact]
+    public async Task Successful_insert_and_update_writes_run_history()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan(plannedUpdateNguoiLx: 1, plannedUpdateHoSo: 1));
+        var history = new FakeMotoSyncRunHistoryRepository();
+        var service = new MotoSyncService(repo, history);
+
+        var request = ConfirmedRequest();
+        request.SyncMode = MotoSyncMode.INSERT_AND_UPDATE;
+        request.ConfirmText = MotoSyncService.UpdateConfirmationText;
+        var result = await service.ExecuteTestAsync(request);
+
+        Assert.True(result.Executed);
+        var entry = Assert.Single(history.Entries);
+        Assert.Equal(MotoSyncMode.INSERT_AND_UPDATE, entry.SyncMode);
+        Assert.True(entry.ConfirmTextMatched);
+        Assert.Equal(2, entry.UpdatedRows);
+        Assert.NotNull(entry.BeforePlanJson);
+        Assert.NotNull(entry.AfterPlanJson);
+    }
+
+    [Fact]
+    public async Task Refused_blocker_writes_run_history_without_after_plan()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan(shortFullPairs: 1));
+        var history = new FakeMotoSyncRunHistoryRepository();
+        var service = new MotoSyncService(repo, history);
+
+        var result = await service.ExecuteTestAsync(ConfirmedRequest());
+
+        Assert.False(result.Executed);
+        var entry = Assert.Single(history.Entries);
+        Assert.Equal("BiChan", entry.Status);
+        Assert.True(entry.ConfirmTextMatched);
+        Assert.NotNull(entry.BeforePlanJson);
+        Assert.Null(entry.AfterPlanJson);
+    }
+
+    [Fact]
+    public async Task Wrong_confirm_writes_run_history_when_possible()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan());
+        var history = new FakeMotoSyncRunHistoryRepository();
+        var service = new MotoSyncService(repo, history);
+
+        var result = await service.ExecuteTestAsync(new MotoSyncTestExecuteRequest
+        {
+            Direction = MotoSyncDirection.V1_TO_V2,
+            SourceProfileCode = "CSDT_V1",
+            TargetProfileCode = "CSDT_V2",
+            ConfirmText = "WRONG",
+        });
+
+        Assert.False(result.Executed);
+        var entry = Assert.Single(history.Entries);
+        Assert.Equal("BiChan", entry.Status);
+        Assert.False(entry.ConfirmTextMatched);
+        Assert.NotNull(entry.BeforePlanJson);
+        Assert.Null(entry.AfterPlanJson);
+        Assert.Equal(0, repo.PlanCalls);
+    }
+
+    [Fact]
+    public async Task Logging_failure_does_not_hide_successful_sync_result()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan());
+        var history = new FakeMotoSyncRunHistoryRepository { ThrowOnCreate = true };
+        var service = new MotoSyncService(repo, history);
+
+        var result = await service.ExecuteTestAsync(ConfirmedRequest());
+
+        Assert.True(result.Executed);
+        Assert.Equal("ThanhCong", result.Status);
+        Assert.Contains("khong ghi duoc lich su", result.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Clean_insert_only_plan_is_executable()
     {
         var repo = new FakeMotoSyncRepository(CleanPlan());
@@ -522,5 +618,34 @@ public sealed class MotoSyncServiceTests
             UpdateExecuteCalls++;
             return Task.FromResult(UpdateSummary);
         }
+    }
+
+    private sealed class FakeMotoSyncRunHistoryRepository : IMotoSyncRunHistoryRepository
+    {
+        public List<MotoSyncRunHistoryCreateDto> Entries { get; } = new();
+        public bool ThrowOnCreate { get; init; }
+
+        public Task<long> CreateAsync(
+            MotoSyncRunHistoryCreateDto entry,
+            CancellationToken cancellationToken = default)
+        {
+            if (ThrowOnCreate)
+            {
+                throw new InvalidOperationException("history failed");
+            }
+
+            Entries.Add(entry);
+            return Task.FromResult((long)Entries.Count);
+        }
+
+        public Task<IReadOnlyList<MotoSyncRunHistoryListItemDto>> SearchAsync(
+            MotoSyncRunHistoryQuery query,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<MotoSyncRunHistoryListItemDto>>(Array.Empty<MotoSyncRunHistoryListItemDto>());
+
+        public Task<MotoSyncRunHistoryDetailDto?> GetByIdAsync(
+            long id,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<MotoSyncRunHistoryDetailDto?>(null);
     }
 }

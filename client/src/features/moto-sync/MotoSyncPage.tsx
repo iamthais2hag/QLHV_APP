@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react';
-import { executeMotoSyncTest, getMotoSyncPlan } from './api';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { executeMotoSyncTest, getMotoSyncPlan, getMotoSyncRunHistory } from './api';
 import type {
   MotoSyncDirection,
   MotoSyncExecuteResult,
   MotoSyncMode,
   MotoSyncPlan,
+  MotoSyncRunHistoryListItem,
 } from './types';
 
 const INSERT_ONLY_CONFIRM = 'SYNC TEST DATABASE';
@@ -20,6 +21,26 @@ export default function MotoSyncPage() {
   const [loadingPlan, setLoadingPlan] = useState(false);
   const [executing, setExecuting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [history, setHistory] = useState<MotoSyncRunHistoryListItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+
+  const loadHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const rows = await getMotoSyncRunHistory(50);
+      setHistory(rows);
+    } catch (err) {
+      setHistoryError(err instanceof Error ? err.message : 'Không thể tải lịch sử đồng bộ Moto TEST.');
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadHistory();
+  }, [loadHistory]);
 
   const profiles = useMemo(() => getProfiles(direction), [direction]);
   const requiredConfirm = syncMode === 'INSERT_AND_UPDATE' ? INSERT_AND_UPDATE_CONFIRM : INSERT_ONLY_CONFIRM;
@@ -106,6 +127,7 @@ export default function MotoSyncPage() {
       if (nextResult.plan) {
         setPlan(nextResult.plan);
       }
+      await loadHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Không thể thực thi đồng bộ Moto TEST.');
     } finally {
@@ -237,6 +259,17 @@ export default function MotoSyncPage() {
 
           <ExecuteResult result={result} />
         </aside>
+      </div>
+
+      <div className="panel moto-sync-history">
+        <div className="moto-sync-section-title">
+          <strong>Lịch sử đồng bộ</strong>
+          <button type="button" className="btn btn--ghost" onClick={() => void loadHistory()} disabled={historyLoading}>
+            {historyLoading ? 'Đang tải...' : 'Tải lại lịch sử'}
+          </button>
+        </div>
+        {historyError && <div className="moto-sync-message-list moto-sync-message-list--error">{historyError}</div>}
+        <RunHistoryTable rows={history} loading={historyLoading} />
       </div>
     </section>
   );
@@ -400,6 +433,65 @@ function ExecuteResult({ result }: { result: MotoSyncExecuteResult | null }) {
   );
 }
 
+function RunHistoryTable({ rows, loading }: { rows: MotoSyncRunHistoryListItem[]; loading: boolean }) {
+  if (loading && rows.length === 0) {
+    return <div className="state">Đang tải lịch sử đồng bộ...</div>;
+  }
+
+  if (rows.length === 0) {
+    return <div className="state">Chưa có lịch sử đồng bộ Moto TEST.</div>;
+  }
+
+  return (
+    <div className="table-wrap">
+      <table className="table table--moto-sync-history">
+        <thead>
+          <tr>
+            <th>Thời gian</th>
+            <th>Mã khóa</th>
+            <th>Hướng</th>
+            <th>Chế độ</th>
+            <th>Trạng thái</th>
+            <th>Đã thêm</th>
+            <th>Đã cập nhật</th>
+            <th>Đã xóa</th>
+            <th>Thời gian chạy</th>
+            <th>Còn việc</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.id}>
+              <td>{formatDateTime(row.createdAt)}</td>
+              <td>{row.maKhoaHoc ?? '-'}</td>
+              <td>{row.direction}</td>
+              <td>{row.syncMode}</td>
+              <td>{row.status}</td>
+              <td>{formatNumber(row.insertedTotal)}</td>
+              <td>{formatNumber(row.updatedRows)}</td>
+              <td>{formatNumber(row.deletedRows)}</td>
+              <td>{formatNumber(row.durationMs)} ms</td>
+              <td>{row.hasRemainingWork ? 'Có' : 'Không'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function formatNumber(value: number): string {
   return new Intl.NumberFormat('vi-VN').format(value);
+}
+
+function formatDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat('vi-VN', {
+    dateStyle: 'short',
+    timeStyle: 'medium',
+  }).format(date);
 }

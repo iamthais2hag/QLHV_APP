@@ -93,3 +93,21 @@ export interface MotoSyncExecuteResult {
   afterPlan: MotoSyncPlan | null;
   hasRemainingWork: boolean;
 }
+
+export interface MotoSyncRunHistoryListItem {
+  id: number;
+  createdAt: string;
+  direction: MotoSyncDirection;
+  syncMode: MotoSyncMode;
+  sourceProfileCode: string;
+  targetProfileCode: string;
+  maKhoaHoc: string | null;
+  executed: boolean;
+  status: string;
+  message: string;
+  insertedTotal: number;
+  updatedRows: number;
+  deletedRows: number;
+  durationMs: number;
+  hasRemainingWork: boolean;
+}

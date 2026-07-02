@@ -169,3 +169,129 @@ public sealed class MotoSyncExecuteSummaryDto
 
     public long DurationMs { get; init; }
 }
+
+public sealed class MotoSyncRunHistoryQuery
+{
+    public string? MaKhoaHoc { get; set; }
+
+    public MotoSyncDirection? Direction { get; set; }
+
+    public MotoSyncMode? SyncMode { get; set; }
+
+    public int Take { get; set; } = 50;
+}
+
+public class MotoSyncRunHistoryListItemDto
+{
+    public long Id { get; init; }
+
+    public DateTime CreatedAt { get; init; }
+
+    public MotoSyncDirection Direction { get; init; }
+
+    public MotoSyncMode SyncMode { get; init; }
+
+    public string SourceProfileCode { get; init; } = string.Empty;
+
+    public string TargetProfileCode { get; init; } = string.Empty;
+
+    public string? MaKhoaHoc { get; init; }
+
+    public bool Executed { get; init; }
+
+    public string Status { get; init; } = string.Empty;
+
+    public string Message { get; init; } = string.Empty;
+
+    public long InsertedTotal { get; init; }
+
+    public long UpdatedRows { get; init; }
+
+    public long DeletedRows { get; init; }
+
+    public long DurationMs { get; init; }
+
+    public bool HasRemainingWork { get; init; }
+}
+
+public sealed class MotoSyncRunHistoryDetailDto : MotoSyncRunHistoryListItemDto
+{
+    public bool ConfirmTextMatched { get; init; }
+
+    public long InsertedKhoaHoc { get; init; }
+
+    public long InsertedBaoCaoI { get; init; }
+
+    public long InsertedNguoiLX { get; init; }
+
+    public long InsertedNguoiLXGPLX { get; init; }
+
+    public long InsertedNguoiLXHoSo { get; init; }
+
+    public long InsertedGiayTo { get; init; }
+
+    public long UpdatedNguoiLX { get; init; }
+
+    public long UpdatedNguoiLXHoSo { get; init; }
+
+    public DateTime StartedAt { get; init; }
+
+    public DateTime EndedAt { get; init; }
+
+    public string? BeforePlanJson { get; init; }
+
+    public string? AfterPlanJson { get; init; }
+}
+
+public sealed class MotoSyncRunHistoryCreateDto
+{
+    public MotoSyncDirection Direction { get; init; }
+
+    public MotoSyncMode SyncMode { get; init; }
+
+    public string SourceProfileCode { get; init; } = string.Empty;
+
+    public string TargetProfileCode { get; init; } = string.Empty;
+
+    public string? MaKhoaHoc { get; init; }
+
+    public bool ConfirmTextMatched { get; init; }
+
+    public bool Executed { get; init; }
+
+    public string Status { get; init; } = string.Empty;
+
+    public string Message { get; init; } = string.Empty;
+
+    public long InsertedKhoaHoc { get; init; }
+
+    public long InsertedBaoCaoI { get; init; }
+
+    public long InsertedNguoiLX { get; init; }
+
+    public long InsertedNguoiLXGPLX { get; init; }
+
+    public long InsertedNguoiLXHoSo { get; init; }
+
+    public long InsertedGiayTo { get; init; }
+
+    public long UpdatedNguoiLX { get; init; }
+
+    public long UpdatedNguoiLXHoSo { get; init; }
+
+    public long UpdatedRows { get; init; }
+
+    public long DeletedRows { get; init; }
+
+    public long DurationMs { get; init; }
+
+    public DateTime StartedAt { get; init; }
+
+    public DateTime EndedAt { get; init; }
+
+    public bool HasRemainingWork { get; init; }
+
+    public string? BeforePlanJson { get; init; }
+
+    public string? AfterPlanJson { get; init; }
+}
