@@ -11,4 +11,12 @@ public interface IMotoSyncService
     Task<MotoSyncExecuteResultDto> ExecuteTestAsync(
         MotoSyncTestExecuteRequest request,
         CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<MotoSyncRunHistoryListItemDto>> GetRunHistoryAsync(
+        MotoSyncRunHistoryQuery query,
+        CancellationToken cancellationToken = default);
+
+    Task<MotoSyncRunHistoryDetailDto?> GetRunHistoryDetailAsync(
+        long id,
+        CancellationToken cancellationToken = default);
 }

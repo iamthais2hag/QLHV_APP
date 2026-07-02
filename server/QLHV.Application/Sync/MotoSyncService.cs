@@ -1,4 +1,6 @@
 using QLHV.Application.Sync.Dtos;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace QLHV.Application.Sync;
 
@@ -10,11 +12,21 @@ public sealed class MotoSyncService : IMotoSyncService
     private const string CsdtV1 = "CSDT_V1";
     private const string CsdtV2 = "CSDT_V2";
 
-    private readonly IMotoSyncRepository _repository;
+    private static readonly JsonSerializerOptions HistoryJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Converters = { new JsonStringEnumConverter() },
+    };
 
-    public MotoSyncService(IMotoSyncRepository repository)
+    private readonly IMotoSyncRepository _repository;
+    private readonly IMotoSyncRunHistoryRepository? _runHistory;
+
+    public MotoSyncService(
+        IMotoSyncRepository repository,
+        IMotoSyncRunHistoryRepository? runHistory = null)
     {
         _repository = repository;
+        _runHistory = runHistory;
     }
 
     public async Task<MotoSyncPlanDto> GetPlanAsync(
@@ -53,6 +65,7 @@ public sealed class MotoSyncService : IMotoSyncService
         MotoSyncTestExecuteRequest request,
         CancellationToken cancellationToken = default)
     {
+        var attemptStartedAt = DateTime.UtcNow;
         request ??= new MotoSyncTestExecuteRequest();
         var syncMode = request.SyncMode;
         var planRequest = Normalize(new MotoSyncPlanRequest
@@ -66,25 +79,50 @@ public sealed class MotoSyncService : IMotoSyncService
 
         if (syncMode is not MotoSyncMode.INSERT_ONLY and not MotoSyncMode.INSERT_AND_UPDATE)
         {
-            return BlockedExecute(
+            var result = BlockedExecute(
                 "SyncMode khong hop le. Chi ho tro INSERT_ONLY hoac INSERT_AND_UPDATE.",
                 BlockedPlan(planRequest, new[] { "SyncMode khong hop le." }));
+            return await WriteRunHistoryAndReturnAsync(
+                planRequest,
+                syncMode,
+                confirmTextMatched: false,
+                result,
+                attemptStartedAt,
+                DateTime.UtcNow,
+                cancellationToken);
         }
 
         var requiredConfirmText = syncMode == MotoSyncMode.INSERT_AND_UPDATE
             ? UpdateConfirmationText
             : ConfirmationText;
-        if (!string.Equals(request.ConfirmText, requiredConfirmText, StringComparison.Ordinal))
+        var confirmTextMatched = string.Equals(request.ConfirmText, requiredConfirmText, StringComparison.Ordinal);
+        if (!confirmTextMatched)
         {
-            return BlockedExecute(
+            var result = BlockedExecute(
                 $"Thieu chuoi xac nhan chinh xac: {requiredConfirmText}.",
                 BlockedPlan(planRequest, new[] { "ConfirmText khong khop." }));
+            return await WriteRunHistoryAndReturnAsync(
+                planRequest,
+                syncMode,
+                confirmTextMatched,
+                result,
+                attemptStartedAt,
+                DateTime.UtcNow,
+                cancellationToken);
         }
 
         var beforePlan = await GetPlanAsync(planRequest, cancellationToken);
         if (!beforePlan.Executable || beforePlan.Blockers.Count > 0 || beforePlan.Errors.Count > 0)
         {
-            return BlockedExecute("Sync test bi chan vi plan co blocker.", beforePlan);
+            var result = BlockedExecute("Sync test bi chan vi plan co blocker.", beforePlan);
+            return await WriteRunHistoryAndReturnAsync(
+                planRequest,
+                syncMode,
+                confirmTextMatched,
+                result,
+                attemptStartedAt,
+                DateTime.UtcNow,
+                cancellationToken);
         }
 
         try
@@ -93,7 +131,7 @@ public sealed class MotoSyncService : IMotoSyncService
                 ? await _repository.ExecuteInsertAndUpdateAsync(planRequest, cancellationToken)
                 : await _repository.ExecuteInsertOnlyAsync(planRequest, cancellationToken);
             var afterPlan = await GetPlanAsync(planRequest, cancellationToken);
-            return new MotoSyncExecuteResultDto
+            var result = new MotoSyncExecuteResultDto
             {
                 Executed = true,
                 Status = "ThanhCong",
@@ -106,10 +144,19 @@ public sealed class MotoSyncService : IMotoSyncService
                 AfterPlan = afterPlan,
                 HasRemainingWork = HasRemainingWork(afterPlan),
             };
+
+            return await WriteRunHistoryAndReturnAsync(
+                planRequest,
+                syncMode,
+                confirmTextMatched,
+                result,
+                attemptStartedAt,
+                DateTime.UtcNow,
+                cancellationToken);
         }
         catch (Exception ex)
         {
-            return new MotoSyncExecuteResultDto
+            var result = new MotoSyncExecuteResultDto
             {
                 Executed = true,
                 Status = "Loi",
@@ -117,8 +164,30 @@ public sealed class MotoSyncService : IMotoSyncService
                 Plan = beforePlan,
                 BeforePlan = beforePlan,
             };
+            return await WriteRunHistoryAndReturnAsync(
+                planRequest,
+                syncMode,
+                confirmTextMatched,
+                result,
+                attemptStartedAt,
+                DateTime.UtcNow,
+                cancellationToken);
         }
     }
+
+    public Task<IReadOnlyList<MotoSyncRunHistoryListItemDto>> GetRunHistoryAsync(
+        MotoSyncRunHistoryQuery query,
+        CancellationToken cancellationToken = default)
+        => _runHistory is null
+            ? Task.FromResult<IReadOnlyList<MotoSyncRunHistoryListItemDto>>(Array.Empty<MotoSyncRunHistoryListItemDto>())
+            : _runHistory.SearchAsync(query ?? new MotoSyncRunHistoryQuery(), cancellationToken);
+
+    public Task<MotoSyncRunHistoryDetailDto?> GetRunHistoryDetailAsync(
+        long id,
+        CancellationToken cancellationToken = default)
+        => _runHistory is null
+            ? Task.FromResult<MotoSyncRunHistoryDetailDto?>(null)
+            : _runHistory.GetByIdAsync(id, cancellationToken);
 
     private static MotoSyncPlanRequest Normalize(MotoSyncPlanRequest request)
     {
@@ -193,6 +262,107 @@ public sealed class MotoSyncService : IMotoSyncService
         Message = message,
         Plan = plan,
         BeforePlan = plan,
+    };
+
+    private async Task<MotoSyncExecuteResultDto> WriteRunHistoryAndReturnAsync(
+        MotoSyncPlanRequest request,
+        MotoSyncMode syncMode,
+        bool confirmTextMatched,
+        MotoSyncExecuteResultDto result,
+        DateTime attemptStartedAt,
+        DateTime attemptEndedAt,
+        CancellationToken cancellationToken)
+    {
+        if (_runHistory is null)
+        {
+            return result;
+        }
+
+        try
+        {
+            await _runHistory.CreateAsync(
+                BuildRunHistoryEntry(
+                    request,
+                    syncMode,
+                    confirmTextMatched,
+                    result,
+                    attemptStartedAt,
+                    attemptEndedAt),
+                cancellationToken);
+            return result;
+        }
+        catch
+        {
+            return CopyWithMessage(
+                result,
+                $"{result.Message} Canh bao: khong ghi duoc lich su dong bo Moto TEST.");
+        }
+    }
+
+    private static MotoSyncRunHistoryCreateDto BuildRunHistoryEntry(
+        MotoSyncPlanRequest request,
+        MotoSyncMode syncMode,
+        bool confirmTextMatched,
+        MotoSyncExecuteResultDto result,
+        DateTime attemptStartedAt,
+        DateTime attemptEndedAt)
+    {
+        var summary = result.Summary;
+        var startedAt = summary is null || summary.StartedAt == default
+            ? attemptStartedAt
+            : summary.StartedAt;
+        var endedAt = summary is null || summary.EndedAt == default
+            ? attemptEndedAt
+            : summary.EndedAt;
+        var durationMs = summary is null
+            ? (long)(endedAt - startedAt).TotalMilliseconds
+            : summary.DurationMs;
+
+        return new MotoSyncRunHistoryCreateDto
+        {
+            Direction = request.Direction,
+            SyncMode = syncMode,
+            SourceProfileCode = request.SourceProfileCode,
+            TargetProfileCode = request.TargetProfileCode,
+            MaKhoaHoc = request.MaKhoaHoc,
+            ConfirmTextMatched = confirmTextMatched,
+            Executed = result.Executed,
+            Status = result.Status,
+            Message = result.Message,
+            InsertedKhoaHoc = summary?.InsertedKhoaHoc ?? 0,
+            InsertedBaoCaoI = summary?.InsertedBaoCaoI ?? 0,
+            InsertedNguoiLX = summary?.InsertedNguoiLX ?? 0,
+            InsertedNguoiLXGPLX = summary?.InsertedNguoiLXGPLX ?? 0,
+            InsertedNguoiLXHoSo = summary?.InsertedNguoiLXHoSo ?? 0,
+            InsertedGiayTo = summary?.InsertedGiayTo ?? 0,
+            UpdatedNguoiLX = summary?.UpdatedNguoiLX ?? 0,
+            UpdatedNguoiLXHoSo = summary?.UpdatedNguoiLXHoSo ?? 0,
+            UpdatedRows = summary?.UpdatedRows ?? 0,
+            DeletedRows = summary?.DeletedRows ?? 0,
+            DurationMs = Math.Max(0, durationMs),
+            StartedAt = startedAt,
+            EndedAt = endedAt,
+            HasRemainingWork = result.HasRemainingWork,
+            BeforePlanJson = SerializePlan(result.BeforePlan ?? result.Plan),
+            AfterPlanJson = result.AfterPlan is null ? null : SerializePlan(result.AfterPlan),
+        };
+    }
+
+    private static string? SerializePlan(MotoSyncPlanDto? plan)
+        => plan is null ? null : JsonSerializer.Serialize(plan, HistoryJsonOptions);
+
+    private static MotoSyncExecuteResultDto CopyWithMessage(
+        MotoSyncExecuteResultDto result,
+        string message) => new()
+    {
+        Executed = result.Executed,
+        Status = result.Status,
+        Message = message,
+        Summary = result.Summary,
+        Plan = result.Plan,
+        BeforePlan = result.BeforePlan,
+        AfterPlan = result.AfterPlan,
+        HasRemainingWork = result.HasRemainingWork,
     };
 
     private static bool HasRemainingWork(MotoSyncPlanDto afterPlan)

@@ -131,6 +131,38 @@ public sealed class DongBoV2Controller : ControllerBase
     }
 
     /// <summary>
+    /// Latest Moto V1/V2 TEST sync run history rows stored in QLHV_APP.
+    /// </summary>
+    [HttpGet("moto/sync-runs")]
+    [ProducesResponseType(typeof(IReadOnlyList<MotoSyncRunHistoryListItemDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<MotoSyncRunHistoryListItemDto>>> MotoSyncRuns(
+        [FromQuery] MotoSyncRunHistoryQuery query,
+        CancellationToken cancellationToken)
+    {
+        var result = await _motoSyncService.GetRunHistoryAsync(query, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Full Moto V1/V2 TEST sync run history detail, including stored plan JSON.
+    /// </summary>
+    [HttpGet("moto/sync-runs/{id:long}")]
+    [ProducesResponseType(typeof(MotoSyncRunHistoryDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<MotoSyncRunHistoryDetailDto>> MotoSyncRunDetail(
+        long id,
+        CancellationToken cancellationToken)
+    {
+        var result = await _motoSyncService.GetRunHistoryDetailAsync(id, cancellationToken);
+        if (result is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(result);
+    }
+
+    /// <summary>
     /// Guarded manual execution for HocVien sync.
     /// Defaults reject unless server config enables writes and the request includes explicit confirmation.
     /// </summary>
