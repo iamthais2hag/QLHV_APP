@@ -111,3 +111,19 @@ export interface MotoSyncRunHistoryListItem {
   durationMs: number;
   hasRemainingWork: boolean;
 }
+
+export interface MotoSyncRunHistoryDetail extends MotoSyncRunHistoryListItem {
+  confirmTextMatched: boolean;
+  insertedKhoaHoc: number;
+  insertedBaoCaoI: number;
+  insertedNguoiLX: number;
+  insertedNguoiLXGPLX: number;
+  insertedNguoiLXHoSo: number;
+  insertedGiayTo: number;
+  updatedNguoiLX: number;
+  updatedNguoiLXHoSo: number;
+  startedAt: string;
+  endedAt: string;
+  beforePlanJson: string | null;
+  afterPlanJson: string | null;
+}

@@ -3,6 +3,7 @@ import type {
   MotoSyncExecuteResult,
   MotoSyncPlan,
   MotoSyncPlanRequest,
+  MotoSyncRunHistoryDetail,
   MotoSyncRunHistoryListItem,
 } from './types';
 
@@ -80,6 +81,23 @@ export async function getMotoSyncRunHistory(
   }
 
   return (await response.json()) as MotoSyncRunHistoryListItem[];
+}
+
+export async function getMotoSyncRunHistoryDetail(
+  id: number,
+  signal?: AbortSignal,
+): Promise<MotoSyncRunHistoryDetail> {
+  const response = await fetch(`${API_BASE}/dong-bo-v2/moto/sync-runs/${id}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(await getSafeErrorMessage(response, 'Không thể tải chi tiết lịch sử đồng bộ Moto TEST.'));
+  }
+
+  return (await response.json()) as MotoSyncRunHistoryDetail;
 }
 
 async function getSafeErrorMessage(response: Response, fallback: string): Promise<string> {
