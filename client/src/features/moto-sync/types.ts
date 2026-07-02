@@ -10,6 +10,29 @@ export interface MotoSyncPlanRequest {
   allowDirtyData?: boolean;
 }
 
+export interface MotoSyncKhoaHocOptionsQuery {
+  direction: MotoSyncDirection;
+  sourceProfileCode: string;
+  targetProfileCode: string;
+  search?: string;
+  take?: number;
+}
+
+export interface MotoSyncKhoaHocOption {
+  maKhoaHoc: string;
+  tenKhoaHoc: string | null;
+  hangDaoTao: string | null;
+  hangGPLX: string | null;
+  ngayKhaiGiang: string | null;
+  sourceHocVienCount: number;
+  targetHocVienCount: number;
+  sourceKhoaHocExists: boolean;
+  targetKhoaHocExists: boolean;
+  hasTargetKhoaHoc: boolean;
+  sourceOnlyHocVienCount: number;
+  targetOnlyHocVienCount: number;
+}
+
 export interface MotoSyncExecuteRequest {
   direction: MotoSyncDirection;
   sourceProfileCode: string;

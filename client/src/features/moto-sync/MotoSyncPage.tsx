@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { executeMotoSyncTest, getMotoSyncPlan, getMotoSyncRunHistory, getMotoSyncRunHistoryDetail } from './api';
+import {
+  executeMotoSyncTest,
+  getMotoSyncKhoaHocOptions,
+  getMotoSyncPlan,
+  getMotoSyncRunHistory,
+  getMotoSyncRunHistoryDetail,
+} from './api';
 import type {
   MotoSyncDirection,
   MotoSyncExecuteResult,
+  MotoSyncKhoaHocOption,
   MotoSyncMode,
   MotoSyncPlan,
   MotoSyncRunHistoryDetail,
@@ -39,6 +46,10 @@ export default function MotoSyncPage() {
   const [loadingPlan, setLoadingPlan] = useState(false);
   const [executing, setExecuting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [courseSearch, setCourseSearch] = useState('');
+  const [courseOptions, setCourseOptions] = useState<MotoSyncKhoaHocOption[]>([]);
+  const [courseOptionsLoading, setCourseOptionsLoading] = useState(false);
+  const [courseOptionsError, setCourseOptionsError] = useState<string | null>(null);
   const [history, setHistory] = useState<MotoSyncRunHistoryListItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -89,8 +100,14 @@ export default function MotoSyncPage() {
     setConfirmText('');
   }
 
+  function clearCourseOptions() {
+    setCourseOptions([]);
+    setCourseOptionsError(null);
+  }
+
   function handleDirectionChange(value: MotoSyncDirection) {
     setDirection(value);
+    clearCourseOptions();
     invalidatePlan();
   }
 
@@ -101,6 +118,32 @@ export default function MotoSyncPage() {
 
   function handleSyncModeChange(value: MotoSyncMode) {
     setSyncMode(value);
+    invalidatePlan();
+  }
+
+  async function handleLoadCourseOptions() {
+    setCourseOptionsLoading(true);
+    setCourseOptionsError(null);
+    try {
+      const options = await getMotoSyncKhoaHocOptions({
+        direction,
+        sourceProfileCode: profiles.sourceProfileCode,
+        targetProfileCode: profiles.targetProfileCode,
+        search: courseSearch,
+        take: 50,
+      });
+      setCourseOptions(options);
+    } catch (err) {
+      setCourseOptions([]);
+      setCourseOptionsError(err instanceof Error ? err.message : 'Không thể tải danh sách khóa học Moto TEST.');
+    } finally {
+      setCourseOptionsLoading(false);
+    }
+  }
+
+  function handleChooseCourse(option: MotoSyncKhoaHocOption) {
+    setMaKhoaHoc(option.maKhoaHoc);
+    setCourseSearch(option.maKhoaHoc);
     invalidatePlan();
   }
 
@@ -243,6 +286,35 @@ export default function MotoSyncPage() {
           </div>
         </div>
 
+        <div className="moto-sync-course-picker">
+          <div className="moto-sync-section-title">
+            <strong>Tìm khóa học</strong>
+            <span>Chỉ đọc từ nguồn theo hướng đang chọn, không tự thực thi đồng bộ.</span>
+          </div>
+          <div className="toolbar__row">
+            <label className="field moto-sync-course-search">
+              <span className="field__label">Từ khóa</span>
+              <input
+                className="field__input"
+                value={courseSearch}
+                onChange={(event) => setCourseSearch(event.target.value)}
+                placeholder="Nhập mã khóa hoặc tên khóa"
+              />
+            </label>
+            <div className="toolbar__actions">
+              <button type="button" className="btn btn--ghost" onClick={() => void handleLoadCourseOptions()} disabled={courseOptionsLoading || executing}>
+                {courseOptionsLoading ? 'Đang tải khóa...' : 'Tải danh sách khóa'}
+              </button>
+            </div>
+          </div>
+          {courseOptionsError && <div className="moto-sync-message-list moto-sync-message-list--error">{courseOptionsError}</div>}
+          <CourseOptionsTable
+            options={courseOptions}
+            loading={courseOptionsLoading}
+            onChoose={handleChooseCourse}
+          />
+        </div>
+
         <div className="moto-sync-safety-note">
           <strong>Lưu ý an toàn:</strong> INSERT_AND_UPDATE có thể ghi đè giá trị hiện có trong NguoiLX và NguoiLX_HoSo.
           Không có xóa dữ liệu. Giấy tờ vẫn insert-only trong giai đoạn này.
@@ -335,6 +407,65 @@ function SectionTitle({ title, hint }: { title: string; hint?: string }) {
     <div className="moto-sync-section-title">
       <strong>{title}</strong>
       {hint && <span>{hint}</span>}
+    </div>
+  );
+}
+
+function CourseOptionsTable({
+  options,
+  loading,
+  onChoose,
+}: {
+  options: MotoSyncKhoaHocOption[];
+  loading: boolean;
+  onChoose: (option: MotoSyncKhoaHocOption) => void;
+}) {
+  if (loading && options.length === 0) {
+    return <div className="state">Đang tải danh sách khóa học...</div>;
+  }
+
+  if (options.length === 0) {
+    return <div className="moto-sync-muted">Chưa tải danh sách khóa hoặc không có khóa phù hợp.</div>;
+  }
+
+  return (
+    <div className="table-wrap moto-sync-course-options">
+      <table className="table table--moto-sync-course-options">
+        <thead>
+          <tr>
+            <th>Mã khóa</th>
+            <th>Tên khóa</th>
+            <th>Hạng</th>
+            <th>Ngày khai giảng</th>
+            <th>Nguồn</th>
+            <th>Đích</th>
+            <th>Khóa đích</th>
+            <th>Chênh lệch</th>
+            <th>Chọn</th>
+          </tr>
+        </thead>
+        <tbody>
+          {options.map((option) => (
+            <tr key={option.maKhoaHoc}>
+              <td>{option.maKhoaHoc}</td>
+              <td>{option.tenKhoaHoc ?? '-'}</td>
+              <td>{option.hangDaoTao ?? option.hangGPLX ?? '-'}</td>
+              <td>{formatOptionalDate(option.ngayKhaiGiang)}</td>
+              <td>{formatNumber(option.sourceHocVienCount)}</td>
+              <td>{formatNumber(option.targetHocVienCount)}</td>
+              <td>{option.hasTargetKhoaHoc ? 'Có' : 'Không'}</td>
+              <td>
+                +{formatNumber(option.sourceOnlyHocVienCount)} / -{formatNumber(option.targetOnlyHocVienCount)}
+              </td>
+              <td>
+                <button type="button" className="btn btn--ghost btn--sm" onClick={() => onChoose(option)}>
+                  Chọn
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -729,5 +860,20 @@ function formatDateTime(value: string): string {
   return new Intl.DateTimeFormat('vi-VN', {
     dateStyle: 'short',
     timeStyle: 'medium',
+  }).format(date);
+}
+
+function formatOptionalDate(value: string | null): string {
+  if (!value) {
+    return '-';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat('vi-VN', {
+    dateStyle: 'short',
   }).format(date);
 }

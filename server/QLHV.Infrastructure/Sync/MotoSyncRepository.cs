@@ -279,6 +279,99 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
         };
     }
 
+    public async Task<IReadOnlyList<MotoSyncKhoaHocOptionDto>> GetKhoaHocOptionsAsync(
+        MotoSyncKhoaHocOptionsQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        await using var source = new SqlConnection(await ResolveConnectionStringAsync(
+            query.SourceProfileCode,
+            cancellationToken));
+        await using var target = new SqlConnection(await ResolveConnectionStringAsync(
+            query.TargetProfileCode,
+            cancellationToken));
+
+        await source.OpenAsync(cancellationToken);
+        await target.OpenAsync(cancellationToken);
+
+        var sourceKhoaHocColumns = await ReadColumnsAsync(source, "KhoaHoc", null, cancellationToken);
+        var targetKhoaHocColumns = await ReadColumnsAsync(target, "KhoaHoc", null, cancellationToken);
+        var sourceHoSoColumns = await ReadColumnsAsync(source, "NguoiLX_HoSo", null, cancellationToken);
+        var targetHoSoColumns = await ReadColumnsAsync(target, "NguoiLX_HoSo", null, cancellationToken);
+
+        var sourceKhoaHocKey = MotoSyncKhoaHocOptionPlanner.DetectKhoaHocCourseKeyColumn(
+            sourceKhoaHocColumns.Select(column => column.Name));
+        var targetKhoaHocKey = MotoSyncKhoaHocOptionPlanner.DetectKhoaHocCourseKeyColumn(
+            targetKhoaHocColumns.Select(column => column.Name));
+        var sourceHoSoKey = MotoSyncKhoaHocOptionPlanner.DetectHoSoCourseKeyColumn(
+            sourceHoSoColumns.Select(column => column.Name));
+        var targetHoSoKey = MotoSyncKhoaHocOptionPlanner.DetectHoSoCourseKeyColumn(
+            targetHoSoColumns.Select(column => column.Name));
+
+        if (sourceKhoaHocKey is null)
+        {
+            throw new InvalidOperationException("Source dbo.KhoaHoc khong co cot khoa hoc MaKH/MaKhoaHoc duoc ho tro.");
+        }
+
+        if (targetKhoaHocKey is null)
+        {
+            throw new InvalidOperationException("Target dbo.KhoaHoc khong co cot khoa hoc MaKH/MaKhoaHoc duoc ho tro.");
+        }
+
+        if (sourceHoSoKey is null)
+        {
+            throw new InvalidOperationException("Source dbo.NguoiLX_HoSo khong co cot khoa hoc MaKhoaHoc/MaKH duoc ho tro.");
+        }
+
+        if (targetHoSoKey is null)
+        {
+            throw new InvalidOperationException("Target dbo.NguoiLX_HoSo khong co cot khoa hoc MaKhoaHoc/MaKH duoc ho tro.");
+        }
+
+        var sourceDisplayColumns = MotoSyncKhoaHocOptionPlanner.DetectDisplayColumns(
+            sourceKhoaHocColumns.Select(column => column.Name));
+        var sourceRows = await ReadKhoaHocOptionRowsAsync(
+            source,
+            new MotoSyncKhoaHocQueryShape(sourceKhoaHocKey, sourceDisplayColumns),
+            query.Search,
+            query.Take,
+            null,
+            cancellationToken);
+        if (sourceRows.Count == 0)
+        {
+            return Array.Empty<MotoSyncKhoaHocOptionDto>();
+        }
+
+        var courseKeys = sourceRows.Select(row => row.MaKhoaHoc).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var sourceHoSo = await ReadHoSoMaDksByKhoaHocAsync(source, sourceHoSoKey, courseKeys, null, cancellationToken);
+        var targetHoSo = await ReadHoSoMaDksByKhoaHocAsync(target, targetHoSoKey, courseKeys, null, cancellationToken);
+        var targetKhoaHoc = await ReadKhoaHocExistsByKeysAsync(target, targetKhoaHocKey, courseKeys, null, cancellationToken);
+
+        return sourceRows.Select(row =>
+        {
+            sourceHoSo.TryGetValue(row.MaKhoaHoc, out var sourceMaDks);
+            targetHoSo.TryGetValue(row.MaKhoaHoc, out var targetMaDks);
+            sourceMaDks ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            targetMaDks ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var hasTargetKhoaHoc = targetKhoaHoc.Contains(row.MaKhoaHoc);
+
+            return new MotoSyncKhoaHocOptionDto
+            {
+                MaKhoaHoc = row.MaKhoaHoc,
+                TenKhoaHoc = row.TenKhoaHoc,
+                HangDaoTao = row.HangDaoTao,
+                HangGPLX = row.HangGPLX,
+                NgayKhaiGiang = row.NgayKhaiGiang,
+                SourceHocVienCount = sourceMaDks.Count,
+                TargetHocVienCount = targetMaDks.Count,
+                SourceKhoaHocExists = true,
+                TargetKhoaHocExists = hasTargetKhoaHoc,
+                HasTargetKhoaHoc = hasTargetKhoaHoc,
+                SourceOnlyHocVienCount = sourceMaDks.Count(maDk => !targetMaDks.Contains(maDk)),
+                TargetOnlyHocVienCount = targetMaDks.Count(maDk => !sourceMaDks.Contains(maDk)),
+            };
+        }).ToArray();
+    }
+
     public async Task<MotoSyncExecuteSummaryDto> ExecuteInsertOnlyAsync(
         MotoSyncPlanRequest request,
         CancellationToken cancellationToken = default)
@@ -1869,6 +1962,131 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
         return values.ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
+    private async Task<IReadOnlyList<KhoaHocOptionRow>> ReadKhoaHocOptionRowsAsync(
+        SqlConnection connection,
+        MotoSyncKhoaHocQueryShape shape,
+        string? search,
+        int take,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        var normalizedTake = MotoSyncKhoaHocOptionPlanner.NormalizeTake(take);
+        var hasSearch = !string.IsNullOrWhiteSpace(search);
+        await using var command = new SqlCommand(
+            MotoSyncKhoaHocOptionPlanner.BuildOptionsSql(shape, hasSearch),
+            connection,
+            transaction);
+        command.CommandTimeout = _options.TimeoutSeconds;
+        command.Parameters.Add(new SqlParameter("@Take", normalizedTake));
+        if (hasSearch)
+        {
+            command.Parameters.Add(new SqlParameter("@SearchLike", $"%{search!.Trim()}%"));
+        }
+
+        var rows = new List<KhoaHocOptionRow>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var maKhoaHoc = Convert.ToString(reader["MaKhoaHoc"])?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(maKhoaHoc))
+            {
+                continue;
+            }
+
+            var hangValue = Convert.ToString(reader["HangValue"]);
+            var isHangGplx = MotoSyncKhoaHocOptionPlanner.IsHangGplxColumn(shape.DisplayColumns.HangColumn);
+            rows.Add(new KhoaHocOptionRow(
+                maKhoaHoc,
+                NullIfWhiteSpace(Convert.ToString(reader["TenKhoaHoc"])),
+                isHangGplx ? null : NullIfWhiteSpace(hangValue),
+                isHangGplx ? NullIfWhiteSpace(hangValue) : null,
+                NullIfWhiteSpace(Convert.ToString(reader["NgayKhaiGiang"]))));
+        }
+
+        return rows;
+    }
+
+    private async Task<HashSet<string>> ReadKhoaHocExistsByKeysAsync(
+        SqlConnection connection,
+        string courseKeyColumn,
+        IReadOnlyCollection<string> maKhoaHocValues,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var chunk in maKhoaHocValues.Chunk(900))
+        {
+            if (chunk.Length == 0)
+            {
+                continue;
+            }
+
+            var parameters = CreateInParameters(chunk, "@p");
+            await using var command = new SqlCommand(
+                $"SELECT {Quote(courseKeyColumn)} FROM dbo.KhoaHoc WHERE {Quote(courseKeyColumn)} IN ({string.Join(", ", parameters.Select(p => p.ParameterName))});",
+                connection,
+                transaction);
+            command.CommandTimeout = _options.TimeoutSeconds;
+            command.Parameters.AddRange(parameters.ToArray());
+            foreach (var value in await ReadStringListAsync(command, cancellationToken))
+            {
+                result.Add(value);
+            }
+        }
+
+        return result;
+    }
+
+    private async Task<IReadOnlyDictionary<string, HashSet<string>>> ReadHoSoMaDksByKhoaHocAsync(
+        SqlConnection connection,
+        string courseKeyColumn,
+        IReadOnlyCollection<string> maKhoaHocValues,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        var result = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var chunk in maKhoaHocValues.Chunk(900))
+        {
+            if (chunk.Length == 0)
+            {
+                continue;
+            }
+
+            var parameters = CreateInParameters(chunk, "@p");
+            await using var command = new SqlCommand(
+                $@"
+SELECT {Quote(courseKeyColumn)} AS MaKhoaHoc, MaDK
+FROM dbo.NguoiLX_HoSo
+WHERE {Quote(courseKeyColumn)} IN ({string.Join(", ", parameters.Select(p => p.ParameterName))})
+  AND MaDK IS NOT NULL
+  AND LTRIM(RTRIM(MaDK)) <> N'';",
+                connection,
+                transaction);
+            command.CommandTimeout = _options.TimeoutSeconds;
+            command.Parameters.AddRange(parameters.ToArray());
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var maKhoaHoc = Convert.ToString(reader["MaKhoaHoc"])?.Trim() ?? string.Empty;
+                var maDk = Convert.ToString(reader["MaDK"])?.Trim() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(maKhoaHoc) || string.IsNullOrWhiteSpace(maDk))
+                {
+                    continue;
+                }
+
+                if (!result.TryGetValue(maKhoaHoc, out var values))
+                {
+                    values = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    result[maKhoaHoc] = values;
+                }
+
+                values.Add(maDk);
+            }
+        }
+
+        return result;
+    }
+
     private async Task<DataTable> ReadKhoaHocRowAsync(
         SqlConnection connection,
         IReadOnlyList<string> columns,
@@ -2489,6 +2707,9 @@ ORDER BY ic.key_ordinal;",
 
     private static string Quote(string identifier) => $"[{identifier.Replace("]", "]]", StringComparison.Ordinal)}]";
 
+    private static string? NullIfWhiteSpace(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
     private static bool IsStringType(string dataType)
         => dataType is "varchar" or "nvarchar" or "char" or "nchar";
 
@@ -2531,6 +2752,13 @@ ORDER BY ic.key_ordinal;",
         IReadOnlyList<string> CommonColumns,
         IReadOnlyList<ColumnMetadata> SourceColumns,
         IReadOnlyList<ColumnMetadata> TargetColumns);
+
+    private sealed record KhoaHocOptionRow(
+        string MaKhoaHoc,
+        string? TenKhoaHoc,
+        string? HangDaoTao,
+        string? HangGPLX,
+        string? NgayKhaiGiang);
 
     private sealed record ColumnMetadata(
         string Name,

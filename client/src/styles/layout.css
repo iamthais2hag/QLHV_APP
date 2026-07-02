@@ -1780,6 +1780,34 @@
   padding: 16px;
 }
 
+.moto-sync-course-picker {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid #e5edf5;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.moto-sync-course-search {
+  min-width: min(360px, 100%);
+  flex: 1 1 320px;
+}
+
+.moto-sync-course-options {
+  max-height: 320px;
+}
+
+.table--moto-sync-course-options {
+  min-width: 980px;
+}
+
+.table--moto-sync-course-options th,
+.table--moto-sync-course-options td {
+  white-space: nowrap;
+}
+
 .moto-sync-safety-note {
   margin-top: 12px;
   padding: 10px 12px;

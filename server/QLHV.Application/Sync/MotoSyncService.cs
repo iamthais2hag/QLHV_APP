@@ -61,6 +61,26 @@ public sealed class MotoSyncService : IMotoSyncService
         }
     }
 
+    public Task<IReadOnlyList<MotoSyncKhoaHocOptionDto>> GetKhoaHocOptionsAsync(
+        MotoSyncKhoaHocOptionsQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        query ??= new MotoSyncKhoaHocOptionsQuery();
+        var normalized = Normalize(query);
+        var validationBlockers = ValidateTestProfiles(new MotoSyncPlanRequest
+        {
+            Direction = normalized.Direction,
+            SourceProfileCode = normalized.SourceProfileCode,
+            TargetProfileCode = normalized.TargetProfileCode,
+        });
+        if (validationBlockers.Count > 0)
+        {
+            throw new ArgumentException(string.Join(" ", validationBlockers));
+        }
+
+        return _repository.GetKhoaHocOptionsAsync(normalized, cancellationToken);
+    }
+
     public async Task<MotoSyncExecuteResultDto> ExecuteTestAsync(
         MotoSyncTestExecuteRequest request,
         CancellationToken cancellationToken = default)
@@ -201,6 +221,21 @@ public sealed class MotoSyncService : IMotoSyncService
             TargetProfileCode = target,
             MaKhoaHoc = string.IsNullOrWhiteSpace(request.MaKhoaHoc) ? null : request.MaKhoaHoc.Trim(),
             AllowDirtyData = request.AllowDirtyData,
+        };
+    }
+
+    private static MotoSyncKhoaHocOptionsQuery Normalize(MotoSyncKhoaHocOptionsQuery query)
+    {
+        var source = NormalizeProfile(query.SourceProfileCode);
+        var target = NormalizeProfile(query.TargetProfileCode);
+
+        return new MotoSyncKhoaHocOptionsQuery
+        {
+            Direction = query.Direction,
+            SourceProfileCode = source,
+            TargetProfileCode = target,
+            Search = string.IsNullOrWhiteSpace(query.Search) ? null : query.Search.Trim(),
+            Take = Math.Clamp(query.Take <= 0 ? 50 : query.Take, 1, 200),
         };
     }
 

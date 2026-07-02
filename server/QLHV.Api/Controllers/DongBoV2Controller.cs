@@ -112,6 +112,27 @@ public sealed class DongBoV2Controller : ControllerBase
     }
 
     /// <summary>
+    /// Read-only Moto V1/V2 TEST course options from source KhoaHoc and learner counts.
+    /// </summary>
+    [HttpGet("moto/khoa-hoc-options")]
+    [ProducesResponseType(typeof(IReadOnlyList<MotoSyncKhoaHocOptionDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<IReadOnlyList<MotoSyncKhoaHocOptionDto>>> MotoKhoaHocOptions(
+        [FromQuery] MotoSyncKhoaHocOptionsQuery query,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _motoSyncService.GetKhoaHocOptionsAsync(query, cancellationToken);
+            return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Guarded TEST-only Moto V1/V2 sync. Defaults to insert-only; update mode requires separate confirmation.
     /// </summary>
     [HttpPost("moto/sync-test")]
