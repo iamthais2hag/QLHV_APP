@@ -1,15 +1,33 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { executeMotoSyncTest, getMotoSyncPlan, getMotoSyncRunHistory } from './api';
+import { executeMotoSyncTest, getMotoSyncPlan, getMotoSyncRunHistory, getMotoSyncRunHistoryDetail } from './api';
 import type {
   MotoSyncDirection,
   MotoSyncExecuteResult,
   MotoSyncMode,
   MotoSyncPlan,
+  MotoSyncRunHistoryDetail,
   MotoSyncRunHistoryListItem,
 } from './types';
 
 const INSERT_ONLY_CONFIRM = 'SYNC TEST DATABASE';
 const INSERT_AND_UPDATE_CONFIRM = 'SYNC TEST DATABASE UPDATE';
+
+interface PlanJsonSummary {
+  sourceRows: number | null;
+  targetRows: number | null;
+  sourceOnly: number | null;
+  targetOnly: number | null;
+  plannedInsertKhoaHoc: number | null;
+  plannedInsertBaoCaoI: number | null;
+  plannedInsertNguoiLX: number | null;
+  plannedInsertNguoiLXGPLX: number | null;
+  plannedInsertNguoiLXHoSo: number | null;
+  plannedInsertGiayTo: number | null;
+  plannedUpdate: number | null;
+  blockersCount: number;
+  warningsCount: number;
+  errorsCount: number;
+}
 
 export default function MotoSyncPage() {
   const [direction, setDirection] = useState<MotoSyncDirection>('V1_TO_V2');
@@ -24,6 +42,9 @@ export default function MotoSyncPage() {
   const [history, setHistory] = useState<MotoSyncRunHistoryListItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyDetail, setHistoryDetail] = useState<MotoSyncRunHistoryDetail | null>(null);
+  const [historyDetailLoading, setHistoryDetailLoading] = useState(false);
+  const [historyDetailError, setHistoryDetailError] = useState<string | null>(null);
 
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
@@ -133,6 +154,26 @@ export default function MotoSyncPage() {
     } finally {
       setExecuting(false);
     }
+  }
+
+  async function handleOpenHistoryDetail(id: number) {
+    setHistoryDetailLoading(true);
+    setHistoryDetailError(null);
+    try {
+      const detail = await getMotoSyncRunHistoryDetail(id);
+      setHistoryDetail(detail);
+    } catch (err) {
+      setHistoryDetail(null);
+      setHistoryDetailError(err instanceof Error ? err.message : 'Không thể tải chi tiết lịch sử đồng bộ Moto TEST.');
+    } finally {
+      setHistoryDetailLoading(false);
+    }
+  }
+
+  function handleCloseHistoryDetail() {
+    setHistoryDetail(null);
+    setHistoryDetailError(null);
+    setHistoryDetailLoading(false);
   }
 
   return (
@@ -269,7 +310,15 @@ export default function MotoSyncPage() {
           </button>
         </div>
         {historyError && <div className="moto-sync-message-list moto-sync-message-list--error">{historyError}</div>}
-        <RunHistoryTable rows={history} loading={historyLoading} />
+        <RunHistoryTable rows={history} loading={historyLoading} onOpenDetail={(id) => void handleOpenHistoryDetail(id)} />
+        {(historyDetailLoading || historyDetailError || historyDetail) && (
+          <RunHistoryDetailPanel
+            detail={historyDetail}
+            loading={historyDetailLoading}
+            error={historyDetailError}
+            onClose={handleCloseHistoryDetail}
+          />
+        )}
       </div>
     </section>
   );
@@ -433,7 +482,15 @@ function ExecuteResult({ result }: { result: MotoSyncExecuteResult | null }) {
   );
 }
 
-function RunHistoryTable({ rows, loading }: { rows: MotoSyncRunHistoryListItem[]; loading: boolean }) {
+function RunHistoryTable({
+  rows,
+  loading,
+  onOpenDetail,
+}: {
+  rows: MotoSyncRunHistoryListItem[];
+  loading: boolean;
+  onOpenDetail: (id: number) => void;
+}) {
   if (loading && rows.length === 0) {
     return <div className="state">Đang tải lịch sử đồng bộ...</div>;
   }
@@ -457,6 +514,7 @@ function RunHistoryTable({ rows, loading }: { rows: MotoSyncRunHistoryListItem[]
             <th>Đã xóa</th>
             <th>Thời gian chạy</th>
             <th>Còn việc</th>
+            <th>Chi tiết</th>
           </tr>
         </thead>
         <tbody>
@@ -472,12 +530,190 @@ function RunHistoryTable({ rows, loading }: { rows: MotoSyncRunHistoryListItem[]
               <td>{formatNumber(row.deletedRows)}</td>
               <td>{formatNumber(row.durationMs)} ms</td>
               <td>{row.hasRemainingWork ? 'Có' : 'Không'}</td>
+              <td>
+                <button type="button" className="btn btn--ghost btn--sm" onClick={() => onOpenDetail(row.id)}>
+                  Chi tiết
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
   );
+}
+
+function RunHistoryDetailPanel({
+  detail,
+  loading,
+  error,
+  onClose,
+}: {
+  detail: MotoSyncRunHistoryDetail | null;
+  loading: boolean;
+  error: string | null;
+  onClose: () => void;
+}) {
+  return (
+    <div className="moto-sync-history-detail">
+      <div className="moto-sync-section-title">
+        <strong>Chi tiết lần đồng bộ</strong>
+        <button type="button" className="btn btn--ghost btn--sm" onClick={onClose}>
+          Đóng
+        </button>
+      </div>
+
+      {loading && <div className="state">Đang tải chi tiết lịch sử...</div>}
+      {error && <div className="moto-sync-message-list moto-sync-message-list--error">{error}</div>}
+      {!loading && !error && detail && (
+        <>
+          <RunHistoryDetailFields detail={detail} />
+          <div className="moto-sync-plan-detail-grid">
+            <PlanJsonBlock title="Kế hoạch trước thực thi" json={detail.beforePlanJson} emptyText="Không có kế hoạch trước thực thi." />
+            <PlanJsonBlock title="Kế hoạch sau thực thi" json={detail.afterPlanJson} emptyText="Không có kế hoạch sau thực thi." />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function RunHistoryDetailFields({ detail }: { detail: MotoSyncRunHistoryDetail }) {
+  const rows: Array<[string, string | number | boolean | null]> = [
+    ['ID', detail.id],
+    ['Ngày tạo', formatDateTime(detail.createdAt)],
+    ['Bắt đầu', formatDateTime(detail.startedAt)],
+    ['Kết thúc', formatDateTime(detail.endedAt)],
+    ['Thời gian chạy', `${formatNumber(detail.durationMs)} ms`],
+    ['Hướng', detail.direction],
+    ['Chế độ', detail.syncMode],
+    ['Nguồn', detail.sourceProfileCode],
+    ['Đích', detail.targetProfileCode],
+    ['Mã khóa học', detail.maKhoaHoc],
+    ['Confirm text khớp', detail.confirmTextMatched ? 'Có' : 'Không'],
+    ['Đã thực thi', detail.executed ? 'Có' : 'Không'],
+    ['Trạng thái', detail.status],
+    ['Thông báo', detail.message],
+    ['Thêm KhoaHoc', detail.insertedKhoaHoc],
+    ['Thêm BaoCaoI', detail.insertedBaoCaoI],
+    ['Thêm NguoiLX', detail.insertedNguoiLX],
+    ['Thêm NguoiLX_GPLX', detail.insertedNguoiLXGPLX],
+    ['Thêm NguoiLX_HoSo', detail.insertedNguoiLXHoSo],
+    ['Thêm giấy tờ', detail.insertedGiayTo],
+    ['Tổng đã thêm', detail.insertedTotal],
+    ['Cập nhật NguoiLX', detail.updatedNguoiLX],
+    ['Cập nhật NguoiLX_HoSo', detail.updatedNguoiLXHoSo],
+    ['Tổng cập nhật', detail.updatedRows],
+    ['Đã xóa', detail.deletedRows],
+    ['Còn việc', detail.hasRemainingWork ? 'Có' : 'Không'],
+  ];
+
+  return (
+    <div className="moto-sync-detail-grid">
+      {rows.map(([label, value]) => (
+        <div key={label} className="moto-sync-detail-item">
+          <span>{label}</span>
+          <strong className={label === 'Trạng thái' ? statusClassName(String(value ?? '')) : undefined}>
+            {value === null || value === '' ? '-' : String(value)}
+          </strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PlanJsonBlock({ title, json, emptyText }: { title: string; json: string | null; emptyText: string }) {
+  if (!json) {
+    return (
+      <div className="moto-sync-plan-json-card">
+        <SectionTitle title={title} />
+        <div className="moto-sync-muted">{emptyText}</div>
+      </div>
+    );
+  }
+
+  const summary = parsePlanJsonSummary(json);
+  return (
+    <div className="moto-sync-plan-json-card">
+      <SectionTitle title={title} hint={summary ? 'Đọc được JSON' : 'Không parse được JSON'} />
+      {summary ? (
+        <div className="moto-sync-plan-summary-grid">
+          {planSummaryRows(summary).map(([label, value]) => (
+            <div key={label} className="moto-sync-detail-item">
+              <span>{label}</span>
+              <strong>{value === null ? '-' : formatNumber(value)}</strong>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="moto-sync-message-list moto-sync-message-list--warning">
+          Không đọc được JSON kế hoạch. Có thể backend đã đổi format hoặc dữ liệu cũ không đúng cấu trúc.
+        </div>
+      )}
+      <details className="moto-sync-raw-json">
+        <summary>JSON gốc</summary>
+        <pre>{json}</pre>
+      </details>
+    </div>
+  );
+}
+
+function parsePlanJsonSummary(json: string): PlanJsonSummary | null {
+  try {
+    const parsed = JSON.parse(json) as Record<string, unknown>;
+    return {
+      sourceRows: readNumber(parsed.sourceRows),
+      targetRows: readNumber(parsed.targetRows),
+      sourceOnly: readNumber(parsed.sourceOnly),
+      targetOnly: readNumber(parsed.targetOnly),
+      plannedInsertKhoaHoc: readNumber(parsed.plannedInsertKhoaHoc),
+      plannedInsertBaoCaoI: readNumber(parsed.plannedInsertBaoCaoI),
+      plannedInsertNguoiLX: readNumber(parsed.plannedInsertNguoiLX),
+      plannedInsertNguoiLXGPLX: readNumber(parsed.plannedInsertNguoiLXGPLX),
+      plannedInsertNguoiLXHoSo: readNumber(parsed.plannedInsertNguoiLXHoSo),
+      plannedInsertGiayTo: readNumber(parsed.plannedInsertGiayTo),
+      plannedUpdate: readNumber(parsed.plannedUpdate),
+      blockersCount: readArrayCount(parsed.blockers),
+      warningsCount: readArrayCount(parsed.warnings),
+      errorsCount: readArrayCount(parsed.errors),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function planSummaryRows(summary: PlanJsonSummary): Array<[string, number | null]> {
+  return [
+    ['sourceRows', summary.sourceRows],
+    ['targetRows', summary.targetRows],
+    ['sourceOnly', summary.sourceOnly],
+    ['targetOnly', summary.targetOnly],
+    ['plannedInsertKhoaHoc', summary.plannedInsertKhoaHoc],
+    ['plannedInsertBaoCaoI', summary.plannedInsertBaoCaoI],
+    ['plannedInsertNguoiLX', summary.plannedInsertNguoiLX],
+    ['plannedInsertNguoiLXGPLX', summary.plannedInsertNguoiLXGPLX],
+    ['plannedInsertNguoiLXHoSo', summary.plannedInsertNguoiLXHoSo],
+    ['plannedInsertGiayTo', summary.plannedInsertGiayTo],
+    ['plannedUpdate', summary.plannedUpdate],
+    ['blockers', summary.blockersCount],
+    ['warnings', summary.warningsCount],
+    ['errors', summary.errorsCount],
+  ];
+}
+
+function readNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function readArrayCount(value: unknown): number {
+  return Array.isArray(value) ? value.length : 0;
+}
+
+function statusClassName(status: string): string {
+  if (status === 'ThanhCong') return 'moto-sync-status moto-sync-status--success';
+  if (status === 'BiChan') return 'moto-sync-status moto-sync-status--blocked';
+  if (status === 'Loi') return 'moto-sync-status moto-sync-status--error';
+  return 'moto-sync-status';
 }
 
 function formatNumber(value: number): string {
