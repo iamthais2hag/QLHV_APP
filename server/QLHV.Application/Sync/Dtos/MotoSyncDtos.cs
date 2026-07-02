@@ -29,6 +29,46 @@ public sealed class MotoSyncPlanRequest
     public bool AllowDirtyData { get; set; }
 }
 
+public sealed class MotoSyncKhoaHocOptionsQuery
+{
+    public MotoSyncDirection Direction { get; set; }
+
+    public string SourceProfileCode { get; set; } = string.Empty;
+
+    public string TargetProfileCode { get; set; } = string.Empty;
+
+    public string? Search { get; set; }
+
+    public int Take { get; set; } = 50;
+}
+
+public sealed class MotoSyncKhoaHocOptionDto
+{
+    public string MaKhoaHoc { get; init; } = string.Empty;
+
+    public string? TenKhoaHoc { get; init; }
+
+    public string? HangDaoTao { get; init; }
+
+    public string? HangGPLX { get; init; }
+
+    public string? NgayKhaiGiang { get; init; }
+
+    public long SourceHocVienCount { get; init; }
+
+    public long TargetHocVienCount { get; init; }
+
+    public bool SourceKhoaHocExists { get; init; }
+
+    public bool TargetKhoaHocExists { get; init; }
+
+    public bool HasTargetKhoaHoc { get; init; }
+
+    public long SourceOnlyHocVienCount { get; init; }
+
+    public long TargetOnlyHocVienCount { get; init; }
+}
+
 public sealed class MotoSyncTestExecuteRequest
 {
     public MotoSyncDirection Direction { get; set; }

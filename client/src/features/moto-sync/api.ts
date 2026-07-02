@@ -1,6 +1,8 @@
 import type {
   MotoSyncExecuteRequest,
   MotoSyncExecuteResult,
+  MotoSyncKhoaHocOption,
+  MotoSyncKhoaHocOptionsQuery,
   MotoSyncPlan,
   MotoSyncPlanRequest,
   MotoSyncRunHistoryDetail,
@@ -31,6 +33,32 @@ export async function getMotoSyncPlan(
   }
 
   return (await response.json()) as MotoSyncPlan;
+}
+
+export async function getMotoSyncKhoaHocOptions(
+  request: MotoSyncKhoaHocOptionsQuery,
+  signal?: AbortSignal,
+): Promise<MotoSyncKhoaHocOption[]> {
+  const query = new URLSearchParams();
+  query.set('direction', request.direction);
+  query.set('sourceProfileCode', request.sourceProfileCode);
+  query.set('targetProfileCode', request.targetProfileCode);
+  if (request.search?.trim()) {
+    query.set('search', request.search.trim());
+  }
+  query.set('take', String(request.take ?? 50));
+
+  const response = await fetch(`${API_BASE}/dong-bo-v2/moto/khoa-hoc-options?${query.toString()}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(await getSafeErrorMessage(response, 'Không thể tải danh sách khóa học Moto TEST.'));
+  }
+
+  return (await response.json()) as MotoSyncKhoaHocOption[];
 }
 
 export async function executeMotoSyncTest(

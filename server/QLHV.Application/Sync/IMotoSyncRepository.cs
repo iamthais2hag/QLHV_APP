@@ -8,6 +8,10 @@ public interface IMotoSyncRepository
         MotoSyncPlanRequest request,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<MotoSyncKhoaHocOptionDto>> GetKhoaHocOptionsAsync(
+        MotoSyncKhoaHocOptionsQuery query,
+        CancellationToken cancellationToken = default);
+
     Task<MotoSyncExecuteSummaryDto> ExecuteInsertOnlyAsync(
         MotoSyncPlanRequest request,
         CancellationToken cancellationToken = default);

@@ -66,6 +66,45 @@ public sealed class MotoSyncServiceTests
     }
 
     [Fact]
+    public async Task Khoa_hoc_options_blocks_non_test_profile_without_repo_call()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan());
+        var service = new MotoSyncService(repo);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => service.GetKhoaHocOptionsAsync(new MotoSyncKhoaHocOptionsQuery
+        {
+            Direction = MotoSyncDirection.V1_TO_V2,
+            SourceProfileCode = "DATA_V1",
+            TargetProfileCode = "CSDT_V2",
+        }));
+
+        Assert.Equal(0, repo.KhoaHocOptionCalls);
+    }
+
+    [Fact]
+    public async Task Khoa_hoc_options_normalizes_profiles_search_and_take()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan());
+        var service = new MotoSyncService(repo);
+
+        await service.GetKhoaHocOptionsAsync(new MotoSyncKhoaHocOptionsQuery
+        {
+            Direction = MotoSyncDirection.V1_TO_V2,
+            SourceProfileCode = " csdt_v1 ",
+            TargetProfileCode = " csdt_v2 ",
+            Search = "  AK15 ",
+            Take = 500,
+        });
+
+        Assert.Equal(1, repo.KhoaHocOptionCalls);
+        Assert.NotNull(repo.LastKhoaHocOptionsQuery);
+        Assert.Equal("CSDT_V1", repo.LastKhoaHocOptionsQuery!.SourceProfileCode);
+        Assert.Equal("CSDT_V2", repo.LastKhoaHocOptionsQuery.TargetProfileCode);
+        Assert.Equal("AK15", repo.LastKhoaHocOptionsQuery.Search);
+        Assert.Equal(200, repo.LastKhoaHocOptionsQuery.Take);
+    }
+
+    [Fact]
     public async Task Execute_rejects_when_plan_has_short_full_madk_blocker()
     {
         var repo = new FakeMotoSyncRepository(CleanPlan(shortFullPairs: 1));
@@ -559,11 +598,13 @@ public sealed class MotoSyncServiceTests
         }
 
         public int PlanCalls { get; private set; }
+        public int KhoaHocOptionCalls { get; private set; }
         public int ExecuteCalls { get; private set; }
         public int UpdateExecuteCalls { get; private set; }
         public MotoSyncExecuteSummaryDto ExecuteSummary { get; init; }
         public MotoSyncExecuteSummaryDto UpdateSummary { get; init; }
         public MotoSyncPlanDto? AfterPlan { get; init; }
+        public MotoSyncKhoaHocOptionsQuery? LastKhoaHocOptionsQuery { get; private set; }
 
         public Task<MotoSyncPlanDto> BuildPlanAsync(
             MotoSyncPlanRequest request,
@@ -601,6 +642,15 @@ public sealed class MotoSyncServiceTests
                 Warnings = plan.Warnings,
                 Errors = plan.Errors,
             });
+        }
+
+        public Task<IReadOnlyList<MotoSyncKhoaHocOptionDto>> GetKhoaHocOptionsAsync(
+            MotoSyncKhoaHocOptionsQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            KhoaHocOptionCalls++;
+            LastKhoaHocOptionsQuery = query;
+            return Task.FromResult<IReadOnlyList<MotoSyncKhoaHocOptionDto>>(Array.Empty<MotoSyncKhoaHocOptionDto>());
         }
 
         public Task<MotoSyncExecuteSummaryDto> ExecuteInsertOnlyAsync(
