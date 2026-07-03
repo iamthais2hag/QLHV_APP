@@ -69,6 +69,119 @@ public sealed class MotoSyncKhoaHocOptionDto
     public long TargetOnlyHocVienCount { get; init; }
 }
 
+public class MotoCenterTransferPlanRequest
+{
+    public string SourceProfileCode { get; set; } = "CSDT_V1";
+
+    public string TargetProfileCode { get; set; } = "CSDT_V2";
+
+    public string? MaKhoaHocCu { get; set; }
+
+    public string? MaCSDTCu { get; set; }
+
+    public string? MaCSDTMoi { get; set; }
+
+    public string? MaSoGTVTMoi { get; set; }
+}
+
+public sealed class MotoCenterTransferTestRequest : MotoCenterTransferPlanRequest
+{
+    public string? ConfirmText { get; set; }
+}
+
+public sealed class MotoCenterTransferPlanDto
+{
+    public bool IsReadOnly { get; init; } = true;
+
+    public string SourceProfileCode { get; init; } = string.Empty;
+
+    public string TargetProfileCode { get; init; } = string.Empty;
+
+    public string MaKhoaHocCu { get; init; } = string.Empty;
+
+    public string MaKhoaHocMoi { get; init; } = string.Empty;
+
+    public string MaCSDTCu { get; init; } = string.Empty;
+
+    public string MaCSDTMoi { get; init; } = string.Empty;
+
+    public string MaSoGTVTMoi { get; init; } = string.Empty;
+
+    public long SourceKhoaHocCount { get; init; }
+
+    public long SourceBaoCaoICount { get; init; }
+
+    public long SourceNguoiLXCount { get; init; }
+
+    public long SourceNguoiLXHoSoCount { get; init; }
+
+    public long TargetKhoaHocCuCount { get; init; }
+
+    public long TargetKhoaHocMoiCount { get; init; }
+
+    public long TargetBaoCaoICuCount { get; init; }
+
+    public long TargetBaoCaoIMoiCount { get; init; }
+
+    public long TargetNguoiLXHoSoCuCount { get; init; }
+
+    public long TargetNguoiLXHoSoMoiCount { get; init; }
+
+    public bool Executable { get; init; }
+
+    public IReadOnlyList<string> Blockers { get; init; } = Array.Empty<string>();
+
+    public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
+}
+
+public sealed class MotoCenterTransferExecuteResultDto
+{
+    public bool Executed { get; init; }
+
+    public string Status { get; init; } = string.Empty;
+
+    public string Message { get; init; } = string.Empty;
+
+    public MotoCenterTransferPlanDto? Plan { get; init; }
+
+    public MotoCenterTransferSummaryDto? Summary { get; init; }
+}
+
+public sealed class MotoCenterTransferSummaryDto
+{
+    public string SourceProfileCode { get; init; } = string.Empty;
+
+    public string TargetProfileCode { get; init; } = string.Empty;
+
+    public string MaKhoaHocCu { get; init; } = string.Empty;
+
+    public string MaKhoaHocMoi { get; init; } = string.Empty;
+
+    public long CopiedKhoaHoc { get; init; }
+
+    public long CopiedBaoCaoI { get; init; }
+
+    public long CopiedNguoiLX { get; init; }
+
+    public long CopiedNguoiLXHoSo { get; init; }
+
+    public long UpdatedNguoiLXHoSo { get; init; }
+
+    public long UpdatedNguoiLX { get; init; }
+
+    public long UpdatedKhoaHoc { get; init; }
+
+    public long UpdatedBaoCaoI { get; init; }
+
+    public long UpdatedGiayTo { get; init; }
+
+    public DateTime StartedAt { get; init; }
+
+    public DateTime EndedAt { get; init; }
+
+    public long DurationMs { get; init; }
+}
+
 public sealed class MotoSyncTestExecuteRequest
 {
     public MotoSyncDirection Direction { get; set; }

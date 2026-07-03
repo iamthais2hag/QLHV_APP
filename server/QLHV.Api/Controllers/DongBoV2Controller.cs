@@ -112,6 +112,38 @@ public sealed class DongBoV2Controller : ControllerBase
     }
 
     /// <summary>
+    /// Read-only TEST plan for copying one Moto course from old center code to new center code.
+    /// </summary>
+    [HttpGet("moto/center-transfer-plan")]
+    [ProducesResponseType(typeof(MotoCenterTransferPlanDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<MotoCenterTransferPlanDto>> MotoCenterTransferPlan(
+        [FromQuery] MotoCenterTransferPlanRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _motoSyncService.GetCenterTransferPlanAsync(request, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Guarded TEST-only transfer for one Moto course from old center code to new center code.
+    /// </summary>
+    [HttpPost("moto/center-transfer-test")]
+    [ProducesResponseType(typeof(MotoCenterTransferExecuteResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(MotoCenterTransferExecuteResultDto), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<MotoCenterTransferExecuteResultDto>> MotoCenterTransferTest(
+        [FromBody] MotoCenterTransferTestRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _motoSyncService.ExecuteCenterTransferTestAsync(request, cancellationToken);
+        if (!result.Executed)
+        {
+            return Conflict(result);
+        }
+
+        return Ok(result);
+    }
+
+    /// <summary>
     /// Read-only Moto V1/V2 TEST course options from source KhoaHoc and learner counts.
     /// </summary>
     [HttpGet("moto/khoa-hoc-options")]

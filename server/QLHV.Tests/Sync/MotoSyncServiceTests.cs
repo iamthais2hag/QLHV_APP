@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using QLHV.Application.Sync;
 using QLHV.Application.Sync.Dtos;
 
@@ -102,6 +103,213 @@ public sealed class MotoSyncServiceTests
         Assert.Equal("CSDT_V2", repo.LastKhoaHocOptionsQuery.TargetProfileCode);
         Assert.Equal("AK15", repo.LastKhoaHocOptionsQuery.Search);
         Assert.Equal(200, repo.LastKhoaHocOptionsQuery.Take);
+    }
+
+    [Fact]
+    public async Task Center_transfer_plan_normalizes_profiles_and_computes_new_course_code()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan());
+        var service = new MotoSyncService(repo);
+
+        var result = await service.GetCenterTransferPlanAsync(new MotoCenterTransferPlanRequest
+        {
+            SourceProfileCode = " csdt_v1 ",
+            TargetProfileCode = " csdt_v2 ",
+            MaKhoaHocCu = " 66016K26A1003 ",
+            MaCSDTCu = "66016",
+            MaCSDTMoi = "75044",
+            MaSoGTVTMoi = "GTVT-MOI",
+        });
+
+        Assert.True(result.Executable);
+        Assert.Equal("CSDT_V1", result.SourceProfileCode);
+        Assert.Equal("CSDT_V2", result.TargetProfileCode);
+        Assert.Equal("66016K26A1003", result.MaKhoaHocCu);
+        Assert.Equal("75044K26A1003", result.MaKhoaHocMoi);
+        Assert.Equal(1, repo.CenterTransferPlanCalls);
+        Assert.NotNull(repo.LastCenterTransferPlanRequest);
+        Assert.Equal("GTVT-MOI", repo.LastCenterTransferPlanRequest!.MaSoGTVTMoi);
+    }
+
+    [Fact]
+    public async Task Center_transfer_plan_blocks_invalid_profile_without_repo_call()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan());
+        var service = new MotoSyncService(repo);
+
+        var result = await service.GetCenterTransferPlanAsync(new MotoCenterTransferPlanRequest
+        {
+            SourceProfileCode = "CSDT_V2",
+            TargetProfileCode = "CSDT_V1",
+            MaKhoaHocCu = "66016K26A1003",
+            MaCSDTCu = "66016",
+            MaCSDTMoi = "75044",
+            MaSoGTVTMoi = "GTVT-MOI",
+        });
+
+        Assert.False(result.Executable);
+        Assert.Contains(result.Blockers, blocker => blocker.Contains("CSDT_V1 sang CSDT_V2", StringComparison.Ordinal));
+        Assert.Equal(0, repo.CenterTransferPlanCalls);
+        Assert.Equal(0, repo.CenterTransferExecuteCalls);
+    }
+
+    [Fact]
+    public async Task Center_transfer_execute_requires_exact_confirm_text()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan());
+        var service = new MotoSyncService(repo);
+
+        var result = await service.ExecuteCenterTransferTestAsync(CenterTransferRequest(confirmText: "WRONG"));
+
+        Assert.False(result.Executed);
+        Assert.Equal("BiChan", result.Status);
+        Assert.Contains(MotoSyncService.CenterTransferConfirmationText, result.Message);
+        Assert.Equal(0, repo.CenterTransferPlanCalls);
+        Assert.Equal(0, repo.CenterTransferExecuteCalls);
+    }
+
+    [Fact]
+    public async Task Center_transfer_execute_refuses_missing_source_course()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan())
+        {
+            CenterTransferPlan = CleanCenterTransferPlan(
+                sourceKhoaHocCount: 0,
+                blockers: new[] { "Source thieu KhoaHoc theo MaKhoaHocCu." }),
+        };
+        var service = new MotoSyncService(repo);
+
+        var result = await service.ExecuteCenterTransferTestAsync(CenterTransferRequest());
+
+        Assert.False(result.Executed);
+        Assert.Equal("BiChan", result.Status);
+        Assert.Contains(result.Plan!.Blockers, blocker => blocker.Contains("Source thieu KhoaHoc", StringComparison.Ordinal));
+        Assert.Equal(1, repo.CenterTransferPlanCalls);
+        Assert.Equal(0, repo.CenterTransferExecuteCalls);
+    }
+
+    [Fact]
+    public async Task Center_transfer_execute_refuses_when_target_new_course_exists()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan())
+        {
+            CenterTransferPlan = CleanCenterTransferPlan(
+                targetKhoaHocMoiCount: 1,
+                blockers: new[] { "Target da co MaKhoaHocMoi, khong the chuyen tiep an toan." }),
+        };
+        var service = new MotoSyncService(repo);
+
+        var result = await service.ExecuteCenterTransferTestAsync(CenterTransferRequest());
+
+        Assert.False(result.Executed);
+        Assert.Equal("BiChan", result.Status);
+        Assert.Contains(result.Plan!.Blockers, blocker => blocker.Contains("MaKhoaHocMoi", StringComparison.Ordinal));
+        Assert.Equal(1, repo.CenterTransferPlanCalls);
+        Assert.Equal(0, repo.CenterTransferExecuteCalls);
+    }
+
+    [Fact]
+    public async Task Center_transfer_plan_blocks_when_target_old_course_exists()
+    {
+        const string blocker = "Target đã có MaKhoaHocCu; không thể phân biệt dữ liệu có sẵn với dữ liệu vừa copy. Hãy chọn target sạch hoặc khóa chưa tồn tại.";
+        var repo = new FakeMotoSyncRepository(CleanPlan())
+        {
+            CenterTransferPlan = CleanCenterTransferPlan(
+                targetKhoaHocCuCount: 1,
+                blockers: new[] { blocker }),
+        };
+        var service = new MotoSyncService(repo);
+
+        var result = await service.GetCenterTransferPlanAsync(CenterTransferRequest());
+
+        Assert.False(result.Executable);
+        Assert.Equal(1, result.TargetKhoaHocCuCount);
+        Assert.Contains(blocker, result.Blockers);
+        Assert.Equal(1, repo.CenterTransferPlanCalls);
+    }
+
+    [Fact]
+    public async Task Center_transfer_plan_blocks_when_target_old_hoso_exists()
+    {
+        const string blocker = "Target đã có MaKhoaHocCu; không thể phân biệt dữ liệu có sẵn với dữ liệu vừa copy. Hãy chọn target sạch hoặc khóa chưa tồn tại.";
+        var repo = new FakeMotoSyncRepository(CleanPlan())
+        {
+            CenterTransferPlan = CleanCenterTransferPlan(
+                targetNguoiLXHoSoCuCount: 216,
+                blockers: new[] { blocker }),
+        };
+        var service = new MotoSyncService(repo);
+
+        var result = await service.GetCenterTransferPlanAsync(CenterTransferRequest());
+
+        Assert.False(result.Executable);
+        Assert.Equal(216, result.TargetNguoiLXHoSoCuCount);
+        Assert.Contains(blocker, result.Blockers);
+        Assert.Equal(1, repo.CenterTransferPlanCalls);
+    }
+
+    [Fact]
+    public async Task Center_transfer_execute_refuses_when_target_old_hoso_exists_before_write()
+    {
+        const string blocker = "Target đã có MaKhoaHocCu; không thể phân biệt dữ liệu có sẵn với dữ liệu vừa copy. Hãy chọn target sạch hoặc khóa chưa tồn tại.";
+        var repo = new FakeMotoSyncRepository(CleanPlan())
+        {
+            CenterTransferPlan = CleanCenterTransferPlan(
+                targetNguoiLXHoSoCuCount: 216,
+                blockers: new[] { blocker }),
+        };
+        var service = new MotoSyncService(repo);
+
+        var result = await service.ExecuteCenterTransferTestAsync(CenterTransferRequest());
+
+        Assert.False(result.Executed);
+        Assert.Equal("BiChan", result.Status);
+        Assert.Contains(blocker, result.Plan!.Blockers);
+        Assert.Equal(1, repo.CenterTransferPlanCalls);
+        Assert.Equal(0, repo.CenterTransferExecuteCalls);
+    }
+
+    [Fact]
+    public async Task Center_transfer_execute_success_calls_repository_once()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan());
+        var service = new MotoSyncService(repo);
+
+        var result = await service.ExecuteCenterTransferTestAsync(CenterTransferRequest());
+
+        Assert.True(result.Executed);
+        Assert.Equal("ThanhCong", result.Status);
+        Assert.NotNull(result.Summary);
+        Assert.Equal("75044K26A1003", result.Summary!.MaKhoaHocMoi);
+        Assert.Equal(1, repo.CenterTransferPlanCalls);
+        Assert.Equal(1, repo.CenterTransferExecuteCalls);
+    }
+
+    [Fact]
+    public void Center_transfer_code_does_not_hardcode_owner_sample_values_or_destructive_keywords()
+    {
+        var source = File.ReadAllText(FindRepositoryFile());
+        var service = File.ReadAllText(FindServiceFile());
+        var combined = source + service;
+
+        Assert.DoesNotContain("70014K26A1023", combined, StringComparison.Ordinal);
+        Assert.DoesNotContain("70014", combined, StringComparison.Ordinal);
+        Assert.DoesNotContain("75044", combined, StringComparison.Ordinal);
+        Assert.DoesNotContain("DELETE FROM", combined, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("MERGE ", combined, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("TRUNCATE TABLE", combined, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Center_transfer_repository_blocks_target_old_course_data_and_excludes_identity_insert()
+    {
+        var source = File.ReadAllText(FindRepositoryFile());
+
+        Assert.Contains("targetKhoaHocCu > 0 || targetBaoCaoICu > 0 || targetHoSoCu > 0", source, StringComparison.Ordinal);
+        Assert.Contains("Target đã có MaKhoaHocCu; không thể phân biệt dữ liệu có sẵn với dữ liệu vừa copy. Hãy chọn target sạch hoặc khóa chưa tồn tại.", source, StringComparison.Ordinal);
+        Assert.Contains(".Where(c => !c.IsIdentity && !c.IsComputed && !c.IsRowVersion)", source, StringComparison.Ordinal);
+        Assert.Contains(".Where(c => !c.IsIdentity && !c.IsComputed && !c.IsRowVersion && sourceNames.Contains(c.Name))", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("SET IDENTITY_INSERT", source, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -507,6 +715,17 @@ public sealed class MotoSyncServiceTests
         ConfirmText = MotoSyncService.ConfirmationText,
     };
 
+    private static MotoCenterTransferTestRequest CenterTransferRequest(string confirmText = MotoSyncService.CenterTransferConfirmationText) => new()
+    {
+        SourceProfileCode = "CSDT_V1",
+        TargetProfileCode = "CSDT_V2",
+        MaKhoaHocCu = "66016K26A1003",
+        MaCSDTCu = "66016",
+        MaCSDTMoi = "75044",
+        MaSoGTVTMoi = "GTVT-MOI",
+        ConfirmText = confirmText,
+    };
+
     private static MotoSyncPlanDto CleanPlan(
         long shortFullPairs = 0,
         long missingKhoaHoc = 0,
@@ -558,6 +777,60 @@ public sealed class MotoSyncServiceTests
         };
     }
 
+    private static MotoCenterTransferPlanDto CleanCenterTransferPlan(
+        long sourceKhoaHocCount = 1,
+        long targetKhoaHocMoiCount = 0,
+        long targetKhoaHocCuCount = 0,
+        long targetBaoCaoICuCount = 0,
+        long targetNguoiLXHoSoCuCount = 0,
+        IReadOnlyList<string>? blockers = null)
+    {
+        blockers ??= Array.Empty<string>();
+        return new MotoCenterTransferPlanDto
+        {
+            SourceProfileCode = "CSDT_V1",
+            TargetProfileCode = "CSDT_V2",
+            MaKhoaHocCu = "66016K26A1003",
+            MaKhoaHocMoi = "75044K26A1003",
+            MaCSDTCu = "66016",
+            MaCSDTMoi = "75044",
+            MaSoGTVTMoi = "GTVT-MOI",
+            SourceKhoaHocCount = sourceKhoaHocCount,
+            SourceBaoCaoICount = 1,
+            SourceNguoiLXCount = 10,
+            SourceNguoiLXHoSoCount = 10,
+            TargetKhoaHocCuCount = targetKhoaHocCuCount,
+            TargetKhoaHocMoiCount = targetKhoaHocMoiCount,
+            TargetBaoCaoICuCount = targetBaoCaoICuCount,
+            TargetNguoiLXHoSoCuCount = targetNguoiLXHoSoCuCount,
+            Executable = blockers.Count == 0,
+            Blockers = blockers,
+        };
+    }
+
+    private static string FindRepositoryFile([CallerFilePath] string testFile = "")
+        => FindWorkspaceFile(testFile, "server", "QLHV.Infrastructure", "Sync", "MotoSyncRepository.cs");
+
+    private static string FindServiceFile([CallerFilePath] string testFile = "")
+        => FindWorkspaceFile(testFile, "server", "QLHV.Application", "Sync", "MotoSyncService.cs");
+
+    private static string FindWorkspaceFile(string testFile, params string[] pathParts)
+    {
+        var directory = new DirectoryInfo(Path.GetDirectoryName(testFile)!);
+        while (directory is not null)
+        {
+            var candidate = Path.Combine(new[] { directory.FullName }.Concat(pathParts).ToArray());
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new FileNotFoundException("Cannot locate workspace file.", Path.Combine(pathParts));
+    }
+
     private sealed class FakeMotoSyncRepository : IMotoSyncRepository
     {
         private readonly MotoSyncPlanDto _plan;
@@ -599,12 +872,18 @@ public sealed class MotoSyncServiceTests
 
         public int PlanCalls { get; private set; }
         public int KhoaHocOptionCalls { get; private set; }
+        public int CenterTransferPlanCalls { get; private set; }
+        public int CenterTransferExecuteCalls { get; private set; }
         public int ExecuteCalls { get; private set; }
         public int UpdateExecuteCalls { get; private set; }
         public MotoSyncExecuteSummaryDto ExecuteSummary { get; init; }
         public MotoSyncExecuteSummaryDto UpdateSummary { get; init; }
+        public MotoCenterTransferPlanDto CenterTransferPlan { get; init; } = CleanCenterTransferPlan();
+        public MotoCenterTransferSummaryDto? CenterTransferSummary { get; init; }
         public MotoSyncPlanDto? AfterPlan { get; init; }
         public MotoSyncKhoaHocOptionsQuery? LastKhoaHocOptionsQuery { get; private set; }
+        public MotoCenterTransferPlanRequest? LastCenterTransferPlanRequest { get; private set; }
+        public MotoCenterTransferPlanRequest? LastCenterTransferExecuteRequest { get; private set; }
 
         public Task<MotoSyncPlanDto> BuildPlanAsync(
             MotoSyncPlanRequest request,
@@ -651,6 +930,65 @@ public sealed class MotoSyncServiceTests
             KhoaHocOptionCalls++;
             LastKhoaHocOptionsQuery = query;
             return Task.FromResult<IReadOnlyList<MotoSyncKhoaHocOptionDto>>(Array.Empty<MotoSyncKhoaHocOptionDto>());
+        }
+
+        public Task<MotoCenterTransferPlanDto> BuildCenterTransferPlanAsync(
+            MotoCenterTransferPlanRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            CenterTransferPlanCalls++;
+            LastCenterTransferPlanRequest = request;
+            return Task.FromResult(new MotoCenterTransferPlanDto
+            {
+                SourceProfileCode = request.SourceProfileCode,
+                TargetProfileCode = request.TargetProfileCode,
+                MaKhoaHocCu = request.MaKhoaHocCu ?? string.Empty,
+                MaKhoaHocMoi = (request.MaKhoaHocCu ?? string.Empty).Replace(
+                    request.MaCSDTCu ?? string.Empty,
+                    request.MaCSDTMoi ?? string.Empty,
+                    StringComparison.OrdinalIgnoreCase),
+                MaCSDTCu = request.MaCSDTCu ?? string.Empty,
+                MaCSDTMoi = request.MaCSDTMoi ?? string.Empty,
+                MaSoGTVTMoi = request.MaSoGTVTMoi ?? string.Empty,
+                SourceKhoaHocCount = CenterTransferPlan.SourceKhoaHocCount,
+                SourceBaoCaoICount = CenterTransferPlan.SourceBaoCaoICount,
+                SourceNguoiLXCount = CenterTransferPlan.SourceNguoiLXCount,
+                SourceNguoiLXHoSoCount = CenterTransferPlan.SourceNguoiLXHoSoCount,
+                TargetKhoaHocCuCount = CenterTransferPlan.TargetKhoaHocCuCount,
+                TargetKhoaHocMoiCount = CenterTransferPlan.TargetKhoaHocMoiCount,
+                TargetBaoCaoICuCount = CenterTransferPlan.TargetBaoCaoICuCount,
+                TargetBaoCaoIMoiCount = CenterTransferPlan.TargetBaoCaoIMoiCount,
+                TargetNguoiLXHoSoCuCount = CenterTransferPlan.TargetNguoiLXHoSoCuCount,
+                TargetNguoiLXHoSoMoiCount = CenterTransferPlan.TargetNguoiLXHoSoMoiCount,
+                Executable = CenterTransferPlan.Blockers.Count == 0 && CenterTransferPlan.Executable,
+                Blockers = CenterTransferPlan.Blockers,
+                Warnings = CenterTransferPlan.Warnings,
+            });
+        }
+
+        public Task<MotoCenterTransferSummaryDto> ExecuteCenterTransferAsync(
+            MotoCenterTransferPlanRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            CenterTransferExecuteCalls++;
+            LastCenterTransferExecuteRequest = request;
+            return Task.FromResult(CenterTransferSummary ?? new MotoCenterTransferSummaryDto
+            {
+                SourceProfileCode = request.SourceProfileCode,
+                TargetProfileCode = request.TargetProfileCode,
+                MaKhoaHocCu = request.MaKhoaHocCu ?? string.Empty,
+                MaKhoaHocMoi = (request.MaKhoaHocCu ?? string.Empty).Replace(
+                    request.MaCSDTCu ?? string.Empty,
+                    request.MaCSDTMoi ?? string.Empty,
+                    StringComparison.OrdinalIgnoreCase),
+                CopiedKhoaHoc = CenterTransferPlan.SourceKhoaHocCount,
+                CopiedBaoCaoI = CenterTransferPlan.SourceBaoCaoICount,
+                CopiedNguoiLX = CenterTransferPlan.SourceNguoiLXCount,
+                CopiedNguoiLXHoSo = CenterTransferPlan.SourceNguoiLXHoSoCount,
+                UpdatedKhoaHoc = 1,
+                StartedAt = DateTime.UtcNow,
+                EndedAt = DateTime.UtcNow,
+            });
         }
 
         public Task<MotoSyncExecuteSummaryDto> ExecuteInsertOnlyAsync(

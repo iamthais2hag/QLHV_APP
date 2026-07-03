@@ -33,6 +33,70 @@ export interface MotoSyncKhoaHocOption {
   targetOnlyHocVienCount: number;
 }
 
+export interface MotoCenterTransferPlanRequest {
+  sourceProfileCode: string;
+  targetProfileCode: string;
+  maKhoaHocCu: string;
+  maCSDTCu: string;
+  maCSDTMoi: string;
+  maSoGTVTMoi: string;
+}
+
+export interface MotoCenterTransferExecuteRequest extends MotoCenterTransferPlanRequest {
+  confirmText: string;
+}
+
+export interface MotoCenterTransferPlan {
+  isReadOnly: boolean;
+  sourceProfileCode: string;
+  targetProfileCode: string;
+  maKhoaHocCu: string;
+  maKhoaHocMoi: string;
+  maCSDTCu: string;
+  maCSDTMoi: string;
+  maSoGTVTMoi: string;
+  sourceKhoaHocCount: number;
+  sourceBaoCaoICount: number;
+  sourceNguoiLXCount: number;
+  sourceNguoiLXHoSoCount: number;
+  targetKhoaHocCuCount: number;
+  targetKhoaHocMoiCount: number;
+  targetBaoCaoICuCount: number;
+  targetBaoCaoIMoiCount: number;
+  targetNguoiLXHoSoCuCount: number;
+  targetNguoiLXHoSoMoiCount: number;
+  executable: boolean;
+  blockers: string[];
+  warnings: string[];
+}
+
+export interface MotoCenterTransferSummary {
+  sourceProfileCode: string;
+  targetProfileCode: string;
+  maKhoaHocCu: string;
+  maKhoaHocMoi: string;
+  copiedKhoaHoc: number;
+  copiedBaoCaoI: number;
+  copiedNguoiLX: number;
+  copiedNguoiLXHoSo: number;
+  updatedNguoiLXHoSo: number;
+  updatedNguoiLX: number;
+  updatedKhoaHoc: number;
+  updatedBaoCaoI: number;
+  updatedGiayTo: number;
+  startedAt: string;
+  endedAt: string;
+  durationMs: number;
+}
+
+export interface MotoCenterTransferExecuteResult {
+  executed: boolean;
+  status: string;
+  message: string;
+  plan: MotoCenterTransferPlan | null;
+  summary: MotoCenterTransferSummary | null;
+}
+
 export interface MotoSyncExecuteRequest {
   direction: MotoSyncDirection;
   sourceProfileCode: string;
