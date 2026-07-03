@@ -8,6 +8,7 @@ public sealed class MotoSyncService : IMotoSyncService
 {
     public const string ConfirmationText = "SYNC TEST DATABASE";
     public const string UpdateConfirmationText = "SYNC TEST DATABASE UPDATE";
+    public const string CenterTransferConfirmationText = "CHUYEN MA CSDT TEST";
 
     private const string CsdtV1 = "CSDT_V1";
     private const string CsdtV2 = "CSDT_V2";
@@ -79,6 +80,74 @@ public sealed class MotoSyncService : IMotoSyncService
         }
 
         return _repository.GetKhoaHocOptionsAsync(normalized, cancellationToken);
+    }
+
+    public async Task<MotoCenterTransferPlanDto> GetCenterTransferPlanAsync(
+        MotoCenterTransferPlanRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        request ??= new MotoCenterTransferPlanRequest();
+        var normalized = Normalize(request);
+        var blockers = ValidateCenterTransferRequest(normalized).ToList();
+        if (blockers.Count > 0)
+        {
+            return BlockedCenterTransferPlan(normalized, blockers);
+        }
+
+        return await _repository.BuildCenterTransferPlanAsync(normalized, cancellationToken);
+    }
+
+    public async Task<MotoCenterTransferExecuteResultDto> ExecuteCenterTransferTestAsync(
+        MotoCenterTransferTestRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        request ??= new MotoCenterTransferTestRequest();
+        var normalized = Normalize(request);
+        if (!string.Equals(request.ConfirmText, CenterTransferConfirmationText, StringComparison.Ordinal))
+        {
+            return new MotoCenterTransferExecuteResultDto
+            {
+                Executed = false,
+                Status = "BiChan",
+                Message = $"Thieu chuoi xac nhan chinh xac: {CenterTransferConfirmationText}.",
+                Plan = BlockedCenterTransferPlan(normalized, new[] { "ConfirmText khong khop." }),
+            };
+        }
+
+        var plan = await GetCenterTransferPlanAsync(normalized, cancellationToken);
+        if (!plan.Executable || plan.Blockers.Count > 0)
+        {
+            return new MotoCenterTransferExecuteResultDto
+            {
+                Executed = false,
+                Status = "BiChan",
+                Message = "Chuyen MaCSDT TEST bi chan vi plan co blocker.",
+                Plan = plan,
+            };
+        }
+
+        try
+        {
+            var summary = await _repository.ExecuteCenterTransferAsync(normalized, cancellationToken);
+            return new MotoCenterTransferExecuteResultDto
+            {
+                Executed = true,
+                Status = "ThanhCong",
+                Message = "Chuyen MaCSDT TEST hoan tat.",
+                Plan = plan,
+                Summary = summary,
+            };
+        }
+        catch (Exception ex)
+        {
+            return new MotoCenterTransferExecuteResultDto
+            {
+                Executed = false,
+                Status = "Loi",
+                Message = $"Chuyen MaCSDT TEST that bai va da rollback transaction. Chi tiet: {ex.GetType().Name}.",
+                Plan = plan,
+            };
+        }
     }
 
     public async Task<MotoSyncExecuteResultDto> ExecuteTestAsync(
@@ -238,6 +307,79 @@ public sealed class MotoSyncService : IMotoSyncService
             Take = Math.Clamp(query.Take <= 0 ? 50 : query.Take, 1, 200),
         };
     }
+
+    private static MotoCenterTransferPlanRequest Normalize(MotoCenterTransferPlanRequest request)
+    {
+        var source = NormalizeProfile(string.IsNullOrWhiteSpace(request.SourceProfileCode) ? CsdtV1 : request.SourceProfileCode);
+        var target = NormalizeProfile(string.IsNullOrWhiteSpace(request.TargetProfileCode) ? CsdtV2 : request.TargetProfileCode);
+
+        return new MotoCenterTransferPlanRequest
+        {
+            SourceProfileCode = source,
+            TargetProfileCode = target,
+            MaKhoaHocCu = string.IsNullOrWhiteSpace(request.MaKhoaHocCu) ? null : request.MaKhoaHocCu.Trim(),
+            MaCSDTCu = string.IsNullOrWhiteSpace(request.MaCSDTCu) ? null : request.MaCSDTCu.Trim(),
+            MaCSDTMoi = string.IsNullOrWhiteSpace(request.MaCSDTMoi) ? null : request.MaCSDTMoi.Trim(),
+            MaSoGTVTMoi = string.IsNullOrWhiteSpace(request.MaSoGTVTMoi) ? null : request.MaSoGTVTMoi.Trim(),
+        };
+    }
+
+    private static MotoCenterTransferPlanRequest Normalize(MotoCenterTransferTestRequest request)
+        => Normalize((MotoCenterTransferPlanRequest)request);
+
+    private static IReadOnlyList<string> ValidateCenterTransferRequest(MotoCenterTransferPlanRequest request)
+    {
+        var blockers = new List<string>();
+        if (!string.Equals(request.SourceProfileCode, CsdtV1, StringComparison.Ordinal) ||
+            !string.Equals(request.TargetProfileCode, CsdtV2, StringComparison.Ordinal))
+        {
+            blockers.Add("Chi cho phep chuyen MaCSDT TEST tu CSDT_V1 sang CSDT_V2 trong task nay.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.MaKhoaHocCu))
+        {
+            blockers.Add("MaKhoaHocCu la bat buoc.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.MaCSDTCu))
+        {
+            blockers.Add("MaCSDTCu la bat buoc.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.MaCSDTMoi))
+        {
+            blockers.Add("MaCSDTMoi la bat buoc.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.MaSoGTVTMoi))
+        {
+            blockers.Add("MaSoGTVTMoi la bat buoc.");
+        }
+
+        return blockers;
+    }
+
+    private static MotoCenterTransferPlanDto BlockedCenterTransferPlan(
+        MotoCenterTransferPlanRequest request,
+        IReadOnlyList<string> blockers) => new()
+    {
+        SourceProfileCode = request.SourceProfileCode,
+        TargetProfileCode = request.TargetProfileCode,
+        MaKhoaHocCu = request.MaKhoaHocCu ?? string.Empty,
+        MaKhoaHocMoi = ComputeMaKhoaHocMoi(request.MaKhoaHocCu, request.MaCSDTCu, request.MaCSDTMoi),
+        MaCSDTCu = request.MaCSDTCu ?? string.Empty,
+        MaCSDTMoi = request.MaCSDTMoi ?? string.Empty,
+        MaSoGTVTMoi = request.MaSoGTVTMoi ?? string.Empty,
+        Executable = false,
+        Blockers = blockers,
+    };
+
+    private static string ComputeMaKhoaHocMoi(string? maKhoaHocCu, string? maCsdtCu, string? maCsdtMoi)
+        => string.IsNullOrWhiteSpace(maKhoaHocCu) ||
+           string.IsNullOrWhiteSpace(maCsdtCu) ||
+           string.IsNullOrWhiteSpace(maCsdtMoi)
+            ? string.Empty
+            : maKhoaHocCu.Replace(maCsdtCu, maCsdtMoi, StringComparison.OrdinalIgnoreCase);
 
     private static IReadOnlyList<string> ValidateTestProfiles(MotoSyncPlanRequest request)
     {

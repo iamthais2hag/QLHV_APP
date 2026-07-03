@@ -1780,6 +1780,26 @@
   padding: 16px;
 }
 
+.moto-sync-option-panel {
+  border-left: 4px solid var(--tc-blue-600);
+}
+
+.moto-sync-center-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.38fr);
+  gap: 16px;
+  margin-top: 16px;
+  align-items: start;
+  min-width: 0;
+}
+
+.moto-sync-center-execute {
+  padding: 14px;
+  border: 1px solid var(--tc-border);
+  border-radius: 8px;
+  background: #fff;
+}
+
 .moto-sync-course-picker {
   display: grid;
   gap: 12px;
@@ -2105,6 +2125,10 @@
 
 @media (max-width: 1100px) {
   .moto-sync-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .moto-sync-center-grid {
     grid-template-columns: 1fr;
   }
 

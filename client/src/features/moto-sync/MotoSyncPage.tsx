@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  executeMotoCenterTransferTest,
   executeMotoSyncTest,
+  getMotoCenterTransferPlan,
   getMotoSyncKhoaHocOptions,
   getMotoSyncPlan,
   getMotoSyncRunHistory,
   getMotoSyncRunHistoryDetail,
 } from './api';
 import type {
+  MotoCenterTransferExecuteResult,
+  MotoCenterTransferPlan,
   MotoSyncDirection,
   MotoSyncExecuteResult,
   MotoSyncKhoaHocOption,
@@ -16,6 +20,7 @@ import type {
   MotoSyncRunHistoryListItem,
 } from './types';
 
+const CENTER_TRANSFER_CONFIRM = 'CHUYEN MA CSDT TEST';
 const INSERT_ONLY_CONFIRM = 'SYNC TEST DATABASE';
 const INSERT_AND_UPDATE_CONFIRM = 'SYNC TEST DATABASE UPDATE';
 
@@ -37,6 +42,16 @@ interface PlanJsonSummary {
 }
 
 export default function MotoSyncPage() {
+  const [centerMaKhoaHocCu, setCenterMaKhoaHocCu] = useState('');
+  const [centerMaCSDTCu, setCenterMaCSDTCu] = useState('');
+  const [centerMaCSDTMoi, setCenterMaCSDTMoi] = useState('');
+  const [centerMaSoGTVTMoi, setCenterMaSoGTVTMoi] = useState('');
+  const [centerConfirmText, setCenterConfirmText] = useState('');
+  const [centerPlan, setCenterPlan] = useState<MotoCenterTransferPlan | null>(null);
+  const [centerResult, setCenterResult] = useState<MotoCenterTransferExecuteResult | null>(null);
+  const [centerLoadingPlan, setCenterLoadingPlan] = useState(false);
+  const [centerExecuting, setCenterExecuting] = useState(false);
+  const [centerError, setCenterError] = useState<string | null>(null);
   const [direction, setDirection] = useState<MotoSyncDirection>('V1_TO_V2');
   const [maKhoaHoc, setMaKhoaHoc] = useState('');
   const [syncMode, setSyncMode] = useState<MotoSyncMode>('INSERT_ONLY');
@@ -77,6 +92,28 @@ export default function MotoSyncPage() {
   const profiles = useMemo(() => getProfiles(direction), [direction]);
   const requiredConfirm = syncMode === 'INSERT_AND_UPDATE' ? INSERT_AND_UPDATE_CONFIRM : INSERT_ONLY_CONFIRM;
   const trimmedMaKhoaHoc = maKhoaHoc.trim();
+  const centerSourceProfileCode = 'CSDT_V1';
+  const centerTargetProfileCode = 'CSDT_V2';
+  const trimmedCenterMaKhoaHocCu = centerMaKhoaHocCu.trim();
+  const trimmedCenterMaCSDTCu = centerMaCSDTCu.trim();
+  const trimmedCenterMaCSDTMoi = centerMaCSDTMoi.trim();
+  const trimmedCenterMaSoGTVTMoi = centerMaSoGTVTMoi.trim();
+  const centerPlanIsCurrent =
+    !!centerPlan &&
+    centerPlan.sourceProfileCode === centerSourceProfileCode &&
+    centerPlan.targetProfileCode === centerTargetProfileCode &&
+    centerPlan.maKhoaHocCu === trimmedCenterMaKhoaHocCu &&
+    centerPlan.maCSDTCu === trimmedCenterMaCSDTCu &&
+    centerPlan.maCSDTMoi === trimmedCenterMaCSDTMoi &&
+    centerPlan.maSoGTVTMoi === trimmedCenterMaSoGTVTMoi;
+  const canExecuteCenterTransfer =
+    centerPlanIsCurrent &&
+    !!centerPlan &&
+    centerPlan.executable &&
+    centerPlan.blockers.length === 0 &&
+    centerConfirmText === CENTER_TRANSFER_CONFIRM &&
+    !centerExecuting &&
+    !centerLoadingPlan;
   const planIsCurrent =
     !!plan &&
     plan.direction === direction &&
@@ -92,6 +129,71 @@ export default function MotoSyncPage() {
     confirmText === requiredConfirm &&
     !executing &&
     !loadingPlan;
+
+  function invalidateCenterPlan() {
+    setCenterPlan(null);
+    setCenterResult(null);
+    setCenterError(null);
+    setCenterConfirmText('');
+  }
+
+  function handleCenterFieldChange(setter: (value: string) => void, value: string) {
+    setter(value);
+    invalidateCenterPlan();
+  }
+
+  async function handleCenterPlan() {
+    if (!trimmedCenterMaKhoaHocCu || !trimmedCenterMaCSDTCu || !trimmedCenterMaCSDTMoi || !trimmedCenterMaSoGTVTMoi) {
+      setCenterError('Vui lòng nhập đủ Mã khóa học cũ, MaCSDT cũ, MaCSDT mới và Mã Sở GTVT mới.');
+      return;
+    }
+
+    setCenterLoadingPlan(true);
+    setCenterError(null);
+    setCenterResult(null);
+    try {
+      const nextPlan = await getMotoCenterTransferPlan({
+        sourceProfileCode: centerSourceProfileCode,
+        targetProfileCode: centerTargetProfileCode,
+        maKhoaHocCu: trimmedCenterMaKhoaHocCu,
+        maCSDTCu: trimmedCenterMaCSDTCu,
+        maCSDTMoi: trimmedCenterMaCSDTMoi,
+        maSoGTVTMoi: trimmedCenterMaSoGTVTMoi,
+      });
+      setCenterPlan(nextPlan);
+    } catch (err) {
+      setCenterPlan(null);
+      setCenterError(err instanceof Error ? err.message : 'Không thể lập kế hoạch chuyển MaCSDT Moto TEST.');
+    } finally {
+      setCenterLoadingPlan(false);
+    }
+  }
+
+  async function handleCenterExecute() {
+    if (!canExecuteCenterTransfer) return;
+
+    setCenterExecuting(true);
+    setCenterError(null);
+    try {
+      const nextResult = await executeMotoCenterTransferTest({
+        sourceProfileCode: centerSourceProfileCode,
+        targetProfileCode: centerTargetProfileCode,
+        maKhoaHocCu: trimmedCenterMaKhoaHocCu,
+        maCSDTCu: trimmedCenterMaCSDTCu,
+        maCSDTMoi: trimmedCenterMaCSDTMoi,
+        maSoGTVTMoi: trimmedCenterMaSoGTVTMoi,
+        confirmText: centerConfirmText,
+      });
+      setCenterResult(nextResult);
+      if (nextResult.plan) {
+        setCenterPlan(nextResult.plan);
+      }
+    } catch (err) {
+      setCenterError(err instanceof Error ? err.message : 'Không thể thực thi chuyển MaCSDT Moto TEST.');
+    } finally {
+      setCenterExecuting(false);
+    }
+  }
 
   function invalidatePlan() {
     setPlan(null);
@@ -223,7 +325,7 @@ export default function MotoSyncPage() {
     <section className="moto-sync-page">
       <div className="toolbar moto-sync-hero">
         <div>
-          <strong>Đồng bộ Moto V1/V2 - TEST DATABASE</strong>
+          <strong>Đồng bộ dữ liệu Moto - TEST DATABASE</strong>
           <p>
             Màn hình này chỉ dùng cho CSDT_V1 và CSDT_V2 test. Luôn lập kế hoạch trước, không tự động thực thi sau khi plan.
           </p>
@@ -231,9 +333,124 @@ export default function MotoSyncPage() {
         <span className="status-pill status-pill--warn">TEST ONLY</span>
       </div>
 
+      {centerError && <div className="pdf-preview-panel__error">{centerError}</div>}
       {error && <div className="pdf-preview-panel__error">{error}</div>}
 
+      <div className="panel moto-sync-form moto-sync-option-panel">
+        <SectionTitle
+          title="Sync MaCSDT cũ -> MaCSDT mới"
+          hint="Copy một khóa từ CSDT_V1 sang CSDT_V2 rồi đổi mã trung tâm trong phạm vi khóa vừa chuyển."
+        />
+        <div className="toolbar__row">
+          <label className="field">
+            <span className="field__label">Nguồn</span>
+            <input className="field__input" value={centerSourceProfileCode} readOnly />
+          </label>
+
+          <label className="field">
+            <span className="field__label">Đích</span>
+            <input className="field__input" value={centerTargetProfileCode} readOnly />
+          </label>
+
+          <label className="field">
+            <span className="field__label">Mã khóa học cũ</span>
+            <input
+              className="field__input"
+              value={centerMaKhoaHocCu}
+              onChange={(event) => handleCenterFieldChange(setCenterMaKhoaHocCu, event.target.value)}
+              placeholder="66016K26A1003"
+            />
+          </label>
+
+          <label className="field">
+            <span className="field__label">MaCSDT cũ</span>
+            <input
+              className="field__input"
+              value={centerMaCSDTCu}
+              onChange={(event) => handleCenterFieldChange(setCenterMaCSDTCu, event.target.value)}
+              placeholder="66016"
+            />
+          </label>
+
+          <label className="field">
+            <span className="field__label">MaCSDT mới</span>
+            <input
+              className="field__input"
+              value={centerMaCSDTMoi}
+              onChange={(event) => handleCenterFieldChange(setCenterMaCSDTMoi, event.target.value)}
+              placeholder="Nhập MaCSDT mới"
+            />
+          </label>
+
+          <label className="field">
+            <span className="field__label">Mã Sở GTVT mới</span>
+            <input
+              className="field__input"
+              value={centerMaSoGTVTMoi}
+              onChange={(event) => handleCenterFieldChange(setCenterMaSoGTVTMoi, event.target.value)}
+              placeholder="Nhập mã Sở GTVT mới"
+            />
+          </label>
+
+          <div className="toolbar__actions">
+            <button type="button" className="btn btn--primary" onClick={handleCenterPlan} disabled={centerLoadingPlan || centerExecuting}>
+              {centerLoadingPlan ? 'Đang lập kế hoạch...' : 'Lập kế hoạch chuyển mã'}
+            </button>
+          </div>
+        </div>
+
+        <div className="moto-sync-safety-note">
+          <strong>Lưu ý:</strong> Chức năng này chỉ dùng cho TEST, không xóa dữ liệu, không merge. Khi execute sẽ copy dữ liệu khóa cũ sang đích,
+          sau đó đổi MaCSDT/MaKhoaHoc/MaDK trong phạm vi khóa vừa chọn.
+        </div>
+
+        {centerPlan && (
+          <div className="moto-sync-center-grid">
+            <div>
+              {!centerPlanIsCurrent && (
+                <div className="moto-sync-warning">Plan chuyển mã đã cũ vì thông tin nhập đã thay đổi. Vui lòng lập kế hoạch lại.</div>
+              )}
+              <CenterTransferPlanMetrics plan={centerPlan} />
+              <MessageList title="Blockers" items={centerPlan.blockers} variant="error" />
+              <MessageList title="Warnings" items={centerPlan.warnings} variant="warning" />
+            </div>
+
+            <aside className="moto-sync-execute moto-sync-center-execute">
+              <SectionTitle title="Thực thi chuyển MaCSDT TEST" hint="Có transaction và rollback khi lỗi" />
+              <div className="moto-sync-confirm-box">
+                <p>Nhập đúng chuỗi xác nhận để bật nút thực thi:</p>
+                <code>{CENTER_TRANSFER_CONFIRM}</code>
+                <input
+                  className="field__input"
+                  value={centerConfirmText}
+                  onChange={(event) => setCenterConfirmText(event.target.value)}
+                  placeholder="Nhập chuỗi xác nhận"
+                />
+              </div>
+              <button
+                type="button"
+                className="btn btn--primary moto-sync-execute__button"
+                onClick={handleCenterExecute}
+                disabled={!canExecuteCenterTransfer}
+              >
+                {centerExecuting ? 'Đang chuyển MaCSDT TEST...' : 'Thực thi chuyển MaCSDT TEST'}
+              </button>
+              {!canExecuteCenterTransfer && (
+                <div className="moto-sync-muted">
+                  Execute chỉ mở khi plan hiện tại executable, không có blocker, và confirm text khớp tuyệt đối.
+                </div>
+              )}
+              <CenterTransferResult result={centerResult} />
+            </aside>
+          </div>
+        )}
+      </div>
+
       <div className="panel moto-sync-form">
+        <SectionTitle
+          title="Sync V1/V2 cùng MaCSDT"
+          hint="Luồng sync hiện có, giữ nguyên MaDK và MaKhoaHoc."
+        />
         <div className="toolbar__row">
           <label className="field">
             <span className="field__label">Hướng đồng bộ</span>
@@ -470,6 +687,38 @@ function CourseOptionsTable({
   );
 }
 
+function CenterTransferPlanMetrics({ plan }: { plan: MotoCenterTransferPlan }) {
+  const rows = [
+    ['maKhoaHocCu', plan.maKhoaHocCu],
+    ['maKhoaHocMoi', plan.maKhoaHocMoi],
+    ['sourceKhoaHoc', plan.sourceKhoaHocCount],
+    ['sourceBaoCaoI', plan.sourceBaoCaoICount],
+    ['sourceNguoiLX', plan.sourceNguoiLXCount],
+    ['sourceNguoiLXHoSo', plan.sourceNguoiLXHoSoCount],
+    ['targetKhoaHocCu', plan.targetKhoaHocCuCount],
+    ['targetKhoaHocMoi', plan.targetKhoaHocMoiCount],
+    ['targetBaoCaoICu', plan.targetBaoCaoICuCount],
+    ['targetBaoCaoIMoi', plan.targetBaoCaoIMoiCount],
+    ['targetNguoiLXHoSoCu', plan.targetNguoiLXHoSoCuCount],
+    ['targetNguoiLXHoSoMoi', plan.targetNguoiLXHoSoMoiCount],
+  ] as const;
+
+  return (
+    <div className="moto-sync-metrics">
+      {rows.map(([label, value]) => (
+        <div key={label} className="moto-sync-metric">
+          <span>{label}</span>
+          <strong>{typeof value === 'number' ? formatNumber(value) : value}</strong>
+        </div>
+      ))}
+      <div className={`moto-sync-metric ${plan.executable ? 'is-ok' : 'is-blocked'}`}>
+        <span>executable</span>
+        <strong>{plan.executable ? 'Có' : 'Không'}</strong>
+      </div>
+    </div>
+  );
+}
+
 function PlanMetrics({ plan }: { plan: MotoSyncPlan }) {
   const rows = [
     ['sourceRows', plan.sourceRows],
@@ -565,6 +814,35 @@ function UpdateSamples({ samples }: { samples: MotoSyncPlan['updateSamples'] }) 
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+function CenterTransferResult({ result }: { result: MotoCenterTransferExecuteResult | null }) {
+  if (!result) return null;
+
+  const summary = result.summary;
+  return (
+    <div className="moto-sync-result">
+      <SectionTitle title="Kết quả chuyển MaCSDT" hint={result.status} />
+      <p>
+        <strong>executed:</strong> {result.executed ? 'true' : 'false'}
+      </p>
+      <p>{result.message}</p>
+      {summary && (
+        <div className="moto-sync-result-grid">
+          <span>copiedKhoaHoc</span><strong>{formatNumber(summary.copiedKhoaHoc)}</strong>
+          <span>copiedBaoCaoI</span><strong>{formatNumber(summary.copiedBaoCaoI)}</strong>
+          <span>copiedNguoiLX</span><strong>{formatNumber(summary.copiedNguoiLX)}</strong>
+          <span>copiedNguoiLXHoSo</span><strong>{formatNumber(summary.copiedNguoiLXHoSo)}</strong>
+          <span>updatedNguoiLXHoSo</span><strong>{formatNumber(summary.updatedNguoiLXHoSo)}</strong>
+          <span>updatedNguoiLX</span><strong>{formatNumber(summary.updatedNguoiLX)}</strong>
+          <span>updatedKhoaHoc</span><strong>{formatNumber(summary.updatedKhoaHoc)}</strong>
+          <span>updatedBaoCaoI</span><strong>{formatNumber(summary.updatedBaoCaoI)}</strong>
+          <span>updatedGiayTo</span><strong>{formatNumber(summary.updatedGiayTo)}</strong>
+          <span>durationMs</span><strong>{formatNumber(summary.durationMs)}</strong>
+        </div>
+      )}
     </div>
   );
 }

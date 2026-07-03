@@ -12,6 +12,14 @@ public interface IMotoSyncRepository
         MotoSyncKhoaHocOptionsQuery query,
         CancellationToken cancellationToken = default);
 
+    Task<MotoCenterTransferPlanDto> BuildCenterTransferPlanAsync(
+        MotoCenterTransferPlanRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<MotoCenterTransferSummaryDto> ExecuteCenterTransferAsync(
+        MotoCenterTransferPlanRequest request,
+        CancellationToken cancellationToken = default);
+
     Task<MotoSyncExecuteSummaryDto> ExecuteInsertOnlyAsync(
         MotoSyncPlanRequest request,
         CancellationToken cancellationToken = default);

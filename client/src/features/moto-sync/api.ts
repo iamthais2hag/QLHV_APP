@@ -1,4 +1,8 @@
 import type {
+  MotoCenterTransferExecuteRequest,
+  MotoCenterTransferExecuteResult,
+  MotoCenterTransferPlan,
+  MotoCenterTransferPlanRequest,
   MotoSyncExecuteRequest,
   MotoSyncExecuteResult,
   MotoSyncKhoaHocOption,
@@ -59,6 +63,61 @@ export async function getMotoSyncKhoaHocOptions(
   }
 
   return (await response.json()) as MotoSyncKhoaHocOption[];
+}
+
+export async function getMotoCenterTransferPlan(
+  request: MotoCenterTransferPlanRequest,
+  signal?: AbortSignal,
+): Promise<MotoCenterTransferPlan> {
+  const query = new URLSearchParams();
+  query.set('sourceProfileCode', request.sourceProfileCode);
+  query.set('targetProfileCode', request.targetProfileCode);
+  query.set('maKhoaHocCu', request.maKhoaHocCu);
+  query.set('maCSDTCu', request.maCSDTCu);
+  query.set('maCSDTMoi', request.maCSDTMoi);
+  query.set('maSoGTVTMoi', request.maSoGTVTMoi);
+
+  const response = await fetch(`${API_BASE}/dong-bo-v2/moto/center-transfer-plan?${query.toString()}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(await getSafeErrorMessage(response, 'Không thể lập kế hoạch chuyển MaCSDT Moto TEST.'));
+  }
+
+  return (await response.json()) as MotoCenterTransferPlan;
+}
+
+export async function executeMotoCenterTransferTest(
+  request: MotoCenterTransferExecuteRequest,
+  signal?: AbortSignal,
+): Promise<MotoCenterTransferExecuteResult> {
+  const response = await fetch(`${API_BASE}/dong-bo-v2/moto/center-transfer-test`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+    signal,
+  });
+
+  const payload = await tryReadJson<MotoCenterTransferExecuteResult>(response);
+  if (!response.ok && payload) {
+    return payload;
+  }
+
+  if (!response.ok) {
+    throw new Error(await getSafeErrorMessage(response, 'Không thể thực thi chuyển MaCSDT Moto TEST.'));
+  }
+
+  if (!payload) {
+    throw new Error('Backend không trả kết quả chuyển MaCSDT Moto TEST hợp lệ.');
+  }
+
+  return payload;
 }
 
 export async function executeMotoSyncTest(
