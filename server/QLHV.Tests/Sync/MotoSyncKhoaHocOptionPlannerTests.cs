@@ -42,4 +42,20 @@ public sealed class MotoSyncKhoaHocOptionPlannerTests
         Assert.Contains("[TenKH] LIKE @SearchLike", sql, StringComparison.Ordinal);
         Assert.Contains("ORDER BY [NgayKhaiGiang] DESC, [MaKH] DESC", sql, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Format_ngay_khai_giang_returns_stable_iso_date_for_date_values()
+    {
+        Assert.Equal("2026-05-26", MotoSyncKhoaHocOptionPlanner.FormatNgayKhaiGiang(new DateTime(2026, 5, 26, 0, 0, 0)));
+        Assert.Equal("2026-04-13", MotoSyncKhoaHocOptionPlanner.FormatNgayKhaiGiang(new DateTimeOffset(2026, 4, 13, 0, 0, 0, TimeSpan.Zero)));
+    }
+
+    [Fact]
+    public void Format_ngay_khai_giang_trims_string_fallback_and_handles_empty_values()
+    {
+        Assert.Equal("26/05/2026 00:00:00", MotoSyncKhoaHocOptionPlanner.FormatNgayKhaiGiang(" 26/05/2026 00:00:00 "));
+        Assert.Null(MotoSyncKhoaHocOptionPlanner.FormatNgayKhaiGiang("   "));
+        Assert.Null(MotoSyncKhoaHocOptionPlanner.FormatNgayKhaiGiang(DBNull.Value));
+        Assert.Null(MotoSyncKhoaHocOptionPlanner.FormatNgayKhaiGiang(null));
+    }
 }
