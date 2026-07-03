@@ -695,12 +695,16 @@ function CenterTransferPlanMetrics({ plan }: { plan: MotoCenterTransferPlan }) {
     ['sourceBaoCaoI', plan.sourceBaoCaoICount],
     ['sourceNguoiLX', plan.sourceNguoiLXCount],
     ['sourceNguoiLXHoSo', plan.sourceNguoiLXHoSoCount],
+    ['sourceNguoiLXHSGiayTo', plan.sourceNguoiLXHSGiayToCount],
     ['targetKhoaHocCu', plan.targetKhoaHocCuCount],
     ['targetKhoaHocMoi', plan.targetKhoaHocMoiCount],
     ['targetBaoCaoICu', plan.targetBaoCaoICuCount],
     ['targetBaoCaoIMoi', plan.targetBaoCaoIMoiCount],
     ['targetNguoiLXHoSoCu', plan.targetNguoiLXHoSoCuCount],
     ['targetNguoiLXHoSoMoi', plan.targetNguoiLXHoSoMoiCount],
+    ['targetNguoiLXHSGiayToCu', plan.targetNguoiLXHSGiayToCuCount],
+    ['targetNguoiLXHSGiayToMoi', plan.targetNguoiLXHSGiayToMoiCount],
+    ['plannedCopyNguoiLXHSGiayTo', plan.plannedCopyNguoiLXHSGiayTo],
   ] as const;
 
   return (
@@ -835,11 +839,18 @@ function CenterTransferResult({ result }: { result: MotoCenterTransferExecuteRes
           <span>copiedBaoCaoI</span><strong>{formatNumber(summary.copiedBaoCaoI)}</strong>
           <span>copiedNguoiLX</span><strong>{formatNumber(summary.copiedNguoiLX)}</strong>
           <span>copiedNguoiLXHoSo</span><strong>{formatNumber(summary.copiedNguoiLXHoSo)}</strong>
+          <span>copiedNguoiLXHSGiayTo</span><strong>{formatNumber(summary.copiedNguoiLXHSGiayTo)}</strong>
           <span>updatedNguoiLXHoSo</span><strong>{formatNumber(summary.updatedNguoiLXHoSo)}</strong>
           <span>updatedNguoiLX</span><strong>{formatNumber(summary.updatedNguoiLX)}</strong>
           <span>updatedKhoaHoc</span><strong>{formatNumber(summary.updatedKhoaHoc)}</strong>
           <span>updatedBaoCaoI</span><strong>{formatNumber(summary.updatedBaoCaoI)}</strong>
           <span>updatedGiayTo</span><strong>{formatNumber(summary.updatedGiayTo)}</strong>
+          <span>updatedNguoiLXHSGiayTo</span><strong>{formatNumber(summary.updatedNguoiLXHSGiayTo)}</strong>
+          <span>targetKhoaHocMoiCountAfter</span><strong>{formatNumber(summary.targetKhoaHocMoiCountAfter)}</strong>
+          <span>targetBaoCaoIMoiCountAfter</span><strong>{formatNumber(summary.targetBaoCaoIMoiCountAfter)}</strong>
+          <span>targetNguoiLXHoSoMoiCountAfter</span><strong>{formatNumber(summary.targetNguoiLXHoSoMoiCountAfter)}</strong>
+          <span>targetNguoiLXHSGiayToMoiCountAfter</span><strong>{formatNumber(summary.targetNguoiLXHSGiayToMoiCountAfter)}</strong>
+          <span>targetNguoiLXMoiCountAfter</span><strong>{formatNumber(summary.targetNguoiLXMoiCountAfter)}</strong>
           <span>durationMs</span><strong>{formatNumber(summary.durationMs)}</strong>
         </div>
       )}

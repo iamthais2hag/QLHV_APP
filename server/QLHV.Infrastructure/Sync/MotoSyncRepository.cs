@@ -414,12 +414,27 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
         var targetHoSoCu = await CountByColumnAsync(target, "NguoiLX_HoSo", "MaKhoaHoc", maKhoaHocCu, null, cancellationToken);
         var targetHoSoMoi = await CountByColumnAsync(target, "NguoiLX_HoSo", "MaKhoaHoc", maKhoaHocMoi, null, cancellationToken);
         var sourceMaDks = await ReadHoSoMaDksAsync(source, maKhoaHocCu, null, cancellationToken);
+        var newMaDks = sourceMaDks.Select(maDk => ReplaceCenterCode(maDk, maCSDTCu, maCSDTMoi)).ToArray();
         var targetNewMaDks = await CountExistingMaDksAsync(
             target,
             "NguoiLX",
-            sourceMaDks.Select(maDk => ReplaceCenterCode(maDk, maCSDTCu, maCSDTMoi)).ToArray(),
+            newMaDks,
             null,
             cancellationToken);
+        var sourceGiayToExists = await TableExistsAsync(source, "NguoiLXHS_GiayTo", null, cancellationToken);
+        var targetGiayToExists = await TableExistsAsync(target, "NguoiLXHS_GiayTo", null, cancellationToken);
+        var sourceGiayTo = sourceGiayToExists
+            ? await CountGiayToByMaDksAsync(source, sourceMaDks, null, cancellationToken)
+            : 0;
+        var targetGiayToCu = targetGiayToExists
+            ? await CountGiayToByMaDksAsync(target, sourceMaDks, null, cancellationToken)
+            : 0;
+        var targetGiayToMoi = targetGiayToExists
+            ? await CountGiayToByMaDksAsync(target, newMaDks, null, cancellationToken)
+            : 0;
+        var plannedCopyGiayTo = sourceGiayToExists && targetGiayToExists
+            ? Math.Max(0, sourceGiayTo - targetGiayToCu)
+            : 0;
 
         if (sourceKhoaHoc == 0)
         {
@@ -436,12 +451,22 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
             blockers.Add($"Target da co {targetNewMaDks} MaDK moi trong dbo.NguoiLX, khong the chuyen MaCSDT an toan.");
         }
 
-        if (targetKhoaHocCu > 0 || targetBaoCaoICu > 0 || targetHoSoCu > 0)
+        if (targetKhoaHocCu > 0 || targetBaoCaoICu > 0 || targetHoSoCu > 0 || targetGiayToCu > 0)
         {
             blockers.Add("Target đã có MaKhoaHocCu; không thể phân biệt dữ liệu có sẵn với dữ liệu vừa copy. Hãy chọn target sạch hoặc khóa chưa tồn tại.");
         }
 
         warnings.Add("Cột identity không được copy; SQL Server tự sinh giá trị mới.");
+
+        if (!sourceGiayToExists)
+        {
+            warnings.Add("Source thieu bang dbo.NguoiLXHS_GiayTo; bo qua copy giay to.");
+        }
+
+        if (!targetGiayToExists)
+        {
+            warnings.Add("Target thieu bang dbo.NguoiLXHS_GiayTo; bo qua copy/cap nhat giay to.");
+        }
 
         if (sourceBaoCaoI == 0)
         {
@@ -471,12 +496,16 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
             SourceBaoCaoICount = sourceBaoCaoI,
             SourceNguoiLXCount = sourceNguoiLX,
             SourceNguoiLXHoSoCount = sourceHoSo,
+            SourceNguoiLXHSGiayToCount = sourceGiayTo,
             TargetKhoaHocCuCount = targetKhoaHocCu,
             TargetKhoaHocMoiCount = targetKhoaHocMoi,
             TargetBaoCaoICuCount = targetBaoCaoICu,
             TargetBaoCaoIMoiCount = targetBaoCaoIMoi,
             TargetNguoiLXHoSoCuCount = targetHoSoCu,
             TargetNguoiLXHoSoMoiCount = targetHoSoMoi,
+            TargetNguoiLXHSGiayToCuCount = targetGiayToCu,
+            TargetNguoiLXHSGiayToMoiCount = targetGiayToMoi,
+            PlannedCopyNguoiLXHSGiayTo = plannedCopyGiayTo,
             Executable = blockers.Count == 0,
             Blockers = blockers,
             Warnings = warnings,
@@ -514,12 +543,19 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
             var copiedBaoCaoI = await CopyMissingRowsByColumnAsync(source, target, transaction, "BaoCaoI", "MaKH", maKhoaHocCu, cancellationToken);
             var copiedNguoiLX = await CopyMissingNguoiLXForCenterTransferAsync(source, target, transaction, oldMaDks, cancellationToken);
             var copiedHoSo = await CopyMissingHoSoForCenterTransferAsync(source, target, transaction, oldMaDks, maKhoaHocCu, cancellationToken);
+            var copiedGiayTo = await CopyMissingGiayToForCenterTransferAsync(source, target, transaction, oldMaDks, cancellationToken);
 
             var updatedHoSo = await UpdateCenterTransferHoSoAsync(target, transaction, oldMaDks, maKhoaHocCu, maKhoaHocMoi, maCSDTCu, maCSDTMoi, cancellationToken);
             var updatedNguoiLX = await UpdateCenterTransferNguoiLXAsync(target, transaction, oldMaDks, maCSDTCu, maCSDTMoi, cancellationToken);
             var updatedKhoaHoc = await UpdateCenterTransferKhoaHocAsync(target, transaction, maKhoaHocCu, maKhoaHocMoi, maCSDTMoi, maSoGTVTMoi, cancellationToken);
             var updatedBaoCaoI = await UpdateCenterTransferBaoCaoIAsync(target, transaction, maKhoaHocCu, maKhoaHocMoi, maCSDTCu, maCSDTMoi, cancellationToken);
             var updatedGiayTo = await UpdateCenterTransferGiayToAsync(target, transaction, oldMaDks, maCSDTCu, maCSDTMoi, cancellationToken);
+            var newMaDks = oldMaDks.Select(maDk => ReplaceCenterCode(maDk, maCSDTCu, maCSDTMoi)).ToArray();
+            var targetKhoaHocMoiAfter = await CountByColumnAsync(target, "KhoaHoc", "MaKH", maKhoaHocMoi, transaction, cancellationToken);
+            var targetBaoCaoIMoiAfter = await CountByColumnAsync(target, "BaoCaoI", "MaKH", maKhoaHocMoi, transaction, cancellationToken);
+            var targetHoSoMoiAfter = await CountByColumnAsync(target, "NguoiLX_HoSo", "MaKhoaHoc", maKhoaHocMoi, transaction, cancellationToken);
+            var targetGiayToMoiAfter = await CountGiayToByMaDksAsync(target, newMaDks, transaction, cancellationToken);
+            var targetNguoiLXMoiAfter = await CountExistingMaDksAsync(target, "NguoiLX", newMaDks, transaction, cancellationToken);
 
             await SetCenterTransferConstraintsAsync(target, transaction, enable: true, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
@@ -535,11 +571,18 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
                 CopiedBaoCaoI = copiedBaoCaoI,
                 CopiedNguoiLX = copiedNguoiLX,
                 CopiedNguoiLXHoSo = copiedHoSo,
+                CopiedNguoiLXHSGiayTo = copiedGiayTo,
                 UpdatedNguoiLXHoSo = updatedHoSo,
                 UpdatedNguoiLX = updatedNguoiLX,
                 UpdatedKhoaHoc = updatedKhoaHoc,
                 UpdatedBaoCaoI = updatedBaoCaoI,
                 UpdatedGiayTo = updatedGiayTo,
+                UpdatedNguoiLXHSGiayTo = updatedGiayTo,
+                TargetKhoaHocMoiCountAfter = targetKhoaHocMoiAfter,
+                TargetBaoCaoIMoiCountAfter = targetBaoCaoIMoiAfter,
+                TargetNguoiLXHoSoMoiCountAfter = targetHoSoMoiAfter,
+                TargetNguoiLXHSGiayToMoiCountAfter = targetGiayToMoiAfter,
+                TargetNguoiLXMoiCountAfter = targetNguoiLXMoiAfter,
                 StartedAt = startedAt,
                 EndedAt = endedAt,
                 DurationMs = (long)(endedAt - startedAt).TotalMilliseconds,
@@ -842,6 +885,45 @@ WHERE hs.MaKhoaHoc = @MaKhoaHoc;",
         return total;
     }
 
+    private async Task<long> CountGiayToByMaDksAsync(
+        SqlConnection connection,
+        IReadOnlyCollection<string> maDks,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        if (maDks.Count == 0 ||
+            !await TableExistsAsync(connection, "NguoiLXHS_GiayTo", transaction, cancellationToken))
+        {
+            return 0;
+        }
+
+        var columns = await ReadColumnsAsync(connection, "NguoiLXHS_GiayTo", transaction, cancellationToken);
+        if (!columns.Any(c => string.Equals(c.Name, "MaDK", StringComparison.OrdinalIgnoreCase)))
+        {
+            return 0;
+        }
+
+        long total = 0;
+        foreach (var chunk in maDks.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).Chunk(900))
+        {
+            if (chunk.Length == 0)
+            {
+                continue;
+            }
+
+            var parameters = CreateInParameters(chunk, "@p");
+            await using var command = new SqlCommand(
+                $"SELECT COUNT_BIG(*) FROM dbo.NguoiLXHS_GiayTo WHERE MaDK IN ({string.Join(", ", parameters.Select(p => p.ParameterName))});",
+                connection,
+                transaction);
+            command.CommandTimeout = _options.TimeoutSeconds;
+            command.Parameters.AddRange(parameters.ToArray());
+            total += Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken) ?? 0L);
+        }
+
+        return total;
+    }
+
     private async Task SetCenterTransferConstraintsAsync(
         SqlConnection target,
         SqlTransaction transaction,
@@ -976,6 +1058,59 @@ WHERE hs.MaKhoaHoc = @MaKhoaHoc;",
             cancellationToken);
         var rowsToInsert = FilterRows(sourceRows, row => !targetExisting.Contains(Convert.ToString(row["MaDK"]) ?? string.Empty));
         await BulkCopyAsync(target, transaction, "NguoiLX_HoSo", columns, rowsToInsert, cancellationToken);
+        return rowsToInsert.Rows.Count;
+    }
+
+    private async Task<long> CopyMissingGiayToForCenterTransferAsync(
+        SqlConnection source,
+        SqlConnection target,
+        SqlTransaction transaction,
+        IReadOnlyCollection<string> oldMaDks,
+        CancellationToken cancellationToken)
+    {
+        if (oldMaDks.Count == 0 ||
+            !await TableExistsAsync(source, "NguoiLXHS_GiayTo", null, cancellationToken) ||
+            !await TableExistsAsync(target, "NguoiLXHS_GiayTo", transaction, cancellationToken))
+        {
+            return 0;
+        }
+
+        var columns = await GetCommonInsertColumnsAsync(source, target, "NguoiLXHS_GiayTo", transaction, cancellationToken);
+        if (!columns.Contains("MaDK", StringComparer.OrdinalIgnoreCase))
+        {
+            return 0;
+        }
+
+        var sourceRows = await ReadRowsByMaDksAsync(
+            source,
+            "NguoiLXHS_GiayTo",
+            columns,
+            oldMaDks,
+            null,
+            cancellationToken);
+        if (sourceRows.Rows.Count == 0)
+        {
+            return 0;
+        }
+
+        DataTable rowsToInsert;
+        if (columns.Contains("MaGT", StringComparer.OrdinalIgnoreCase))
+        {
+            var targetExisting = await ReadGiayToKeysAsync(target, oldMaDks, transaction, cancellationToken);
+            rowsToInsert = FilterRows(sourceRows, row =>
+            {
+                var maDk = Convert.ToString(row["MaDK"]) ?? string.Empty;
+                var maGt = Convert.ToString(row["MaGT"]) ?? string.Empty;
+                return !targetExisting.Contains($"{maGt}|{maDk}");
+            });
+        }
+        else
+        {
+            var targetExistingMaDks = await ReadMaDkKeysAsync(target, "NguoiLXHS_GiayTo", oldMaDks, transaction, cancellationToken);
+            rowsToInsert = FilterRows(sourceRows, row => !targetExistingMaDks.Contains(Convert.ToString(row["MaDK"]) ?? string.Empty));
+        }
+
+        await BulkCopyAsync(target, transaction, "NguoiLXHS_GiayTo", columns, rowsToInsert, cancellationToken);
         return rowsToInsert.Rows.Count;
     }
 
@@ -2450,12 +2585,12 @@ WHERE MaDK LIKE @MaDkPrefixLike
         var sourceColumns = await ReadColumnsAsync(source, tableName, null, cancellationToken);
         var targetColumns = await ReadColumnsAsync(target, tableName, transaction, cancellationToken);
         var sourceNames = sourceColumns
-            .Where(c => !c.IsIdentity && !c.IsComputed && !c.IsRowVersion)
+            .Where(c => !c.IsIdentity && !c.IsComputed && !c.IsRowVersion && !IsBinaryType(c.DataType))
             .Select(c => c.Name)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         return targetColumns
-            .Where(c => !c.IsIdentity && !c.IsComputed && !c.IsRowVersion && sourceNames.Contains(c.Name))
+            .Where(c => !c.IsIdentity && !c.IsComputed && !c.IsRowVersion && !IsBinaryType(c.DataType) && sourceNames.Contains(c.Name))
             .Select(c => c.Name)
             .ToArray();
     }

@@ -115,6 +115,8 @@ public sealed class MotoCenterTransferPlanDto
 
     public long SourceNguoiLXHoSoCount { get; init; }
 
+    public long SourceNguoiLXHSGiayToCount { get; init; }
+
     public long TargetKhoaHocCuCount { get; init; }
 
     public long TargetKhoaHocMoiCount { get; init; }
@@ -126,6 +128,12 @@ public sealed class MotoCenterTransferPlanDto
     public long TargetNguoiLXHoSoCuCount { get; init; }
 
     public long TargetNguoiLXHoSoMoiCount { get; init; }
+
+    public long TargetNguoiLXHSGiayToCuCount { get; init; }
+
+    public long TargetNguoiLXHSGiayToMoiCount { get; init; }
+
+    public long PlannedCopyNguoiLXHSGiayTo { get; init; }
 
     public bool Executable { get; init; }
 
@@ -165,6 +173,8 @@ public sealed class MotoCenterTransferSummaryDto
 
     public long CopiedNguoiLXHoSo { get; init; }
 
+    public long CopiedNguoiLXHSGiayTo { get; init; }
+
     public long UpdatedNguoiLXHoSo { get; init; }
 
     public long UpdatedNguoiLX { get; init; }
@@ -174,6 +184,18 @@ public sealed class MotoCenterTransferSummaryDto
     public long UpdatedBaoCaoI { get; init; }
 
     public long UpdatedGiayTo { get; init; }
+
+    public long UpdatedNguoiLXHSGiayTo { get; init; }
+
+    public long TargetKhoaHocMoiCountAfter { get; init; }
+
+    public long TargetBaoCaoIMoiCountAfter { get; init; }
+
+    public long TargetNguoiLXHoSoMoiCountAfter { get; init; }
+
+    public long TargetNguoiLXHSGiayToMoiCountAfter { get; init; }
+
+    public long TargetNguoiLXMoiCountAfter { get; init; }
 
     public DateTime StartedAt { get; init; }
 

@@ -249,6 +249,26 @@ public sealed class MotoSyncServiceTests
     }
 
     [Fact]
+    public async Task Center_transfer_plan_blocks_when_target_old_giay_to_exists()
+    {
+        const string blocker = "Target đã có MaKhoaHocCu; không thể phân biệt dữ liệu có sẵn với dữ liệu vừa copy. Hãy chọn target sạch hoặc khóa chưa tồn tại.";
+        var repo = new FakeMotoSyncRepository(CleanPlan())
+        {
+            CenterTransferPlan = CleanCenterTransferPlan(
+                targetGiayToCuCount: 4,
+                blockers: new[] { blocker }),
+        };
+        var service = new MotoSyncService(repo);
+
+        var result = await service.GetCenterTransferPlanAsync(CenterTransferRequest());
+
+        Assert.False(result.Executable);
+        Assert.Equal(4, result.TargetNguoiLXHSGiayToCuCount);
+        Assert.Contains(blocker, result.Blockers);
+        Assert.Equal(1, repo.CenterTransferPlanCalls);
+    }
+
+    [Fact]
     public async Task Center_transfer_execute_refuses_when_target_old_hoso_exists_before_write()
     {
         const string blocker = "Target đã có MaKhoaHocCu; không thể phân biệt dữ liệu có sẵn với dữ liệu vừa copy. Hãy chọn target sạch hoặc khóa chưa tồn tại.";
@@ -286,6 +306,51 @@ public sealed class MotoSyncServiceTests
     }
 
     [Fact]
+    public async Task Center_transfer_plan_returns_giay_to_counts_and_identity_warning()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan())
+        {
+            CenterTransferPlan = CleanCenterTransferPlan(
+                sourceGiayToCount: 7,
+                targetGiayToCuCount: 1,
+                targetGiayToMoiCount: 2,
+                plannedCopyGiayTo: 6),
+        };
+        var service = new MotoSyncService(repo);
+
+        var result = await service.GetCenterTransferPlanAsync(CenterTransferRequest());
+
+        Assert.True(result.Executable);
+        Assert.Equal(7, result.SourceNguoiLXHSGiayToCount);
+        Assert.Equal(1, result.TargetNguoiLXHSGiayToCuCount);
+        Assert.Equal(2, result.TargetNguoiLXHSGiayToMoiCount);
+        Assert.Equal(6, result.PlannedCopyNguoiLXHSGiayTo);
+        Assert.Contains(result.Warnings, warning => warning.Contains("Cột identity không được copy", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Center_transfer_plan_missing_giay_to_table_warns_without_blocking()
+    {
+        const string warning = "Source thieu bang dbo.NguoiLXHS_GiayTo; bo qua copy giay to.";
+        var repo = new FakeMotoSyncRepository(CleanPlan())
+        {
+            CenterTransferPlan = CleanCenterTransferPlan(
+                sourceGiayToCount: 0,
+                targetGiayToCuCount: 0,
+                targetGiayToMoiCount: 0,
+                plannedCopyGiayTo: 0,
+                warnings: new[] { warning }),
+        };
+        var service = new MotoSyncService(repo);
+
+        var result = await service.GetCenterTransferPlanAsync(CenterTransferRequest());
+
+        Assert.True(result.Executable);
+        Assert.Equal(0, result.PlannedCopyNguoiLXHSGiayTo);
+        Assert.Contains(warning, result.Warnings);
+    }
+
+    [Fact]
     public void Center_transfer_code_does_not_hardcode_owner_sample_values_or_destructive_keywords()
     {
         var source = File.ReadAllText(FindRepositoryFile());
@@ -306,10 +371,38 @@ public sealed class MotoSyncServiceTests
         var source = File.ReadAllText(FindRepositoryFile());
 
         Assert.Contains("targetKhoaHocCu > 0 || targetBaoCaoICu > 0 || targetHoSoCu > 0", source, StringComparison.Ordinal);
+        Assert.Contains("targetGiayToCu > 0", source, StringComparison.Ordinal);
         Assert.Contains("Target đã có MaKhoaHocCu; không thể phân biệt dữ liệu có sẵn với dữ liệu vừa copy. Hãy chọn target sạch hoặc khóa chưa tồn tại.", source, StringComparison.Ordinal);
-        Assert.Contains(".Where(c => !c.IsIdentity && !c.IsComputed && !c.IsRowVersion)", source, StringComparison.Ordinal);
-        Assert.Contains(".Where(c => !c.IsIdentity && !c.IsComputed && !c.IsRowVersion && sourceNames.Contains(c.Name))", source, StringComparison.Ordinal);
+        Assert.Contains(".Where(c => !c.IsIdentity && !c.IsComputed && !c.IsRowVersion && !IsBinaryType(c.DataType))", source, StringComparison.Ordinal);
+        Assert.Contains(".Where(c => !c.IsIdentity && !c.IsComputed && !c.IsRowVersion && !IsBinaryType(c.DataType) && sourceNames.Contains(c.Name))", source, StringComparison.Ordinal);
         Assert.DoesNotContain("SET IDENTITY_INSERT", source, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Center_transfer_repository_copies_giay_to_before_update_and_scopes_update_to_selected_old_madks()
+    {
+        var source = File.ReadAllText(FindRepositoryFile());
+
+        var copyIndex = source.IndexOf("CopyMissingGiayToForCenterTransferAsync(source, target, transaction, oldMaDks", StringComparison.Ordinal);
+        var updateIndex = source.IndexOf("UpdateCenterTransferGiayToAsync(target, transaction, oldMaDks", StringComparison.Ordinal);
+        Assert.True(copyIndex >= 0, "Expected GiayTo copy call in center-transfer execute path.");
+        Assert.True(updateIndex >= 0, "Expected GiayTo update call in center-transfer execute path.");
+        Assert.True(copyIndex < updateIndex, "GiayTo must be copied before MaDK is changed.");
+        Assert.Contains("WHERE MaDK LIKE @MaDkPrefixLike", source, StringComparison.Ordinal);
+        Assert.Contains("AND MaDK IN ({string.Join(\", \", parameters.Select(p => p.ParameterName))});", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Center_transfer_repository_has_giay_to_plan_counts_and_missing_table_warnings()
+    {
+        var source = File.ReadAllText(FindRepositoryFile());
+
+        Assert.Contains("SourceNguoiLXHSGiayToCount = sourceGiayTo", source, StringComparison.Ordinal);
+        Assert.Contains("TargetNguoiLXHSGiayToCuCount = targetGiayToCu", source, StringComparison.Ordinal);
+        Assert.Contains("TargetNguoiLXHSGiayToMoiCount = targetGiayToMoi", source, StringComparison.Ordinal);
+        Assert.Contains("PlannedCopyNguoiLXHSGiayTo = plannedCopyGiayTo", source, StringComparison.Ordinal);
+        Assert.Contains("Source thieu bang dbo.NguoiLXHS_GiayTo; bo qua copy giay to.", source, StringComparison.Ordinal);
+        Assert.Contains("Target thieu bang dbo.NguoiLXHS_GiayTo; bo qua copy/cap nhat giay to.", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -783,9 +876,15 @@ public sealed class MotoSyncServiceTests
         long targetKhoaHocCuCount = 0,
         long targetBaoCaoICuCount = 0,
         long targetNguoiLXHoSoCuCount = 0,
-        IReadOnlyList<string>? blockers = null)
+        long sourceGiayToCount = 3,
+        long targetGiayToCuCount = 0,
+        long targetGiayToMoiCount = 0,
+        long plannedCopyGiayTo = 3,
+        IReadOnlyList<string>? blockers = null,
+        IReadOnlyList<string>? warnings = null)
     {
         blockers ??= Array.Empty<string>();
+        warnings ??= new[] { "Cột identity không được copy; SQL Server tự sinh giá trị mới." };
         return new MotoCenterTransferPlanDto
         {
             SourceProfileCode = "CSDT_V1",
@@ -799,12 +898,17 @@ public sealed class MotoSyncServiceTests
             SourceBaoCaoICount = 1,
             SourceNguoiLXCount = 10,
             SourceNguoiLXHoSoCount = 10,
+            SourceNguoiLXHSGiayToCount = sourceGiayToCount,
             TargetKhoaHocCuCount = targetKhoaHocCuCount,
             TargetKhoaHocMoiCount = targetKhoaHocMoiCount,
             TargetBaoCaoICuCount = targetBaoCaoICuCount,
             TargetNguoiLXHoSoCuCount = targetNguoiLXHoSoCuCount,
+            TargetNguoiLXHSGiayToCuCount = targetGiayToCuCount,
+            TargetNguoiLXHSGiayToMoiCount = targetGiayToMoiCount,
+            PlannedCopyNguoiLXHSGiayTo = plannedCopyGiayTo,
             Executable = blockers.Count == 0,
             Blockers = blockers,
+            Warnings = warnings,
         };
     }
 
@@ -954,12 +1058,16 @@ public sealed class MotoSyncServiceTests
                 SourceBaoCaoICount = CenterTransferPlan.SourceBaoCaoICount,
                 SourceNguoiLXCount = CenterTransferPlan.SourceNguoiLXCount,
                 SourceNguoiLXHoSoCount = CenterTransferPlan.SourceNguoiLXHoSoCount,
+                SourceNguoiLXHSGiayToCount = CenterTransferPlan.SourceNguoiLXHSGiayToCount,
                 TargetKhoaHocCuCount = CenterTransferPlan.TargetKhoaHocCuCount,
                 TargetKhoaHocMoiCount = CenterTransferPlan.TargetKhoaHocMoiCount,
                 TargetBaoCaoICuCount = CenterTransferPlan.TargetBaoCaoICuCount,
                 TargetBaoCaoIMoiCount = CenterTransferPlan.TargetBaoCaoIMoiCount,
                 TargetNguoiLXHoSoCuCount = CenterTransferPlan.TargetNguoiLXHoSoCuCount,
                 TargetNguoiLXHoSoMoiCount = CenterTransferPlan.TargetNguoiLXHoSoMoiCount,
+                TargetNguoiLXHSGiayToCuCount = CenterTransferPlan.TargetNguoiLXHSGiayToCuCount,
+                TargetNguoiLXHSGiayToMoiCount = CenterTransferPlan.TargetNguoiLXHSGiayToMoiCount,
+                PlannedCopyNguoiLXHSGiayTo = CenterTransferPlan.PlannedCopyNguoiLXHSGiayTo,
                 Executable = CenterTransferPlan.Blockers.Count == 0 && CenterTransferPlan.Executable,
                 Blockers = CenterTransferPlan.Blockers,
                 Warnings = CenterTransferPlan.Warnings,
@@ -985,7 +1093,13 @@ public sealed class MotoSyncServiceTests
                 CopiedBaoCaoI = CenterTransferPlan.SourceBaoCaoICount,
                 CopiedNguoiLX = CenterTransferPlan.SourceNguoiLXCount,
                 CopiedNguoiLXHoSo = CenterTransferPlan.SourceNguoiLXHoSoCount,
+                CopiedNguoiLXHSGiayTo = CenterTransferPlan.PlannedCopyNguoiLXHSGiayTo,
                 UpdatedKhoaHoc = 1,
+                TargetKhoaHocMoiCountAfter = 1,
+                TargetBaoCaoIMoiCountAfter = CenterTransferPlan.SourceBaoCaoICount,
+                TargetNguoiLXHoSoMoiCountAfter = CenterTransferPlan.SourceNguoiLXHoSoCount,
+                TargetNguoiLXHSGiayToMoiCountAfter = CenterTransferPlan.PlannedCopyNguoiLXHSGiayTo,
+                TargetNguoiLXMoiCountAfter = CenterTransferPlan.SourceNguoiLXCount,
                 StartedAt = DateTime.UtcNow,
                 EndedAt = DateTime.UtcNow,
             });
