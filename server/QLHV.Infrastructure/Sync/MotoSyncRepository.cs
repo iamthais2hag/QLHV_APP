@@ -2000,7 +2000,7 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
                 NullIfWhiteSpace(Convert.ToString(reader["TenKhoaHoc"])),
                 isHangGplx ? null : NullIfWhiteSpace(hangValue),
                 isHangGplx ? NullIfWhiteSpace(hangValue) : null,
-                NullIfWhiteSpace(Convert.ToString(reader["NgayKhaiGiang"]))));
+                MotoSyncKhoaHocOptionPlanner.FormatNgayKhaiGiang(reader["NgayKhaiGiang"])));
         }
 
         return rows;

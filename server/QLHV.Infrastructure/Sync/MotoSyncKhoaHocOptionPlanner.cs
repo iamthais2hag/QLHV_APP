@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace QLHV.Infrastructure.Sync;
 
 internal static class MotoSyncKhoaHocOptionPlanner
@@ -38,6 +40,26 @@ internal static class MotoSyncKhoaHocOptionPlanner
            (string.Equals(columnName, "HangGPLX", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(columnName, "HangGPLXHoc", StringComparison.OrdinalIgnoreCase));
 
+    public static string? FormatNgayKhaiGiang(object? value)
+    {
+        if (value is null || value is DBNull)
+        {
+            return null;
+        }
+
+        if (value is DateTime dateTime)
+        {
+            return dateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        }
+
+        if (value is DateTimeOffset dateTimeOffset)
+        {
+            return dateTimeOffset.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        }
+
+        return NullIfWhiteSpace(Convert.ToString(value, CultureInfo.InvariantCulture));
+    }
+
     public static string BuildOptionsSql(
         MotoSyncKhoaHocQueryShape shape,
         bool hasSearch)
@@ -70,6 +92,12 @@ ORDER BY {orderBy};";
     {
         var names = columnNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
         return candidates.FirstOrDefault(names.Contains);
+    }
+
+    private static string? NullIfWhiteSpace(string? value)
+    {
+        var trimmed = value?.Trim();
+        return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
     }
 
     private static string Quote(string identifier) => $"[{identifier.Replace("]", "]]", StringComparison.Ordinal)}]";

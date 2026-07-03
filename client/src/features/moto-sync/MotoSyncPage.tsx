@@ -864,16 +864,35 @@ function formatDateTime(value: string): string {
 }
 
 function formatOptionalDate(value: string | null): string {
-  if (!value) {
+  const trimmed = value?.trim();
+  if (!trimmed) {
     return '-';
   }
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
+  const date = parseOptionalDate(trimmed);
+  if (!date) {
+    return trimmed;
   }
 
   return new Intl.DateTimeFormat('vi-VN', {
     dateStyle: 'short',
   }).format(date);
+}
+
+function parseOptionalDate(value: string): Date | null {
+  const isoDate = /^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/.exec(value);
+  if (isoDate) {
+    const year = Number(isoDate[1]);
+    const month = Number(isoDate[2]);
+    const day = Number(isoDate[3]);
+    const date = new Date(year, month - 1, day);
+    if (date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day) {
+      return date;
+    }
+
+    return null;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
