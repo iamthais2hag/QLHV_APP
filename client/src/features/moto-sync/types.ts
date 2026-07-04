@@ -55,6 +55,10 @@ export interface MotoCenterTransferPlan {
   maCSDTCu: string;
   maCSDTMoi: string;
   maSoGTVTMoi: string;
+  targetMaCSDTMoiExists: boolean;
+  targetMaCSDTMoiTenDV: string | null;
+  targetMaSoGTVTMoiExists: boolean;
+  targetMaSoGTVTMoiTenDV: string | null;
   sourceKhoaHocCount: number;
   sourceBaoCaoICount: number;
   sourceNguoiLXCount: number;

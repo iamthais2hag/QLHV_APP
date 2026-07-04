@@ -107,6 +107,14 @@ public sealed class MotoCenterTransferPlanDto
 
     public string MaSoGTVTMoi { get; init; } = string.Empty;
 
+    public bool TargetMaCSDTMoiExists { get; init; }
+
+    public string? TargetMaCSDTMoiTenDV { get; init; }
+
+    public bool TargetMaSoGTVTMoiExists { get; init; }
+
+    public string? TargetMaSoGTVTMoiTenDV { get; init; }
+
     public long SourceKhoaHocCount { get; init; }
 
     public long SourceBaoCaoICount { get; init; }

@@ -132,6 +132,25 @@ public sealed class MotoSyncServiceTests
     }
 
     [Fact]
+    public async Task Center_transfer_plan_includes_donvigttv_names_when_codes_exist()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan())
+        {
+            CenterTransferPlan = CleanCenterTransferPlan(
+                targetMaCSDTMoiTenDV: "Trung tam moi",
+                targetMaSoGTVTMoiTenDV: "So GTVT moi"),
+        };
+        var service = new MotoSyncService(repo);
+
+        var result = await service.GetCenterTransferPlanAsync(CenterTransferRequest());
+
+        Assert.True(result.TargetMaCSDTMoiExists);
+        Assert.Equal("Trung tam moi", result.TargetMaCSDTMoiTenDV);
+        Assert.True(result.TargetMaSoGTVTMoiExists);
+        Assert.Equal("So GTVT moi", result.TargetMaSoGTVTMoiTenDV);
+    }
+
+    [Fact]
     public async Task Center_transfer_plan_blocks_invalid_profile_without_repo_call()
     {
         var repo = new FakeMotoSyncRepository(CleanPlan());
@@ -154,6 +173,46 @@ public sealed class MotoSyncServiceTests
     }
 
     [Fact]
+    public async Task Center_transfer_plan_blocks_when_ma_csdt_moi_missing_in_target_dm_donvigttv()
+    {
+        const string blocker = "MaCSDTMoi không tồn tại trong DM_DonViGTVT của target: 99099.";
+        var repo = new FakeMotoSyncRepository(CleanPlan())
+        {
+            CenterTransferPlan = CleanCenterTransferPlan(
+                targetMaCSDTMoiExists: false,
+                blockers: new[] { blocker }),
+        };
+        var service = new MotoSyncService(repo);
+
+        var result = await service.GetCenterTransferPlanAsync(CenterTransferRequest());
+
+        Assert.False(result.Executable);
+        Assert.False(result.TargetMaCSDTMoiExists);
+        Assert.Contains(blocker, result.Blockers);
+        Assert.Equal(1, repo.CenterTransferPlanCalls);
+    }
+
+    [Fact]
+    public async Task Center_transfer_plan_blocks_when_ma_so_gtvt_moi_missing_in_target_dm_donvigttv()
+    {
+        const string blocker = "MaSoGTVTMoi không tồn tại trong DM_DonViGTVT của target: 99.";
+        var repo = new FakeMotoSyncRepository(CleanPlan())
+        {
+            CenterTransferPlan = CleanCenterTransferPlan(
+                targetMaSoGTVTMoiExists: false,
+                blockers: new[] { blocker }),
+        };
+        var service = new MotoSyncService(repo);
+
+        var result = await service.GetCenterTransferPlanAsync(CenterTransferRequest());
+
+        Assert.False(result.Executable);
+        Assert.False(result.TargetMaSoGTVTMoiExists);
+        Assert.Contains(blocker, result.Blockers);
+        Assert.Equal(1, repo.CenterTransferPlanCalls);
+    }
+
+    [Fact]
     public async Task Center_transfer_execute_requires_exact_confirm_text()
     {
         var repo = new FakeMotoSyncRepository(CleanPlan());
@@ -165,6 +224,27 @@ public sealed class MotoSyncServiceTests
         Assert.Equal("BiChan", result.Status);
         Assert.Contains(MotoSyncService.CenterTransferConfirmationText, result.Message);
         Assert.Equal(0, repo.CenterTransferPlanCalls);
+        Assert.Equal(0, repo.CenterTransferExecuteCalls);
+    }
+
+    [Fact]
+    public async Task Center_transfer_execute_refuses_donvigttv_blocker_before_write()
+    {
+        const string blocker = "MaCSDTMoi không tồn tại trong DM_DonViGTVT của target: 99099.";
+        var repo = new FakeMotoSyncRepository(CleanPlan())
+        {
+            CenterTransferPlan = CleanCenterTransferPlan(
+                targetMaCSDTMoiExists: false,
+                blockers: new[] { blocker }),
+        };
+        var service = new MotoSyncService(repo);
+
+        var result = await service.ExecuteCenterTransferTestAsync(CenterTransferRequest());
+
+        Assert.False(result.Executed);
+        Assert.Equal("BiChan", result.Status);
+        Assert.Contains(blocker, result.Plan!.Blockers);
+        Assert.Equal(1, repo.CenterTransferPlanCalls);
         Assert.Equal(0, repo.CenterTransferExecuteCalls);
     }
 
@@ -186,6 +266,40 @@ public sealed class MotoSyncServiceTests
         Assert.Contains(result.Plan!.Blockers, blocker => blocker.Contains("Source thieu KhoaHoc", StringComparison.Ordinal));
         Assert.Equal(1, repo.CenterTransferPlanCalls);
         Assert.Equal(0, repo.CenterTransferExecuteCalls);
+    }
+
+    [Fact]
+    public async Task Center_transfer_plan_blocks_when_course_code_does_not_contain_old_center_code()
+    {
+        const string blocker = "MaKhoaHocCu không chứa MaCSDTCu nên không thể tính MaKhoaHocMoi chính xác.";
+        var repo = new FakeMotoSyncRepository(CleanPlan())
+        {
+            CenterTransferPlan = CleanCenterTransferPlan(blockers: new[] { blocker }),
+        };
+        var service = new MotoSyncService(repo);
+
+        var result = await service.GetCenterTransferPlanAsync(CenterTransferRequest());
+
+        Assert.False(result.Executable);
+        Assert.Contains(blocker, result.Blockers);
+        Assert.Equal(1, repo.CenterTransferPlanCalls);
+    }
+
+    [Fact]
+    public async Task Center_transfer_plan_blocks_when_source_khoahoc_ma_csdt_mismatches_request()
+    {
+        const string blocker = "MaCSDTCu không khớp MaCSDT của khóa nguồn.";
+        var repo = new FakeMotoSyncRepository(CleanPlan())
+        {
+            CenterTransferPlan = CleanCenterTransferPlan(blockers: new[] { blocker }),
+        };
+        var service = new MotoSyncService(repo);
+
+        var result = await service.GetCenterTransferPlanAsync(CenterTransferRequest());
+
+        Assert.False(result.Executable);
+        Assert.Contains(blocker, result.Blockers);
+        Assert.Equal(1, repo.CenterTransferPlanCalls);
     }
 
     [Fact]
@@ -403,6 +517,21 @@ public sealed class MotoSyncServiceTests
         Assert.Contains("PlannedCopyNguoiLXHSGiayTo = plannedCopyGiayTo", source, StringComparison.Ordinal);
         Assert.Contains("Source thieu bang dbo.NguoiLXHS_GiayTo; bo qua copy giay to.", source, StringComparison.Ordinal);
         Assert.Contains("Target thieu bang dbo.NguoiLXHS_GiayTo; bo qua copy/cap nhat giay to.", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Center_transfer_repository_has_donvigttv_and_course_preflight_guards()
+    {
+        var source = File.ReadAllText(FindRepositoryFile());
+
+        Assert.Contains("ReadDonViGTVTAsync(target, maCSDTMoi", source, StringComparison.Ordinal);
+        Assert.Contains("ReadDonViGTVTAsync(target, maSoGTVTMoi", source, StringComparison.Ordinal);
+        Assert.Contains("MaCSDTMoi không tồn tại trong DM_DonViGTVT của target", source, StringComparison.Ordinal);
+        Assert.Contains("MaSoGTVTMoi không tồn tại trong DM_DonViGTVT của target", source, StringComparison.Ordinal);
+        Assert.Contains("MaKhoaHocCu không chứa MaCSDTCu nên không thể tính MaKhoaHocMoi chính xác.", source, StringComparison.Ordinal);
+        Assert.Contains("MaCSDTCu không khớp MaCSDT của khóa nguồn.", source, StringComparison.Ordinal);
+        Assert.Contains("SELECT TOP (1) MaCSDT FROM dbo.KhoaHoc WHERE MaKH = @MaKhoaHoc;", source, StringComparison.Ordinal);
+        Assert.Contains("FROM dbo.DM_DonViGTVT WHERE LTRIM(RTRIM(MaDV)) = @MaDV", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -880,6 +1009,10 @@ public sealed class MotoSyncServiceTests
         long targetGiayToCuCount = 0,
         long targetGiayToMoiCount = 0,
         long plannedCopyGiayTo = 3,
+        bool targetMaCSDTMoiExists = true,
+        string? targetMaCSDTMoiTenDV = "Trung tam dao tao moi",
+        bool targetMaSoGTVTMoiExists = true,
+        string? targetMaSoGTVTMoiTenDV = "So GTVT moi",
         IReadOnlyList<string>? blockers = null,
         IReadOnlyList<string>? warnings = null)
     {
@@ -894,6 +1027,10 @@ public sealed class MotoSyncServiceTests
             MaCSDTCu = "66016",
             MaCSDTMoi = "75044",
             MaSoGTVTMoi = "GTVT-MOI",
+            TargetMaCSDTMoiExists = targetMaCSDTMoiExists,
+            TargetMaCSDTMoiTenDV = targetMaCSDTMoiTenDV,
+            TargetMaSoGTVTMoiExists = targetMaSoGTVTMoiExists,
+            TargetMaSoGTVTMoiTenDV = targetMaSoGTVTMoiTenDV,
             SourceKhoaHocCount = sourceKhoaHocCount,
             SourceBaoCaoICount = 1,
             SourceNguoiLXCount = 10,
@@ -1054,6 +1191,10 @@ public sealed class MotoSyncServiceTests
                 MaCSDTCu = request.MaCSDTCu ?? string.Empty,
                 MaCSDTMoi = request.MaCSDTMoi ?? string.Empty,
                 MaSoGTVTMoi = request.MaSoGTVTMoi ?? string.Empty,
+                TargetMaCSDTMoiExists = CenterTransferPlan.TargetMaCSDTMoiExists,
+                TargetMaCSDTMoiTenDV = CenterTransferPlan.TargetMaCSDTMoiTenDV,
+                TargetMaSoGTVTMoiExists = CenterTransferPlan.TargetMaSoGTVTMoiExists,
+                TargetMaSoGTVTMoiTenDV = CenterTransferPlan.TargetMaSoGTVTMoiTenDV,
                 SourceKhoaHocCount = CenterTransferPlan.SourceKhoaHocCount,
                 SourceBaoCaoICount = CenterTransferPlan.SourceBaoCaoICount,
                 SourceNguoiLXCount = CenterTransferPlan.SourceNguoiLXCount,
