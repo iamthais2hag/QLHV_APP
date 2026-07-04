@@ -691,6 +691,8 @@ function CenterTransferPlanMetrics({ plan }: { plan: MotoCenterTransferPlan }) {
   const rows = [
     ['maKhoaHocCu', plan.maKhoaHocCu],
     ['maKhoaHocMoi', plan.maKhoaHocMoi],
+    ['MaCSDT mới trong danh mục', formatDonViCatalogStatus(plan.targetMaCSDTMoiExists, plan.targetMaCSDTMoiTenDV)],
+    ['Mã Sở GTVT mới trong danh mục', formatDonViCatalogStatus(plan.targetMaSoGTVTMoiExists, plan.targetMaSoGTVTMoiTenDV)],
     ['sourceKhoaHoc', plan.sourceKhoaHocCount],
     ['sourceBaoCaoI', plan.sourceBaoCaoICount],
     ['sourceNguoiLX', plan.sourceNguoiLXCount],
@@ -721,6 +723,14 @@ function CenterTransferPlanMetrics({ plan }: { plan: MotoCenterTransferPlan }) {
       </div>
     </div>
   );
+}
+
+function formatDonViCatalogStatus(exists: boolean, tenDV: string | null) {
+  if (!exists) {
+    return 'Không';
+  }
+
+  return tenDV?.trim() ? `Có - ${tenDV.trim()}` : 'Có';
 }
 
 function PlanMetrics({ plan }: { plan: MotoSyncPlan }) {

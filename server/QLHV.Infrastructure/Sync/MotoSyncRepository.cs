@@ -392,6 +392,7 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
         var maCSDTMoi = request.MaCSDTMoi?.Trim() ?? string.Empty;
         var maSoGTVTMoi = request.MaSoGTVTMoi?.Trim() ?? string.Empty;
         var maKhoaHocMoi = ReplaceCenterCode(maKhoaHocCu, maCSDTCu, maCSDTMoi);
+        var maKhoaHocContainsMaCSDTCu = maKhoaHocCu.Contains(maCSDTCu, StringComparison.OrdinalIgnoreCase);
 
         await using var source = new SqlConnection(await ResolveConnectionStringAsync(
             request.SourceProfileCode,
@@ -404,9 +405,14 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
         await target.OpenAsync(cancellationToken);
 
         var sourceKhoaHoc = await CountByColumnAsync(source, "KhoaHoc", "MaKH", maKhoaHocCu, null, cancellationToken);
+        var sourceKhoaHocMaCSDT = sourceKhoaHoc > 0
+            ? await ReadKhoaHocMaCSDTAsync(source, maKhoaHocCu, null, cancellationToken)
+            : null;
         var sourceBaoCaoI = await CountByColumnAsync(source, "BaoCaoI", "MaKH", maKhoaHocCu, null, cancellationToken);
         var sourceNguoiLX = await CountNguoiLXByHoSoCourseAsync(source, maKhoaHocCu, null, cancellationToken);
         var sourceHoSo = await CountByColumnAsync(source, "NguoiLX_HoSo", "MaKhoaHoc", maKhoaHocCu, null, cancellationToken);
+        var targetMaCSDTMoi = await ReadDonViGTVTAsync(target, maCSDTMoi, null, cancellationToken);
+        var targetMaSoGTVTMoi = await ReadDonViGTVTAsync(target, maSoGTVTMoi, null, cancellationToken);
         var targetKhoaHocCu = await CountByColumnAsync(target, "KhoaHoc", "MaKH", maKhoaHocCu, null, cancellationToken);
         var targetKhoaHocMoi = await CountByColumnAsync(target, "KhoaHoc", "MaKH", maKhoaHocMoi, null, cancellationToken);
         var targetBaoCaoICu = await CountByColumnAsync(target, "BaoCaoI", "MaKH", maKhoaHocCu, null, cancellationToken);
@@ -439,6 +445,27 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
         if (sourceKhoaHoc == 0)
         {
             blockers.Add("Source thieu KhoaHoc theo MaKhoaHocCu.");
+        }
+
+        if (!maKhoaHocContainsMaCSDTCu)
+        {
+            blockers.Add("MaKhoaHocCu không chứa MaCSDTCu nên không thể tính MaKhoaHocMoi chính xác.");
+        }
+
+        if (sourceKhoaHoc > 0 &&
+            !string.Equals(sourceKhoaHocMaCSDT?.Trim(), maCSDTCu, StringComparison.OrdinalIgnoreCase))
+        {
+            blockers.Add("MaCSDTCu không khớp MaCSDT của khóa nguồn.");
+        }
+
+        if (!targetMaCSDTMoi.Exists)
+        {
+            blockers.Add($"MaCSDTMoi không tồn tại trong DM_DonViGTVT của target: {maCSDTMoi}.");
+        }
+
+        if (!targetMaSoGTVTMoi.Exists)
+        {
+            blockers.Add($"MaSoGTVTMoi không tồn tại trong DM_DonViGTVT của target: {maSoGTVTMoi}.");
         }
 
         if (targetKhoaHocMoi > 0)
@@ -492,6 +519,10 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
             MaCSDTCu = maCSDTCu,
             MaCSDTMoi = maCSDTMoi,
             MaSoGTVTMoi = maSoGTVTMoi,
+            TargetMaCSDTMoiExists = targetMaCSDTMoi.Exists,
+            TargetMaCSDTMoiTenDV = targetMaCSDTMoi.TenDV,
+            TargetMaSoGTVTMoiExists = targetMaSoGTVTMoi.Exists,
+            TargetMaSoGTVTMoiTenDV = targetMaSoGTVTMoi.TenDV,
             SourceKhoaHocCount = sourceKhoaHoc,
             SourceBaoCaoICount = sourceBaoCaoI,
             SourceNguoiLXCount = sourceNguoiLX,
@@ -830,6 +861,70 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
         command.CommandTimeout = _options.TimeoutSeconds;
         command.Parameters.Add(new SqlParameter("@Value", value));
         return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken) ?? 0L);
+    }
+
+    private async Task<string?> ReadKhoaHocMaCSDTAsync(
+        SqlConnection connection,
+        string maKhoaHoc,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        if (!await TableExistsAsync(connection, "KhoaHoc", transaction, cancellationToken))
+        {
+            return null;
+        }
+
+        var columns = await ReadColumnsAsync(connection, "KhoaHoc", transaction, cancellationToken);
+        if (!columns.Any(c => string.Equals(c.Name, "MaKH", StringComparison.OrdinalIgnoreCase)) ||
+            !columns.Any(c => string.Equals(c.Name, "MaCSDT", StringComparison.OrdinalIgnoreCase)))
+        {
+            return null;
+        }
+
+        await using var command = new SqlCommand(
+            "SELECT TOP (1) MaCSDT FROM dbo.KhoaHoc WHERE MaKH = @MaKhoaHoc;",
+            connection,
+            transaction);
+        command.CommandTimeout = _options.TimeoutSeconds;
+        command.Parameters.Add(new SqlParameter("@MaKhoaHoc", maKhoaHoc));
+        return Convert.ToString(await command.ExecuteScalarAsync(cancellationToken))?.Trim();
+    }
+
+    private async Task<DonViGTVTLookup> ReadDonViGTVTAsync(
+        SqlConnection connection,
+        string maDonVi,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(maDonVi) ||
+            !await TableExistsAsync(connection, "DM_DonViGTVT", transaction, cancellationToken))
+        {
+            return new DonViGTVTLookup(false, null);
+        }
+
+        var columns = await ReadColumnsAsync(connection, "DM_DonViGTVT", transaction, cancellationToken);
+        if (!columns.Any(c => string.Equals(c.Name, "MaDV", StringComparison.OrdinalIgnoreCase)))
+        {
+            return new DonViGTVTLookup(false, null);
+        }
+
+        var hasTenDv = columns.Any(c => string.Equals(c.Name, "TenDV", StringComparison.OrdinalIgnoreCase));
+        await using var command = new SqlCommand(
+            hasTenDv
+                ? "SELECT TOP (1) MaDV, TenDV FROM dbo.DM_DonViGTVT WHERE LTRIM(RTRIM(MaDV)) = @MaDV;"
+                : "SELECT TOP (1) MaDV, CAST(NULL AS nvarchar(1)) AS TenDV FROM dbo.DM_DonViGTVT WHERE LTRIM(RTRIM(MaDV)) = @MaDV;",
+            connection,
+            transaction);
+        command.CommandTimeout = _options.TimeoutSeconds;
+        command.Parameters.Add(new SqlParameter("@MaDV", maDonVi.Trim()));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return new DonViGTVTLookup(false, null);
+        }
+
+        var tenDv = reader.IsDBNull(1) ? null : Convert.ToString(reader[1])?.Trim();
+        return new DonViGTVTLookup(true, tenDv);
     }
 
     private async Task<long> CountNguoiLXByHoSoCourseAsync(
@@ -3578,6 +3673,10 @@ ORDER BY ic.key_ordinal;",
         string? HangDaoTao,
         string? HangGPLX,
         string? NgayKhaiGiang);
+
+    private sealed record DonViGTVTLookup(
+        bool Exists,
+        string? TenDV);
 
     private sealed record ColumnMetadata(
         string Name,
