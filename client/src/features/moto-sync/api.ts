@@ -13,6 +13,8 @@ import type {
   MotoSyncPlanRequest,
   MotoSyncRunHistoryDetail,
   MotoSyncRunHistoryListItem,
+  MotoTargetDonViGTVTOptionsQuery,
+  MotoTargetDonViGTVTOptionsResult,
 } from './types';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api';
@@ -65,6 +67,30 @@ export async function getMotoSyncKhoaHocOptions(
   }
 
   return (await response.json()) as MotoSyncKhoaHocOption[];
+}
+
+export async function getMotoTargetDonViGTVTOptions(
+  request: MotoTargetDonViGTVTOptionsQuery,
+  signal?: AbortSignal,
+): Promise<MotoTargetDonViGTVTOptionsResult> {
+  const query = new URLSearchParams();
+  query.set('targetProfileCode', request.targetProfileCode);
+  if (request.search?.trim()) {
+    query.set('search', request.search.trim());
+  }
+  query.set('take', String(request.take ?? 20));
+
+  const response = await fetch(`${API_BASE}/dong-bo-v2/moto/target-don-vi-gtvt-options?${query.toString()}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(await getSafeErrorMessage(response, 'Khong the tai danh muc DM_DonViGTVT target Moto TEST.'));
+  }
+
+  return (await response.json()) as MotoTargetDonViGTVTOptionsResult;
 }
 
 export async function getMotoCenterTransferPlan(

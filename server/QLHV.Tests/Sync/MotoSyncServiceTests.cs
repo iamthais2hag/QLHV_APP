@@ -106,6 +106,41 @@ public sealed class MotoSyncServiceTests
     }
 
     [Fact]
+    public async Task Target_don_vi_options_blocks_non_target_profile_without_repo_call()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan());
+        var service = new MotoSyncService(repo);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => service.GetTargetDonViGTVTOptionsAsync(new MotoTargetDonViGTVTOptionsQuery
+        {
+            TargetProfileCode = "CSDT_V1",
+            Search = "01001",
+        }));
+
+        Assert.Equal(0, repo.DonViGTVTOptionCalls);
+    }
+
+    [Fact]
+    public async Task Target_don_vi_options_normalizes_search_and_take()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan());
+        var service = new MotoSyncService(repo);
+
+        await service.GetTargetDonViGTVTOptionsAsync(new MotoTargetDonViGTVTOptionsQuery
+        {
+            TargetProfileCode = " csdt_v2 ",
+            Search = "  01001 ",
+            Take = 500,
+        });
+
+        Assert.Equal(1, repo.DonViGTVTOptionCalls);
+        Assert.NotNull(repo.LastDonViGTVTOptionsQuery);
+        Assert.Equal("CSDT_V2", repo.LastDonViGTVTOptionsQuery!.TargetProfileCode);
+        Assert.Equal("01001", repo.LastDonViGTVTOptionsQuery.Search);
+        Assert.Equal(100, repo.LastDonViGTVTOptionsQuery.Take);
+    }
+
+    [Fact]
     public async Task Center_transfer_plan_normalizes_profiles_and_computes_new_course_code()
     {
         var repo = new FakeMotoSyncRepository(CleanPlan());
@@ -1250,6 +1285,7 @@ public sealed class MotoSyncServiceTests
 
         public int PlanCalls { get; private set; }
         public int KhoaHocOptionCalls { get; private set; }
+        public int DonViGTVTOptionCalls { get; private set; }
         public int CenterTransferPlanCalls { get; private set; }
         public int CenterTransferExecuteCalls { get; private set; }
         public int ExecuteCalls { get; private set; }
@@ -1261,6 +1297,7 @@ public sealed class MotoSyncServiceTests
         public bool ThrowOnCenterTransferExecute { get; init; }
         public MotoSyncPlanDto? AfterPlan { get; init; }
         public MotoSyncKhoaHocOptionsQuery? LastKhoaHocOptionsQuery { get; private set; }
+        public MotoTargetDonViGTVTOptionsQuery? LastDonViGTVTOptionsQuery { get; private set; }
         public MotoCenterTransferPlanRequest? LastCenterTransferPlanRequest { get; private set; }
         public MotoCenterTransferPlanRequest? LastCenterTransferExecuteRequest { get; private set; }
 
@@ -1309,6 +1346,19 @@ public sealed class MotoSyncServiceTests
             KhoaHocOptionCalls++;
             LastKhoaHocOptionsQuery = query;
             return Task.FromResult<IReadOnlyList<MotoSyncKhoaHocOptionDto>>(Array.Empty<MotoSyncKhoaHocOptionDto>());
+        }
+
+        public Task<MotoTargetDonViGTVTOptionsResultDto> GetTargetDonViGTVTOptionsAsync(
+            MotoTargetDonViGTVTOptionsQuery query,
+            CancellationToken cancellationToken = default)
+        {
+            DonViGTVTOptionCalls++;
+            LastDonViGTVTOptionsQuery = query;
+            return Task.FromResult(new MotoTargetDonViGTVTOptionsResultDto
+            {
+                TargetProfileCode = query.TargetProfileCode,
+                Items = Array.Empty<MotoTargetDonViGTVTOptionDto>(),
+            });
         }
 
         public Task<MotoCenterTransferPlanDto> BuildCenterTransferPlanAsync(

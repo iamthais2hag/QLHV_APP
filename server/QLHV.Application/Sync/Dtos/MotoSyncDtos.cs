@@ -69,6 +69,37 @@ public sealed class MotoSyncKhoaHocOptionDto
     public long TargetOnlyHocVienCount { get; init; }
 }
 
+public sealed class MotoTargetDonViGTVTOptionsQuery
+{
+    public string TargetProfileCode { get; set; } = "CSDT_V2";
+
+    public string? Search { get; set; }
+
+    public int Take { get; set; } = 20;
+}
+
+public sealed class MotoTargetDonViGTVTOptionsResultDto
+{
+    public bool IsReadOnly { get; init; } = true;
+
+    public string TargetProfileCode { get; init; } = string.Empty;
+
+    public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
+
+    public IReadOnlyList<MotoTargetDonViGTVTOptionDto> Items { get; init; } = Array.Empty<MotoTargetDonViGTVTOptionDto>();
+}
+
+public sealed class MotoTargetDonViGTVTOptionDto
+{
+    public string MaDV { get; init; } = string.Empty;
+
+    public string? TenDV { get; init; }
+
+    public string? MaSoGTVT { get; init; }
+
+    public string DisplayText { get; init; } = string.Empty;
+}
+
 public class MotoCenterTransferPlanRequest
 {
     public string SourceProfileCode { get; set; } = "CSDT_V1";

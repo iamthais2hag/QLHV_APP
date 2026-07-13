@@ -381,6 +381,72 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
         }).ToArray();
     }
 
+    public async Task<MotoTargetDonViGTVTOptionsResultDto> GetTargetDonViGTVTOptionsAsync(
+        MotoTargetDonViGTVTOptionsQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        await using var target = new SqlConnection(await ResolveConnectionStringAsync(
+            query.TargetProfileCode,
+            cancellationToken));
+
+        await target.OpenAsync(cancellationToken);
+
+        var warnings = new List<string>();
+        if (!await TableExistsAsync(target, "DM_DonViGTVT", null, cancellationToken))
+        {
+            warnings.Add("Target khong co bang dbo.DM_DonViGTVT.");
+            return new MotoTargetDonViGTVTOptionsResultDto
+            {
+                TargetProfileCode = query.TargetProfileCode,
+                Warnings = warnings,
+            };
+        }
+
+        var columns = await ReadColumnsAsync(target, "DM_DonViGTVT", null, cancellationToken);
+        if (!columns.Any(column => string.Equals(column.Name, "MaDV", StringComparison.OrdinalIgnoreCase)))
+        {
+            warnings.Add("Target dbo.DM_DonViGTVT khong co cot MaDV.");
+            return new MotoTargetDonViGTVTOptionsResultDto
+            {
+                TargetProfileCode = query.TargetProfileCode,
+                Warnings = warnings,
+            };
+        }
+
+        var displayColumns = MotoSyncDonViGTVTOptionPlanner.DetectDisplayColumns(
+            columns.Select(column => column.Name));
+        if (displayColumns.TenDVColumn is null)
+        {
+            warnings.Add("Target dbo.DM_DonViGTVT khong co cot TenDV; chi hien thi MaDV.");
+        }
+
+        if (displayColumns.MaSoGTVTColumn is null)
+        {
+            warnings.Add("Target dbo.DM_DonViGTVT khong co cot MaSoGTVT; truong MaSoGTVT se de trong.");
+        }
+
+        var rows = await ReadDonViGTVTOptionRowsAsync(
+            target,
+            new MotoSyncDonViGTVTQueryShape(displayColumns),
+            query.Search,
+            query.Take,
+            null,
+            cancellationToken);
+
+        return new MotoTargetDonViGTVTOptionsResultDto
+        {
+            TargetProfileCode = query.TargetProfileCode,
+            Warnings = warnings,
+            Items = rows.Select(row => new MotoTargetDonViGTVTOptionDto
+            {
+                MaDV = row.MaDV,
+                TenDV = row.TenDV,
+                MaSoGTVT = row.MaSoGTVT,
+                DisplayText = BuildDonViDisplayText(row),
+            }).ToArray(),
+        };
+    }
+
     public async Task<MotoCenterTransferPlanDto> BuildCenterTransferPlanAsync(
         MotoCenterTransferPlanRequest request,
         CancellationToken cancellationToken = default)
@@ -2857,6 +2923,56 @@ WHERE MaDK LIKE @MaDkPrefixLike
         return rows;
     }
 
+    private async Task<IReadOnlyList<DonViGTVTOptionRow>> ReadDonViGTVTOptionRowsAsync(
+        SqlConnection connection,
+        MotoSyncDonViGTVTQueryShape shape,
+        string? search,
+        int take,
+        SqlTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        var normalizedTake = MotoSyncDonViGTVTOptionPlanner.NormalizeTake(take);
+        var hasSearch = !string.IsNullOrWhiteSpace(search);
+        await using var command = new SqlCommand(
+            MotoSyncDonViGTVTOptionPlanner.BuildOptionsSql(shape, hasSearch),
+            connection,
+            transaction);
+        command.CommandTimeout = _options.TimeoutSeconds;
+        command.Parameters.Add(new SqlParameter("@Take", normalizedTake));
+        if (hasSearch)
+        {
+            command.Parameters.Add(new SqlParameter("@SearchLike", $"%{search!.Trim()}%"));
+        }
+
+        var rows = new List<DonViGTVTOptionRow>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var maDv = Convert.ToString(reader["MaDV"])?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(maDv))
+            {
+                continue;
+            }
+
+            rows.Add(new DonViGTVTOptionRow(
+                maDv,
+                NullIfWhiteSpace(Convert.ToString(reader["TenDV"])),
+                NullIfWhiteSpace(Convert.ToString(reader["MaSoGTVT"]))));
+        }
+
+        return rows;
+    }
+
+    private static string BuildDonViDisplayText(DonViGTVTOptionRow row)
+    {
+        var text = string.IsNullOrWhiteSpace(row.TenDV)
+            ? row.MaDV
+            : $"{row.MaDV} - {row.TenDV}";
+        return string.IsNullOrWhiteSpace(row.MaSoGTVT)
+            ? text
+            : $"{text} ({row.MaSoGTVT})";
+    }
+
     private async Task<HashSet<string>> ReadKhoaHocExistsByKeysAsync(
         SqlConnection connection,
         string courseKeyColumn,
@@ -3673,6 +3789,11 @@ ORDER BY ic.key_ordinal;",
         string? HangDaoTao,
         string? HangGPLX,
         string? NgayKhaiGiang);
+
+    private sealed record DonViGTVTOptionRow(
+        string MaDV,
+        string? TenDV,
+        string? MaSoGTVT);
 
     private sealed record DonViGTVTLookup(
         bool Exists,

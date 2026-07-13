@@ -125,6 +125,27 @@ public sealed class DongBoV2Controller : ControllerBase
     }
 
     /// <summary>
+    /// Read-only target DM_DonViGTVT options for Moto center-transfer TEST picker.
+    /// </summary>
+    [HttpGet("moto/target-don-vi-gtvt-options")]
+    [ProducesResponseType(typeof(MotoTargetDonViGTVTOptionsResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<MotoTargetDonViGTVTOptionsResultDto>> MotoTargetDonViGTVTOptions(
+        [FromQuery] MotoTargetDonViGTVTOptionsQuery query,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _motoSyncService.GetTargetDonViGTVTOptionsAsync(query, cancellationToken);
+            return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Guarded TEST-only transfer for one Moto course from old center code to new center code.
     /// </summary>
     [HttpPost("moto/center-transfer-test")]

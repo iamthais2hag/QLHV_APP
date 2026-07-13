@@ -85,6 +85,20 @@ public sealed class MotoSyncService : IMotoSyncService
         return _repository.GetKhoaHocOptionsAsync(normalized, cancellationToken);
     }
 
+    public Task<MotoTargetDonViGTVTOptionsResultDto> GetTargetDonViGTVTOptionsAsync(
+        MotoTargetDonViGTVTOptionsQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        query ??= new MotoTargetDonViGTVTOptionsQuery();
+        var normalized = Normalize(query);
+        if (!string.Equals(normalized.TargetProfileCode, CsdtV2, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Chi cho phep tim DM_DonViGTVT tren target TEST CSDT_V2 cho chuc nang chuyen MaCSDT.");
+        }
+
+        return _repository.GetTargetDonViGTVTOptionsAsync(normalized, cancellationToken);
+    }
+
     public async Task<MotoCenterTransferPlanDto> GetCenterTransferPlanAsync(
         MotoCenterTransferPlanRequest request,
         CancellationToken cancellationToken = default)
@@ -353,6 +367,14 @@ public sealed class MotoSyncService : IMotoSyncService
             Take = Math.Clamp(query.Take <= 0 ? 50 : query.Take, 1, 200),
         };
     }
+
+    private static MotoTargetDonViGTVTOptionsQuery Normalize(MotoTargetDonViGTVTOptionsQuery query)
+        => new()
+        {
+            TargetProfileCode = NormalizeProfile(string.IsNullOrWhiteSpace(query.TargetProfileCode) ? CsdtV2 : query.TargetProfileCode),
+            Search = string.IsNullOrWhiteSpace(query.Search) ? null : query.Search.Trim(),
+            Take = Math.Clamp(query.Take <= 0 ? 20 : query.Take, 1, 100),
+        };
 
     private static MotoCenterTransferPlanRequest Normalize(MotoCenterTransferPlanRequest request)
     {

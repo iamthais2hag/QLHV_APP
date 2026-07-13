@@ -33,6 +33,26 @@ export interface MotoSyncKhoaHocOption {
   targetOnlyHocVienCount: number;
 }
 
+export interface MotoTargetDonViGTVTOptionsQuery {
+  targetProfileCode: string;
+  search?: string;
+  take?: number;
+}
+
+export interface MotoTargetDonViGTVTOption {
+  maDV: string;
+  tenDV: string | null;
+  maSoGTVT: string | null;
+  displayText: string;
+}
+
+export interface MotoTargetDonViGTVTOptionsResult {
+  isReadOnly: boolean;
+  targetProfileCode: string;
+  warnings: string[];
+  items: MotoTargetDonViGTVTOption[];
+}
+
 export interface MotoCenterTransferPlanRequest {
   sourceProfileCode: string;
   targetProfileCode: string;
