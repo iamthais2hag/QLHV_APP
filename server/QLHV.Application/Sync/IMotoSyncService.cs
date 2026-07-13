@@ -12,6 +12,10 @@ public interface IMotoSyncService
         MotoSyncKhoaHocOptionsQuery query,
         CancellationToken cancellationToken = default);
 
+    Task<MotoTargetDonViGTVTOptionsResultDto> GetTargetDonViGTVTOptionsAsync(
+        MotoTargetDonViGTVTOptionsQuery query,
+        CancellationToken cancellationToken = default);
+
     Task<MotoCenterTransferPlanDto> GetCenterTransferPlanAsync(
         MotoCenterTransferPlanRequest request,
         CancellationToken cancellationToken = default);

@@ -9,6 +9,7 @@ import {
   getMotoSyncPlan,
   getMotoSyncRunHistory,
   getMotoSyncRunHistoryDetail,
+  getMotoTargetDonViGTVTOptions,
 } from './api';
 import type {
   MotoCenterTransferExecuteResult,
@@ -22,6 +23,7 @@ import type {
   MotoSyncPlan,
   MotoSyncRunHistoryDetail,
   MotoSyncRunHistoryListItem,
+  MotoTargetDonViGTVTOption,
 } from './types';
 
 const CENTER_TRANSFER_CONFIRM = 'CHUYEN MA CSDT TEST';
@@ -56,6 +58,11 @@ export default function MotoSyncPage() {
   const [centerLoadingPlan, setCenterLoadingPlan] = useState(false);
   const [centerExecuting, setCenterExecuting] = useState(false);
   const [centerError, setCenterError] = useState<string | null>(null);
+  const [centerDonViSearch, setCenterDonViSearch] = useState('');
+  const [centerDonViOptions, setCenterDonViOptions] = useState<MotoTargetDonViGTVTOption[]>([]);
+  const [centerDonViWarnings, setCenterDonViWarnings] = useState<string[]>([]);
+  const [centerDonViLoading, setCenterDonViLoading] = useState(false);
+  const [centerDonViError, setCenterDonViError] = useState<string | null>(null);
   const [centerHistory, setCenterHistory] = useState<MotoCenterTransferRunHistoryListItem[]>([]);
   const [centerHistoryLoading, setCenterHistoryLoading] = useState(false);
   const [centerHistoryError, setCenterHistoryError] = useState<string | null>(null);
@@ -218,6 +225,34 @@ export default function MotoSyncPage() {
     } finally {
       setCenterExecuting(false);
     }
+  }
+
+  async function handleLoadCenterDonViOptions() {
+    setCenterDonViLoading(true);
+    setCenterDonViError(null);
+    setCenterDonViWarnings([]);
+    try {
+      const result = await getMotoTargetDonViGTVTOptions({
+        targetProfileCode: centerTargetProfileCode,
+        search: centerDonViSearch,
+        take: 20,
+      });
+      setCenterDonViOptions(result.items);
+      setCenterDonViWarnings(result.warnings);
+    } catch (err) {
+      setCenterDonViOptions([]);
+      setCenterDonViError(err instanceof Error ? err.message : 'Không thể tải danh mục DM_DonViGTVT target.');
+    } finally {
+      setCenterDonViLoading(false);
+    }
+  }
+
+  function handleChooseCenterMaCSDTMoi(option: MotoTargetDonViGTVTOption) {
+    handleCenterFieldChange(setCenterMaCSDTMoi, option.maDV);
+  }
+
+  function handleChooseCenterMaSoGTVTMoi(option: MotoTargetDonViGTVTOption) {
+    handleCenterFieldChange(setCenterMaSoGTVTMoi, option.maDV);
   }
 
   function invalidatePlan() {
@@ -442,6 +477,73 @@ export default function MotoSyncPage() {
               {centerLoadingPlan ? 'Đang lập kế hoạch...' : 'Lập kế hoạch chuyển mã'}
             </button>
           </div>
+        </div>
+
+        <div className="moto-sync-history-panel">
+          <div className="moto-sync-section-title">
+            <div>
+              <strong>Tìm đơn vị target DM_DonViGTVT</strong>
+              <p>Tra cứu trên CSDT_V2 để chọn MaCSDT mới hoặc Mã Sở GTVT mới, tránh nhập mã không tồn tại trong danh mục target.</p>
+            </div>
+          </div>
+          <div className="toolbar__row">
+            <label className="field">
+              <span className="field__label">Từ khóa MaDV / Tên đơn vị</span>
+              <input
+                className="field__input"
+                value={centerDonViSearch}
+                onChange={(event) => setCenterDonViSearch(event.target.value)}
+                placeholder="01001 hoặc tên đơn vị"
+              />
+            </label>
+            <div className="toolbar__actions">
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => void handleLoadCenterDonViOptions()}
+                disabled={centerDonViLoading}
+              >
+                {centerDonViLoading ? 'Đang tải danh mục...' : 'Tải danh mục target'}
+              </button>
+            </div>
+          </div>
+          {centerDonViError && <div className="moto-sync-message-list moto-sync-message-list--error">{centerDonViError}</div>}
+          <MessageList title="Cảnh báo danh mục" items={centerDonViWarnings} variant="warning" />
+          {centerDonViOptions.length > 0 && (
+            <div className="table-responsive">
+              <table className="table table--moto-sync-history">
+                <thead>
+                  <tr>
+                    <th>MaDV</th>
+                    <th>Tên đơn vị</th>
+                    <th>MaSoGTVT</th>
+                    <th>Hiển thị</th>
+                    <th>Chọn</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {centerDonViOptions.map((option) => (
+                    <tr key={`${option.maDV}-${option.maSoGTVT ?? ''}`}>
+                      <td><code>{option.maDV}</code></td>
+                      <td>{option.tenDV ?? '-'}</td>
+                      <td>{option.maSoGTVT ?? '-'}</td>
+                      <td>{option.displayText}</td>
+                      <td>
+                        <div className="toolbar__actions">
+                          <button type="button" className="btn btn--ghost btn--sm" onClick={() => handleChooseCenterMaCSDTMoi(option)}>
+                            Chọn làm MaCSDT mới
+                          </button>
+                          <button type="button" className="btn btn--ghost btn--sm" onClick={() => handleChooseCenterMaSoGTVTMoi(option)}>
+                            Chọn làm Mã Sở GTVT mới
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         <div className="moto-sync-safety-note">
