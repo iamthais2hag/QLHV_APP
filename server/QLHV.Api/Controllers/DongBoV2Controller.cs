@@ -144,6 +144,38 @@ public sealed class DongBoV2Controller : ControllerBase
     }
 
     /// <summary>
+    /// Latest Moto center-transfer TEST run history rows stored in QLHV_APP.
+    /// </summary>
+    [HttpGet("moto/center-transfer-runs")]
+    [ProducesResponseType(typeof(IReadOnlyList<MotoCenterTransferRunHistoryListItemDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<MotoCenterTransferRunHistoryListItemDto>>> MotoCenterTransferRuns(
+        [FromQuery] MotoCenterTransferRunHistoryQuery query,
+        CancellationToken cancellationToken)
+    {
+        var result = await _motoSyncService.GetCenterTransferRunHistoryAsync(query, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Full Moto center-transfer TEST run history detail, including stored plan and summary JSON.
+    /// </summary>
+    [HttpGet("moto/center-transfer-runs/{id:long}")]
+    [ProducesResponseType(typeof(MotoCenterTransferRunHistoryDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<MotoCenterTransferRunHistoryDetailDto>> MotoCenterTransferRunDetail(
+        long id,
+        CancellationToken cancellationToken)
+    {
+        var result = await _motoSyncService.GetCenterTransferRunHistoryDetailAsync(id, cancellationToken);
+        if (result is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(result);
+    }
+
+    /// <summary>
     /// Read-only Moto V1/V2 TEST course options from source KhoaHoc and learner counts.
     /// </summary>
     [HttpGet("moto/khoa-hoc-options")]

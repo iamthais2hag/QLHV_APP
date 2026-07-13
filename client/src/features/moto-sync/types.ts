@@ -112,6 +112,46 @@ export interface MotoCenterTransferExecuteResult {
   summary: MotoCenterTransferSummary | null;
 }
 
+export interface MotoCenterTransferRunHistoryListItem {
+  id: number;
+  sourceProfileCode: string;
+  targetProfileCode: string;
+  maKhoaHocCu: string;
+  maKhoaHocMoi: string | null;
+  maCSDTCu: string;
+  maCSDTMoi: string;
+  maSoGTVTMoi: string | null;
+  confirmTextMatched: boolean;
+  executed: boolean;
+  status: string;
+  message: string;
+  copiedTotal: number;
+  updatedTotal: number;
+  durationMs: number;
+  startedAt: string;
+  endedAt: string | null;
+}
+
+export interface MotoCenterTransferRunHistoryDetail extends MotoCenterTransferRunHistoryListItem {
+  copiedKhoaHoc: number;
+  copiedBaoCaoI: number;
+  copiedNguoiLX: number;
+  copiedNguoiLXHoSo: number;
+  copiedNguoiLXHSGiayTo: number;
+  updatedNguoiLXHoSo: number;
+  updatedNguoiLX: number;
+  updatedKhoaHoc: number;
+  updatedBaoCaoI: number;
+  updatedNguoiLXHSGiayTo: number;
+  targetKhoaHocMoiCountAfter: number | null;
+  targetBaoCaoIMoiCountAfter: number | null;
+  targetNguoiLXHoSoMoiCountAfter: number | null;
+  targetNguoiLXHSGiayToMoiCountAfter: number | null;
+  targetNguoiLXMoiCountAfter: number | null;
+  planJson: string | null;
+  summaryJson: string | null;
+}
+
 export interface MotoSyncExecuteRequest {
   direction: MotoSyncDirection;
   sourceProfileCode: string;

@@ -31,4 +31,12 @@ public interface IMotoSyncService
     Task<MotoSyncRunHistoryDetailDto?> GetRunHistoryDetailAsync(
         long id,
         CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<MotoCenterTransferRunHistoryListItemDto>> GetCenterTransferRunHistoryAsync(
+        MotoCenterTransferRunHistoryQuery query,
+        CancellationToken cancellationToken = default);
+
+    Task<MotoCenterTransferRunHistoryDetailDto?> GetCenterTransferRunHistoryDetailAsync(
+        long id,
+        CancellationToken cancellationToken = default);
 }
