@@ -3,6 +3,8 @@ import type {
   MotoCenterTransferExecuteResult,
   MotoCenterTransferPlan,
   MotoCenterTransferPlanRequest,
+  MotoCenterTransferRunHistoryDetail,
+  MotoCenterTransferRunHistoryListItem,
   MotoSyncExecuteRequest,
   MotoSyncExecuteResult,
   MotoSyncKhoaHocOption,
@@ -118,6 +120,43 @@ export async function executeMotoCenterTransferTest(
   }
 
   return payload;
+}
+
+export async function getMotoCenterTransferRunHistory(
+  take = 50,
+  signal?: AbortSignal,
+): Promise<MotoCenterTransferRunHistoryListItem[]> {
+  const query = new URLSearchParams();
+  query.set('take', String(take));
+
+  const response = await fetch(`${API_BASE}/dong-bo-v2/moto/center-transfer-runs?${query.toString()}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(await getSafeErrorMessage(response, 'KhÃ´ng thá»ƒ táº£i lá»‹ch sá»­ chuyá»ƒn MaCSDT Moto TEST.'));
+  }
+
+  return (await response.json()) as MotoCenterTransferRunHistoryListItem[];
+}
+
+export async function getMotoCenterTransferRunHistoryDetail(
+  id: number,
+  signal?: AbortSignal,
+): Promise<MotoCenterTransferRunHistoryDetail> {
+  const response = await fetch(`${API_BASE}/dong-bo-v2/moto/center-transfer-runs/${id}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(await getSafeErrorMessage(response, 'KhÃ´ng thá»ƒ táº£i chi tiáº¿t lá»‹ch sá»­ chuyá»ƒn MaCSDT Moto TEST.'));
+  }
+
+  return (await response.json()) as MotoCenterTransferRunHistoryDetail;
 }
 
 export async function executeMotoSyncTest(

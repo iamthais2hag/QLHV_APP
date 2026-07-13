@@ -21,13 +21,16 @@ public sealed class MotoSyncService : IMotoSyncService
 
     private readonly IMotoSyncRepository _repository;
     private readonly IMotoSyncRunHistoryRepository? _runHistory;
+    private readonly IMotoCenterTransferRunHistoryRepository? _centerTransferRunHistory;
 
     public MotoSyncService(
         IMotoSyncRepository repository,
-        IMotoSyncRunHistoryRepository? runHistory = null)
+        IMotoSyncRunHistoryRepository? runHistory = null,
+        IMotoCenterTransferRunHistoryRepository? centerTransferRunHistory = null)
     {
         _repository = repository;
         _runHistory = runHistory;
+        _centerTransferRunHistory = centerTransferRunHistory;
     }
 
     public async Task<MotoSyncPlanDto> GetPlanAsync(
@@ -101,35 +104,50 @@ public sealed class MotoSyncService : IMotoSyncService
         MotoCenterTransferTestRequest request,
         CancellationToken cancellationToken = default)
     {
+        var attemptStartedAt = DateTime.UtcNow;
         request ??= new MotoCenterTransferTestRequest();
         var normalized = Normalize(request);
         if (!string.Equals(request.ConfirmText, CenterTransferConfirmationText, StringComparison.Ordinal))
         {
-            return new MotoCenterTransferExecuteResultDto
+            var result = new MotoCenterTransferExecuteResultDto
             {
                 Executed = false,
                 Status = "BiChan",
                 Message = $"Thieu chuoi xac nhan chinh xac: {CenterTransferConfirmationText}.",
                 Plan = BlockedCenterTransferPlan(normalized, new[] { "ConfirmText khong khop." }),
             };
+            return await WriteCenterTransferRunHistoryAndReturnAsync(
+                normalized,
+                confirmTextMatched: false,
+                result,
+                attemptStartedAt,
+                DateTime.UtcNow,
+                cancellationToken);
         }
 
         var plan = await GetCenterTransferPlanAsync(normalized, cancellationToken);
         if (!plan.Executable || plan.Blockers.Count > 0)
         {
-            return new MotoCenterTransferExecuteResultDto
+            var result = new MotoCenterTransferExecuteResultDto
             {
                 Executed = false,
                 Status = "BiChan",
                 Message = "Chuyen MaCSDT TEST bi chan vi plan co blocker.",
                 Plan = plan,
             };
+            return await WriteCenterTransferRunHistoryAndReturnAsync(
+                normalized,
+                confirmTextMatched: true,
+                result,
+                attemptStartedAt,
+                DateTime.UtcNow,
+                cancellationToken);
         }
 
         try
         {
             var summary = await _repository.ExecuteCenterTransferAsync(normalized, cancellationToken);
-            return new MotoCenterTransferExecuteResultDto
+            var result = new MotoCenterTransferExecuteResultDto
             {
                 Executed = true,
                 Status = "ThanhCong",
@@ -137,16 +155,30 @@ public sealed class MotoSyncService : IMotoSyncService
                 Plan = plan,
                 Summary = summary,
             };
+            return await WriteCenterTransferRunHistoryAndReturnAsync(
+                normalized,
+                confirmTextMatched: true,
+                result,
+                attemptStartedAt,
+                DateTime.UtcNow,
+                cancellationToken);
         }
         catch (Exception ex)
         {
-            return new MotoCenterTransferExecuteResultDto
+            var result = new MotoCenterTransferExecuteResultDto
             {
                 Executed = false,
                 Status = "Loi",
                 Message = $"Chuyen MaCSDT TEST that bai va da rollback transaction. Chi tiet: {ex.GetType().Name}.",
                 Plan = plan,
             };
+            return await WriteCenterTransferRunHistoryAndReturnAsync(
+                normalized,
+                confirmTextMatched: true,
+                result,
+                attemptStartedAt,
+                DateTime.UtcNow,
+                cancellationToken);
         }
     }
 
@@ -277,6 +309,20 @@ public sealed class MotoSyncService : IMotoSyncService
         => _runHistory is null
             ? Task.FromResult<MotoSyncRunHistoryDetailDto?>(null)
             : _runHistory.GetByIdAsync(id, cancellationToken);
+
+    public Task<IReadOnlyList<MotoCenterTransferRunHistoryListItemDto>> GetCenterTransferRunHistoryAsync(
+        MotoCenterTransferRunHistoryQuery query,
+        CancellationToken cancellationToken = default)
+        => _centerTransferRunHistory is null
+            ? Task.FromResult<IReadOnlyList<MotoCenterTransferRunHistoryListItemDto>>(Array.Empty<MotoCenterTransferRunHistoryListItemDto>())
+            : _centerTransferRunHistory.SearchAsync(query ?? new MotoCenterTransferRunHistoryQuery(), cancellationToken);
+
+    public Task<MotoCenterTransferRunHistoryDetailDto?> GetCenterTransferRunHistoryDetailAsync(
+        long id,
+        CancellationToken cancellationToken = default)
+        => _centerTransferRunHistory is null
+            ? Task.FromResult<MotoCenterTransferRunHistoryDetailDto?>(null)
+            : _centerTransferRunHistory.GetByIdAsync(id, cancellationToken);
 
     private static MotoSyncPlanRequest Normalize(MotoSyncPlanRequest request)
     {
@@ -527,6 +573,111 @@ public sealed class MotoSyncService : IMotoSyncService
 
     private static string? SerializePlan(MotoSyncPlanDto? plan)
         => plan is null ? null : JsonSerializer.Serialize(plan, HistoryJsonOptions);
+
+    private async Task<MotoCenterTransferExecuteResultDto> WriteCenterTransferRunHistoryAndReturnAsync(
+        MotoCenterTransferPlanRequest request,
+        bool confirmTextMatched,
+        MotoCenterTransferExecuteResultDto result,
+        DateTime attemptStartedAt,
+        DateTime attemptEndedAt,
+        CancellationToken cancellationToken)
+    {
+        if (_centerTransferRunHistory is null)
+        {
+            return result;
+        }
+
+        try
+        {
+            await _centerTransferRunHistory.CreateAsync(
+                BuildCenterTransferRunHistoryEntry(
+                    request,
+                    confirmTextMatched,
+                    result,
+                    attemptStartedAt,
+                    attemptEndedAt),
+                cancellationToken);
+            return result;
+        }
+        catch
+        {
+            return CopyWithCenterTransferMessage(
+                result,
+                $"{result.Message} Canh bao: khong ghi duoc lich su chuyen MaCSDT Moto TEST.");
+        }
+    }
+
+    private static MotoCenterTransferRunHistoryCreateDto BuildCenterTransferRunHistoryEntry(
+        MotoCenterTransferPlanRequest request,
+        bool confirmTextMatched,
+        MotoCenterTransferExecuteResultDto result,
+        DateTime attemptStartedAt,
+        DateTime attemptEndedAt)
+    {
+        var summary = result.Summary;
+        var plan = result.Plan;
+        var startedAt = summary is null || summary.StartedAt == default
+            ? attemptStartedAt
+            : summary.StartedAt;
+        var endedAt = summary is null || summary.EndedAt == default
+            ? attemptEndedAt
+            : summary.EndedAt;
+        var durationMs = summary is null
+            ? (long)(endedAt - startedAt).TotalMilliseconds
+            : summary.DurationMs;
+
+        return new MotoCenterTransferRunHistoryCreateDto
+        {
+            SourceProfileCode = request.SourceProfileCode,
+            TargetProfileCode = request.TargetProfileCode,
+            MaKhoaHocCu = request.MaKhoaHocCu ?? string.Empty,
+            MaKhoaHocMoi = summary?.MaKhoaHocMoi ?? plan?.MaKhoaHocMoi ?? ComputeMaKhoaHocMoi(request.MaKhoaHocCu, request.MaCSDTCu, request.MaCSDTMoi),
+            MaCSDTCu = request.MaCSDTCu ?? string.Empty,
+            MaCSDTMoi = request.MaCSDTMoi ?? string.Empty,
+            MaSoGTVTMoi = request.MaSoGTVTMoi,
+            ConfirmTextMatched = confirmTextMatched,
+            Executed = result.Executed,
+            Status = result.Status,
+            Message = result.Message,
+            CopiedKhoaHoc = summary?.CopiedKhoaHoc ?? 0,
+            CopiedBaoCaoI = summary?.CopiedBaoCaoI ?? 0,
+            CopiedNguoiLX = summary?.CopiedNguoiLX ?? 0,
+            CopiedNguoiLXHoSo = summary?.CopiedNguoiLXHoSo ?? 0,
+            CopiedNguoiLXHSGiayTo = summary?.CopiedNguoiLXHSGiayTo ?? 0,
+            UpdatedNguoiLXHoSo = summary?.UpdatedNguoiLXHoSo ?? 0,
+            UpdatedNguoiLX = summary?.UpdatedNguoiLX ?? 0,
+            UpdatedKhoaHoc = summary?.UpdatedKhoaHoc ?? 0,
+            UpdatedBaoCaoI = summary?.UpdatedBaoCaoI ?? 0,
+            UpdatedNguoiLXHSGiayTo = summary?.UpdatedNguoiLXHSGiayTo ?? summary?.UpdatedGiayTo ?? 0,
+            TargetKhoaHocMoiCountAfter = summary?.TargetKhoaHocMoiCountAfter,
+            TargetBaoCaoIMoiCountAfter = summary?.TargetBaoCaoIMoiCountAfter,
+            TargetNguoiLXHoSoMoiCountAfter = summary?.TargetNguoiLXHoSoMoiCountAfter,
+            TargetNguoiLXHSGiayToMoiCountAfter = summary?.TargetNguoiLXHSGiayToMoiCountAfter,
+            TargetNguoiLXMoiCountAfter = summary?.TargetNguoiLXMoiCountAfter,
+            DurationMs = Math.Max(0, durationMs),
+            StartedAt = startedAt,
+            EndedAt = endedAt,
+            PlanJson = SerializeCenterTransferPlan(plan),
+            SummaryJson = SerializeCenterTransferSummary(summary),
+        };
+    }
+
+    private static string? SerializeCenterTransferPlan(MotoCenterTransferPlanDto? plan)
+        => plan is null ? null : JsonSerializer.Serialize(plan, HistoryJsonOptions);
+
+    private static string? SerializeCenterTransferSummary(MotoCenterTransferSummaryDto? summary)
+        => summary is null ? null : JsonSerializer.Serialize(summary, HistoryJsonOptions);
+
+    private static MotoCenterTransferExecuteResultDto CopyWithCenterTransferMessage(
+        MotoCenterTransferExecuteResultDto result,
+        string message) => new()
+    {
+        Executed = result.Executed,
+        Status = result.Status,
+        Message = message,
+        Plan = result.Plan,
+        Summary = result.Summary,
+    };
 
     private static MotoSyncExecuteResultDto CopyWithMessage(
         MotoSyncExecuteResultDto result,

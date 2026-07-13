@@ -420,6 +420,143 @@ public sealed class MotoSyncServiceTests
     }
 
     [Fact]
+    public async Task Center_transfer_wrong_confirm_writes_refused_history()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan());
+        var history = new FakeMotoCenterTransferRunHistoryRepository();
+        var service = new MotoSyncService(repo, centerTransferRunHistory: history);
+
+        var result = await service.ExecuteCenterTransferTestAsync(CenterTransferRequest(confirmText: "WRONG"));
+
+        Assert.False(result.Executed);
+        var entry = Assert.Single(history.Entries);
+        Assert.False(entry.ConfirmTextMatched);
+        Assert.False(entry.Executed);
+        Assert.Equal("BiChan", entry.Status);
+        Assert.NotNull(entry.PlanJson);
+        Assert.Null(entry.SummaryJson);
+        Assert.Equal(0, repo.CenterTransferPlanCalls);
+        Assert.Equal(0, repo.CenterTransferExecuteCalls);
+    }
+
+    [Fact]
+    public async Task Center_transfer_blocked_plan_writes_history_without_summary()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan())
+        {
+            CenterTransferPlan = CleanCenterTransferPlan(blockers: new[] { "blocked" }),
+        };
+        var history = new FakeMotoCenterTransferRunHistoryRepository();
+        var service = new MotoSyncService(repo, centerTransferRunHistory: history);
+
+        var result = await service.ExecuteCenterTransferTestAsync(CenterTransferRequest());
+
+        Assert.False(result.Executed);
+        var entry = Assert.Single(history.Entries);
+        Assert.True(entry.ConfirmTextMatched);
+        Assert.False(entry.Executed);
+        Assert.Equal("BiChan", entry.Status);
+        Assert.NotNull(entry.PlanJson);
+        Assert.Null(entry.SummaryJson);
+        Assert.Equal(1, repo.CenterTransferPlanCalls);
+        Assert.Equal(0, repo.CenterTransferExecuteCalls);
+    }
+
+    [Fact]
+    public async Task Center_transfer_success_writes_copied_and_updated_counts()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan())
+        {
+            CenterTransferSummary = new MotoCenterTransferSummaryDto
+            {
+                SourceProfileCode = "CSDT_V1",
+                TargetProfileCode = "CSDT_V2",
+                MaKhoaHocCu = "66016K26A1003",
+                MaKhoaHocMoi = "75044K26A1003",
+                CopiedKhoaHoc = 1,
+                CopiedBaoCaoI = 1,
+                CopiedNguoiLX = 117,
+                CopiedNguoiLXHoSo = 117,
+                CopiedNguoiLXHSGiayTo = 351,
+                UpdatedNguoiLXHoSo = 117,
+                UpdatedNguoiLX = 117,
+                UpdatedKhoaHoc = 1,
+                UpdatedBaoCaoI = 1,
+                UpdatedNguoiLXHSGiayTo = 351,
+                TargetKhoaHocMoiCountAfter = 1,
+                TargetBaoCaoIMoiCountAfter = 1,
+                TargetNguoiLXHoSoMoiCountAfter = 117,
+                TargetNguoiLXHSGiayToMoiCountAfter = 351,
+                TargetNguoiLXMoiCountAfter = 117,
+                StartedAt = DateTime.UtcNow,
+                EndedAt = DateTime.UtcNow,
+                DurationMs = 123,
+            },
+        };
+        var history = new FakeMotoCenterTransferRunHistoryRepository();
+        var service = new MotoSyncService(repo, centerTransferRunHistory: history);
+
+        var result = await service.ExecuteCenterTransferTestAsync(CenterTransferRequest());
+
+        Assert.True(result.Executed);
+        var entry = Assert.Single(history.Entries);
+        Assert.True(entry.ConfirmTextMatched);
+        Assert.True(entry.Executed);
+        Assert.Equal("ThanhCong", entry.Status);
+        Assert.Equal(117, entry.CopiedNguoiLX);
+        Assert.Equal(117, entry.CopiedNguoiLXHoSo);
+        Assert.Equal(351, entry.CopiedNguoiLXHSGiayTo);
+        Assert.Equal(351, entry.UpdatedNguoiLXHSGiayTo);
+        Assert.Equal(117, entry.TargetNguoiLXMoiCountAfter);
+        Assert.NotNull(entry.PlanJson);
+        Assert.NotNull(entry.SummaryJson);
+    }
+
+    [Fact]
+    public async Task Center_transfer_exception_writes_failed_history_after_rollback_result()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan())
+        {
+            ThrowOnCenterTransferExecute = true,
+        };
+        var history = new FakeMotoCenterTransferRunHistoryRepository();
+        var service = new MotoSyncService(repo, centerTransferRunHistory: history);
+
+        var result = await service.ExecuteCenterTransferTestAsync(CenterTransferRequest());
+
+        Assert.False(result.Executed);
+        Assert.Equal("Loi", result.Status);
+        var entry = Assert.Single(history.Entries);
+        Assert.True(entry.ConfirmTextMatched);
+        Assert.False(entry.Executed);
+        Assert.Equal("Loi", entry.Status);
+        Assert.NotNull(entry.PlanJson);
+        Assert.Null(entry.SummaryJson);
+    }
+
+    [Fact]
+    public async Task Center_transfer_history_logging_failure_does_not_hide_success()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan());
+        var history = new FakeMotoCenterTransferRunHistoryRepository { ThrowOnCreate = true };
+        var service = new MotoSyncService(repo, centerTransferRunHistory: history);
+
+        var result = await service.ExecuteCenterTransferTestAsync(CenterTransferRequest());
+
+        Assert.True(result.Executed);
+        Assert.Equal("ThanhCong", result.Status);
+        Assert.Contains("khong ghi duoc lich su", result.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Center_transfer_history_create_dto_does_not_store_raw_confirm_text()
+    {
+        Assert.DoesNotContain(
+            typeof(MotoCenterTransferRunHistoryCreateDto).GetProperties(),
+            property => string.Equals(property.Name, "ConfirmText", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task Center_transfer_plan_returns_giay_to_counts_and_identity_warning()
     {
         var repo = new FakeMotoSyncRepository(CleanPlan())
@@ -1121,6 +1258,7 @@ public sealed class MotoSyncServiceTests
         public MotoSyncExecuteSummaryDto UpdateSummary { get; init; }
         public MotoCenterTransferPlanDto CenterTransferPlan { get; init; } = CleanCenterTransferPlan();
         public MotoCenterTransferSummaryDto? CenterTransferSummary { get; init; }
+        public bool ThrowOnCenterTransferExecute { get; init; }
         public MotoSyncPlanDto? AfterPlan { get; init; }
         public MotoSyncKhoaHocOptionsQuery? LastKhoaHocOptionsQuery { get; private set; }
         public MotoCenterTransferPlanRequest? LastCenterTransferPlanRequest { get; private set; }
@@ -1219,6 +1357,11 @@ public sealed class MotoSyncServiceTests
             MotoCenterTransferPlanRequest request,
             CancellationToken cancellationToken = default)
         {
+            if (ThrowOnCenterTransferExecute)
+            {
+                throw new InvalidOperationException("center transfer failed");
+            }
+
             CenterTransferExecuteCalls++;
             LastCenterTransferExecuteRequest = request;
             return Task.FromResult(CenterTransferSummary ?? new MotoCenterTransferSummaryDto
@@ -1290,5 +1433,34 @@ public sealed class MotoSyncServiceTests
             long id,
             CancellationToken cancellationToken = default)
             => Task.FromResult<MotoSyncRunHistoryDetailDto?>(null);
+    }
+
+    private sealed class FakeMotoCenterTransferRunHistoryRepository : IMotoCenterTransferRunHistoryRepository
+    {
+        public List<MotoCenterTransferRunHistoryCreateDto> Entries { get; } = new();
+        public bool ThrowOnCreate { get; init; }
+
+        public Task<long> CreateAsync(
+            MotoCenterTransferRunHistoryCreateDto entry,
+            CancellationToken cancellationToken = default)
+        {
+            if (ThrowOnCreate)
+            {
+                throw new InvalidOperationException("center transfer history failed");
+            }
+
+            Entries.Add(entry);
+            return Task.FromResult((long)Entries.Count);
+        }
+
+        public Task<IReadOnlyList<MotoCenterTransferRunHistoryListItemDto>> SearchAsync(
+            MotoCenterTransferRunHistoryQuery query,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<MotoCenterTransferRunHistoryListItemDto>>(Array.Empty<MotoCenterTransferRunHistoryListItemDto>());
+
+        public Task<MotoCenterTransferRunHistoryDetailDto?> GetByIdAsync(
+            long id,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<MotoCenterTransferRunHistoryDetailDto?>(null);
     }
 }

@@ -3,6 +3,8 @@ import {
   executeMotoCenterTransferTest,
   executeMotoSyncTest,
   getMotoCenterTransferPlan,
+  getMotoCenterTransferRunHistory,
+  getMotoCenterTransferRunHistoryDetail,
   getMotoSyncKhoaHocOptions,
   getMotoSyncPlan,
   getMotoSyncRunHistory,
@@ -11,6 +13,8 @@ import {
 import type {
   MotoCenterTransferExecuteResult,
   MotoCenterTransferPlan,
+  MotoCenterTransferRunHistoryDetail,
+  MotoCenterTransferRunHistoryListItem,
   MotoSyncDirection,
   MotoSyncExecuteResult,
   MotoSyncKhoaHocOption,
@@ -52,6 +56,12 @@ export default function MotoSyncPage() {
   const [centerLoadingPlan, setCenterLoadingPlan] = useState(false);
   const [centerExecuting, setCenterExecuting] = useState(false);
   const [centerError, setCenterError] = useState<string | null>(null);
+  const [centerHistory, setCenterHistory] = useState<MotoCenterTransferRunHistoryListItem[]>([]);
+  const [centerHistoryLoading, setCenterHistoryLoading] = useState(false);
+  const [centerHistoryError, setCenterHistoryError] = useState<string | null>(null);
+  const [centerHistoryDetail, setCenterHistoryDetail] = useState<MotoCenterTransferRunHistoryDetail | null>(null);
+  const [centerHistoryDetailLoading, setCenterHistoryDetailLoading] = useState(false);
+  const [centerHistoryDetailError, setCenterHistoryDetailError] = useState<string | null>(null);
   const [direction, setDirection] = useState<MotoSyncDirection>('V1_TO_V2');
   const [maKhoaHoc, setMaKhoaHoc] = useState('');
   const [syncMode, setSyncMode] = useState<MotoSyncMode>('INSERT_ONLY');
@@ -72,6 +82,19 @@ export default function MotoSyncPage() {
   const [historyDetailLoading, setHistoryDetailLoading] = useState(false);
   const [historyDetailError, setHistoryDetailError] = useState<string | null>(null);
 
+  const loadCenterHistory = useCallback(async () => {
+    setCenterHistoryLoading(true);
+    setCenterHistoryError(null);
+    try {
+      const rows = await getMotoCenterTransferRunHistory(50);
+      setCenterHistory(rows);
+    } catch (err) {
+      setCenterHistoryError(err instanceof Error ? err.message : 'KhÃ´ng thá»ƒ táº£i lá»‹ch sá»­ chuyá»ƒn MaCSDT Moto TEST.');
+    } finally {
+      setCenterHistoryLoading(false);
+    }
+  }, []);
+
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
     setHistoryError(null);
@@ -86,8 +109,9 @@ export default function MotoSyncPage() {
   }, []);
 
   useEffect(() => {
+    void loadCenterHistory();
     void loadHistory();
-  }, [loadHistory]);
+  }, [loadCenterHistory, loadHistory]);
 
   const profiles = useMemo(() => getProfiles(direction), [direction]);
   const requiredConfirm = syncMode === 'INSERT_AND_UPDATE' ? INSERT_AND_UPDATE_CONFIRM : INSERT_ONLY_CONFIRM;
@@ -188,6 +212,7 @@ export default function MotoSyncPage() {
       if (nextResult.plan) {
         setCenterPlan(nextResult.plan);
       }
+      await loadCenterHistory();
     } catch (err) {
       setCenterError(err instanceof Error ? err.message : 'Không thể thực thi chuyển MaCSDT Moto TEST.');
     } finally {
@@ -321,6 +346,26 @@ export default function MotoSyncPage() {
     setHistoryDetailLoading(false);
   }
 
+  async function handleOpenCenterHistoryDetail(id: number) {
+    setCenterHistoryDetailLoading(true);
+    setCenterHistoryDetailError(null);
+    try {
+      const detail = await getMotoCenterTransferRunHistoryDetail(id);
+      setCenterHistoryDetail(detail);
+    } catch (err) {
+      setCenterHistoryDetail(null);
+      setCenterHistoryDetailError(err instanceof Error ? err.message : 'KhÃ´ng thá»ƒ táº£i chi tiáº¿t lá»‹ch sá»­ chuyá»ƒn MaCSDT Moto TEST.');
+    } finally {
+      setCenterHistoryDetailLoading(false);
+    }
+  }
+
+  function handleCloseCenterHistoryDetail() {
+    setCenterHistoryDetail(null);
+    setCenterHistoryDetailError(null);
+    setCenterHistoryDetailLoading(false);
+  }
+
   return (
     <section className="moto-sync-page">
       <div className="toolbar moto-sync-hero">
@@ -444,6 +489,32 @@ export default function MotoSyncPage() {
             </aside>
           </div>
         )}
+
+        <div className="moto-sync-history-panel">
+          <div className="moto-sync-section-title">
+            <div>
+              <strong>Lá»‹ch sá»­ chuyá»ƒn MaCSDT</strong>
+              <p>Ghi láº¡i cÃ¡c láº§n thá»±c thi Option 1 trong QLHV_APP, khÃ´ng hiá»ƒn thá»‹ confirm text gá»‘c.</p>
+            </div>
+            <button type="button" className="btn btn--ghost btn--sm" onClick={() => void loadCenterHistory()} disabled={centerHistoryLoading}>
+              {centerHistoryLoading ? 'Äang táº£i...' : 'Táº£i láº¡i'}
+            </button>
+          </div>
+          {centerHistoryError && <div className="moto-sync-message-list moto-sync-message-list--error">{centerHistoryError}</div>}
+          <CenterTransferRunHistoryTable
+            rows={centerHistory}
+            loading={centerHistoryLoading}
+            onOpenDetail={(id) => void handleOpenCenterHistoryDetail(id)}
+          />
+          {(centerHistoryDetail || centerHistoryDetailLoading || centerHistoryDetailError) && (
+            <CenterTransferRunHistoryDetailPanel
+              detail={centerHistoryDetail}
+              loading={centerHistoryDetailLoading}
+              error={centerHistoryDetailError}
+              onClose={handleCloseCenterHistoryDetail}
+            />
+          )}
+        </div>
       </div>
 
       <div className="panel moto-sync-form">
@@ -863,6 +934,168 @@ function CenterTransferResult({ result }: { result: MotoCenterTransferExecuteRes
           <span>targetNguoiLXMoiCountAfter</span><strong>{formatNumber(summary.targetNguoiLXMoiCountAfter)}</strong>
           <span>durationMs</span><strong>{formatNumber(summary.durationMs)}</strong>
         </div>
+      )}
+    </div>
+  );
+}
+
+function CenterTransferRunHistoryTable({
+  rows,
+  loading,
+  onOpenDetail,
+}: {
+  rows: MotoCenterTransferRunHistoryListItem[];
+  loading: boolean;
+  onOpenDetail: (id: number) => void;
+}) {
+  if (loading && rows.length === 0) {
+    return <div className="state">Äang táº£i lá»‹ch sá»­ chuyá»ƒn MaCSDT...</div>;
+  }
+
+  if (rows.length === 0) {
+    return <div className="state">ChÆ°a cÃ³ lá»‹ch sá»­ chuyá»ƒn MaCSDT Moto TEST.</div>;
+  }
+
+  return (
+    <div className="table-wrap">
+      <table className="table table--moto-sync-history">
+        <thead>
+          <tr>
+            <th>Thá»i gian</th>
+            <th>KhÃ³a</th>
+            <th>MaCSDT</th>
+            <th>Tráº¡ng thÃ¡i</th>
+            <th>ÄÃ£ copy</th>
+            <th>ÄÃ£ cáº­p nháº­t</th>
+            <th>Thá»i gian cháº¡y</th>
+            <th>Chi tiáº¿t</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.id}>
+              <td>{formatDateTime(row.startedAt)}</td>
+              <td>
+                {row.maKhoaHocCu} â†’ {row.maKhoaHocMoi ?? '-'}
+              </td>
+              <td>
+                {row.maCSDTCu} â†’ {row.maCSDTMoi}
+              </td>
+              <td>
+                <span className={statusClassName(row.status)}>{row.status}</span>
+              </td>
+              <td>{formatNumber(row.copiedTotal)}</td>
+              <td>{formatNumber(row.updatedTotal)}</td>
+              <td>{formatNumber(row.durationMs)} ms</td>
+              <td>
+                <button type="button" className="btn btn--ghost btn--sm" onClick={() => onOpenDetail(row.id)}>
+                  Chi tiáº¿t
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function CenterTransferRunHistoryDetailPanel({
+  detail,
+  loading,
+  error,
+  onClose,
+}: {
+  detail: MotoCenterTransferRunHistoryDetail | null;
+  loading: boolean;
+  error: string | null;
+  onClose: () => void;
+}) {
+  return (
+    <div className="moto-sync-history-detail">
+      <div className="moto-sync-section-title">
+        <strong>Chi tiáº¿t láº§n chuyá»ƒn MaCSDT</strong>
+        <button type="button" className="btn btn--ghost btn--sm" onClick={onClose}>
+          ÄÃ³ng
+        </button>
+      </div>
+
+      {loading && <div className="state">Äang táº£i chi tiáº¿t lá»‹ch sá»­ chuyá»ƒn MaCSDT...</div>}
+      {error && <div className="moto-sync-message-list moto-sync-message-list--error">{error}</div>}
+      {!loading && !error && detail && (
+        <>
+          <CenterTransferRunHistoryDetailFields detail={detail} />
+          <div className="moto-sync-plan-detail-grid">
+            <RawJsonBlock title="Plan JSON" json={detail.planJson} emptyText="KhÃ´ng cÃ³ plan JSON." />
+            <RawJsonBlock title="Summary JSON" json={detail.summaryJson} emptyText="KhÃ´ng cÃ³ summary JSON." />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function CenterTransferRunHistoryDetailFields({ detail }: { detail: MotoCenterTransferRunHistoryDetail }) {
+  const rows: Array<[string, string | number | boolean | null]> = [
+    ['ID', detail.id],
+    ['Báº¯t Ä‘áº§u', formatDateTime(detail.startedAt)],
+    ['Káº¿t thÃºc', detail.endedAt ? formatDateTime(detail.endedAt) : null],
+    ['Thá»i gian cháº¡y', `${formatNumber(detail.durationMs)} ms`],
+    ['Nguá»“n', detail.sourceProfileCode],
+    ['ÄÃ­ch', detail.targetProfileCode],
+    ['MÃ£ khÃ³a cÅ©', detail.maKhoaHocCu],
+    ['MÃ£ khÃ³a má»›i', detail.maKhoaHocMoi],
+    ['MaCSDT cÅ©', detail.maCSDTCu],
+    ['MaCSDT má»›i', detail.maCSDTMoi],
+    ['MÃ£ Sá»Ÿ GTVT má»›i', detail.maSoGTVTMoi],
+    ['Confirm text khá»›p', detail.confirmTextMatched ? 'CÃ³' : 'KhÃ´ng'],
+    ['ÄÃ£ thá»±c thi', detail.executed ? 'CÃ³' : 'KhÃ´ng'],
+    ['Tráº¡ng thÃ¡i', detail.status],
+    ['ThÃ´ng bÃ¡o', detail.message],
+    ['Copy KhoaHoc', detail.copiedKhoaHoc],
+    ['Copy BaoCaoI', detail.copiedBaoCaoI],
+    ['Copy NguoiLX', detail.copiedNguoiLX],
+    ['Copy NguoiLX_HoSo', detail.copiedNguoiLXHoSo],
+    ['Copy NguoiLXHS_GiayTo', detail.copiedNguoiLXHSGiayTo],
+    ['Tá»•ng Ä‘Ã£ copy', detail.copiedTotal],
+    ['Cáº­p nháº­t NguoiLX_HoSo', detail.updatedNguoiLXHoSo],
+    ['Cáº­p nháº­t NguoiLX', detail.updatedNguoiLX],
+    ['Cáº­p nháº­t KhoaHoc', detail.updatedKhoaHoc],
+    ['Cáº­p nháº­t BaoCaoI', detail.updatedBaoCaoI],
+    ['Cáº­p nháº­t NguoiLXHS_GiayTo', detail.updatedNguoiLXHSGiayTo],
+    ['Tá»•ng Ä‘Ã£ cáº­p nháº­t', detail.updatedTotal],
+    ['Target KhoaHoc má»›i sau cháº¡y', detail.targetKhoaHocMoiCountAfter],
+    ['Target BaoCaoI má»›i sau cháº¡y', detail.targetBaoCaoIMoiCountAfter],
+    ['Target Há»“ sÆ¡ má»›i sau cháº¡y', detail.targetNguoiLXHoSoMoiCountAfter],
+    ['Target Giáº¥y tá» má»›i sau cháº¡y', detail.targetNguoiLXHSGiayToMoiCountAfter],
+    ['Target NguoiLX má»›i sau cháº¡y', detail.targetNguoiLXMoiCountAfter],
+  ];
+
+  return (
+    <div className="moto-sync-detail-grid">
+      {rows.map(([label, value]) => (
+        <div key={label} className="moto-sync-detail-item">
+          <span>{label}</span>
+          <strong className={label === 'Tráº¡ng thÃ¡i' ? statusClassName(String(value ?? '')) : undefined}>
+            {value === null || value === '' ? '-' : String(value)}
+          </strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RawJsonBlock({ title, json, emptyText }: { title: string; json: string | null; emptyText: string }) {
+  return (
+    <div className="moto-sync-plan-json-card">
+      <SectionTitle title={title} />
+      {json ? (
+        <details className="moto-sync-raw-json">
+          <summary>Xem JSON</summary>
+          <pre>{json}</pre>
+        </details>
+      ) : (
+        <div className="moto-sync-muted">{emptyText}</div>
       )}
     </div>
   );

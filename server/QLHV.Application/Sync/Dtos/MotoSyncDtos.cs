@@ -212,6 +212,150 @@ public sealed class MotoCenterTransferSummaryDto
     public long DurationMs { get; init; }
 }
 
+public sealed class MotoCenterTransferRunHistoryQuery
+{
+    public int Take { get; set; } = 50;
+}
+
+public class MotoCenterTransferRunHistoryListItemDto
+{
+    public long Id { get; init; }
+
+    public string SourceProfileCode { get; init; } = string.Empty;
+
+    public string TargetProfileCode { get; init; } = string.Empty;
+
+    public string MaKhoaHocCu { get; init; } = string.Empty;
+
+    public string? MaKhoaHocMoi { get; init; }
+
+    public string MaCSDTCu { get; init; } = string.Empty;
+
+    public string MaCSDTMoi { get; init; } = string.Empty;
+
+    public string? MaSoGTVTMoi { get; init; }
+
+    public bool ConfirmTextMatched { get; init; }
+
+    public bool Executed { get; init; }
+
+    public string Status { get; init; } = string.Empty;
+
+    public string Message { get; init; } = string.Empty;
+
+    public long CopiedTotal { get; init; }
+
+    public long UpdatedTotal { get; init; }
+
+    public long DurationMs { get; init; }
+
+    public DateTime StartedAt { get; init; }
+
+    public DateTime? EndedAt { get; init; }
+}
+
+public sealed class MotoCenterTransferRunHistoryDetailDto : MotoCenterTransferRunHistoryListItemDto
+{
+    public long CopiedKhoaHoc { get; init; }
+
+    public long CopiedBaoCaoI { get; init; }
+
+    public long CopiedNguoiLX { get; init; }
+
+    public long CopiedNguoiLXHoSo { get; init; }
+
+    public long CopiedNguoiLXHSGiayTo { get; init; }
+
+    public long UpdatedNguoiLXHoSo { get; init; }
+
+    public long UpdatedNguoiLX { get; init; }
+
+    public long UpdatedKhoaHoc { get; init; }
+
+    public long UpdatedBaoCaoI { get; init; }
+
+    public long UpdatedNguoiLXHSGiayTo { get; init; }
+
+    public long? TargetKhoaHocMoiCountAfter { get; init; }
+
+    public long? TargetBaoCaoIMoiCountAfter { get; init; }
+
+    public long? TargetNguoiLXHoSoMoiCountAfter { get; init; }
+
+    public long? TargetNguoiLXHSGiayToMoiCountAfter { get; init; }
+
+    public long? TargetNguoiLXMoiCountAfter { get; init; }
+
+    public string? PlanJson { get; init; }
+
+    public string? SummaryJson { get; init; }
+}
+
+public sealed class MotoCenterTransferRunHistoryCreateDto
+{
+    public string SourceProfileCode { get; init; } = string.Empty;
+
+    public string TargetProfileCode { get; init; } = string.Empty;
+
+    public string MaKhoaHocCu { get; init; } = string.Empty;
+
+    public string? MaKhoaHocMoi { get; init; }
+
+    public string MaCSDTCu { get; init; } = string.Empty;
+
+    public string MaCSDTMoi { get; init; } = string.Empty;
+
+    public string? MaSoGTVTMoi { get; init; }
+
+    public bool ConfirmTextMatched { get; init; }
+
+    public bool Executed { get; init; }
+
+    public string Status { get; init; } = string.Empty;
+
+    public string Message { get; init; } = string.Empty;
+
+    public long CopiedKhoaHoc { get; init; }
+
+    public long CopiedBaoCaoI { get; init; }
+
+    public long CopiedNguoiLX { get; init; }
+
+    public long CopiedNguoiLXHoSo { get; init; }
+
+    public long CopiedNguoiLXHSGiayTo { get; init; }
+
+    public long UpdatedNguoiLXHoSo { get; init; }
+
+    public long UpdatedNguoiLX { get; init; }
+
+    public long UpdatedKhoaHoc { get; init; }
+
+    public long UpdatedBaoCaoI { get; init; }
+
+    public long UpdatedNguoiLXHSGiayTo { get; init; }
+
+    public long? TargetKhoaHocMoiCountAfter { get; init; }
+
+    public long? TargetBaoCaoIMoiCountAfter { get; init; }
+
+    public long? TargetNguoiLXHoSoMoiCountAfter { get; init; }
+
+    public long? TargetNguoiLXHSGiayToMoiCountAfter { get; init; }
+
+    public long? TargetNguoiLXMoiCountAfter { get; init; }
+
+    public long? DurationMs { get; init; }
+
+    public DateTime StartedAt { get; init; }
+
+    public DateTime? EndedAt { get; init; }
+
+    public string? PlanJson { get; init; }
+
+    public string? SummaryJson { get; init; }
+}
+
 public sealed class MotoSyncTestExecuteRequest
 {
     public MotoSyncDirection Direction { get; set; }

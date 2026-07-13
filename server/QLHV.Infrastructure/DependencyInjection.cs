@@ -44,6 +44,7 @@ public static class DependencyInjection
         services.AddScoped<IQlhvHocVienTargetRepository, QlhvHocVienTargetRepository>();
         services.AddScoped<IMotoSyncRepository, MotoSyncRepository>();
         services.AddScoped<IMotoSyncRunHistoryRepository, MotoSyncRunHistoryRepository>();
+        services.AddScoped<IMotoCenterTransferRunHistoryRepository, MotoCenterTransferRunHistoryRepository>();
         services.AddScoped<IHocVienSourceAttributionDiagnosticsRepository, HocVienSourceAttributionDiagnosticsRepository>();
         services.AddScoped<ISyncRunLogWriter, SyncRunLogWriter>();
         services.AddScoped<IHocVienSyncJob, HocVienSyncJob>();
