@@ -63,12 +63,19 @@ export default function MotoSyncPage() {
   const [centerDonViWarnings, setCenterDonViWarnings] = useState<string[]>([]);
   const [centerDonViLoading, setCenterDonViLoading] = useState(false);
   const [centerDonViError, setCenterDonViError] = useState<string | null>(null);
+  const [selectedCenterMaCSDTMoiLabel, setSelectedCenterMaCSDTMoiLabel] = useState<string | null>(null);
+  const [selectedCenterMaSoGTVTMoiLabel, setSelectedCenterMaSoGTVTMoiLabel] = useState<string | null>(null);
   const [centerHistory, setCenterHistory] = useState<MotoCenterTransferRunHistoryListItem[]>([]);
   const [centerHistoryLoading, setCenterHistoryLoading] = useState(false);
   const [centerHistoryError, setCenterHistoryError] = useState<string | null>(null);
   const [centerHistoryDetail, setCenterHistoryDetail] = useState<MotoCenterTransferRunHistoryDetail | null>(null);
   const [centerHistoryDetailLoading, setCenterHistoryDetailLoading] = useState(false);
   const [centerHistoryDetailError, setCenterHistoryDetailError] = useState<string | null>(null);
+  const [centerHistoryMaKhoaHoc, setCenterHistoryMaKhoaHoc] = useState('');
+  const [centerHistoryMaCSDT, setCenterHistoryMaCSDT] = useState('');
+  const [centerHistoryStatus, setCenterHistoryStatus] = useState('');
+  const [centerHistoryExecuted, setCenterHistoryExecuted] = useState('');
+  const [centerHistoryTake, setCenterHistoryTake] = useState(50);
   const [direction, setDirection] = useState<MotoSyncDirection>('V1_TO_V2');
   const [maKhoaHoc, setMaKhoaHoc] = useState('');
   const [syncMode, setSyncMode] = useState<MotoSyncMode>('INSERT_ONLY');
@@ -93,14 +100,20 @@ export default function MotoSyncPage() {
     setCenterHistoryLoading(true);
     setCenterHistoryError(null);
     try {
-      const rows = await getMotoCenterTransferRunHistory(50);
+      const rows = await getMotoCenterTransferRunHistory({
+        take: centerHistoryTake,
+        maKhoaHoc: centerHistoryMaKhoaHoc,
+        maCSDT: centerHistoryMaCSDT,
+        status: centerHistoryStatus || undefined,
+        executed: centerHistoryExecuted === '' ? null : centerHistoryExecuted === 'true',
+      });
       setCenterHistory(rows);
     } catch (err) {
       setCenterHistoryError(err instanceof Error ? err.message : 'KhÃ´ng thá»ƒ táº£i lá»‹ch sá»­ chuyá»ƒn MaCSDT Moto TEST.');
     } finally {
       setCenterHistoryLoading(false);
     }
-  }, []);
+  }, [centerHistoryExecuted, centerHistoryMaCSDT, centerHistoryMaKhoaHoc, centerHistoryStatus, centerHistoryTake]);
 
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
@@ -118,7 +131,9 @@ export default function MotoSyncPage() {
   useEffect(() => {
     void loadCenterHistory();
     void loadHistory();
-  }, [loadCenterHistory, loadHistory]);
+    // Initial load only; history filters are applied by the explicit reload button.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const profiles = useMemo(() => getProfiles(direction), [direction]);
   const requiredConfirm = syncMode === 'INSERT_AND_UPDATE' ? INSERT_AND_UPDATE_CONFIRM : INSERT_ONLY_CONFIRM;
@@ -129,6 +144,11 @@ export default function MotoSyncPage() {
   const trimmedCenterMaCSDTCu = centerMaCSDTCu.trim();
   const trimmedCenterMaCSDTMoi = centerMaCSDTMoi.trim();
   const trimmedCenterMaSoGTVTMoi = centerMaSoGTVTMoi.trim();
+  const centerSuggestedMaSoGTVTMoi = trimmedCenterMaCSDTMoi.length >= 2 ? trimmedCenterMaCSDTMoi.slice(0, 2) : '';
+  const centerHasSameOldNewCode =
+    !!trimmedCenterMaCSDTCu &&
+    !!trimmedCenterMaCSDTMoi &&
+    trimmedCenterMaCSDTCu.toLocaleUpperCase('vi-VN') === trimmedCenterMaCSDTMoi.toLocaleUpperCase('vi-VN');
   const centerPlanIsCurrent =
     !!centerPlan &&
     centerPlan.sourceProfileCode === centerSourceProfileCode &&
@@ -249,10 +269,17 @@ export default function MotoSyncPage() {
 
   function handleChooseCenterMaCSDTMoi(option: MotoTargetDonViGTVTOption) {
     handleCenterFieldChange(setCenterMaCSDTMoi, option.maDV);
+    setSelectedCenterMaCSDTMoiLabel(`Đã chọn MaCSDT mới: ${formatDonViOptionLabel(option)}`);
   }
 
   function handleChooseCenterMaSoGTVTMoi(option: MotoTargetDonViGTVTOption) {
     handleCenterFieldChange(setCenterMaSoGTVTMoi, option.maDV);
+    setSelectedCenterMaSoGTVTMoiLabel(`Đã chọn Mã Sở GTVT mới: ${formatDonViOptionLabel(option)}`);
+  }
+
+  function handleUseCenterMaSoGTVTSuggestion() {
+    handleCenterFieldChange(setCenterMaSoGTVTMoi, centerSuggestedMaSoGTVTMoi);
+    setSelectedCenterMaSoGTVTMoiLabel(`Đã chọn Mã Sở GTVT mới theo gợi ý: ${centerSuggestedMaSoGTVTMoi}`);
   }
 
   function invalidatePlan() {
@@ -457,7 +484,10 @@ export default function MotoSyncPage() {
             <input
               className="field__input"
               value={centerMaCSDTMoi}
-              onChange={(event) => handleCenterFieldChange(setCenterMaCSDTMoi, event.target.value)}
+              onChange={(event) => {
+                setSelectedCenterMaCSDTMoiLabel(null);
+                handleCenterFieldChange(setCenterMaCSDTMoi, event.target.value);
+              }}
               placeholder="Nhập MaCSDT mới"
             />
           </label>
@@ -467,7 +497,10 @@ export default function MotoSyncPage() {
             <input
               className="field__input"
               value={centerMaSoGTVTMoi}
-              onChange={(event) => handleCenterFieldChange(setCenterMaSoGTVTMoi, event.target.value)}
+              onChange={(event) => {
+                setSelectedCenterMaSoGTVTMoiLabel(null);
+                handleCenterFieldChange(setCenterMaSoGTVTMoi, event.target.value);
+              }}
               placeholder="Nhập mã Sở GTVT mới"
             />
           </label>
@@ -482,8 +515,8 @@ export default function MotoSyncPage() {
         <div className="moto-sync-history-panel">
           <div className="moto-sync-section-title">
             <div>
-              <strong>Tìm đơn vị target DM_DonViGTVT</strong>
-              <p>Tra cứu trên CSDT_V2 để chọn MaCSDT mới hoặc Mã Sở GTVT mới, tránh nhập mã không tồn tại trong danh mục target.</p>
+              <strong>Tìm trong target CSDT_V2.DM_DonViGTVT</strong>
+              <p>Dùng để chọn MaCSDT mới hoặc Mã Sở GTVT mới, tránh nhập mã không tồn tại trong danh mục target.</p>
             </div>
           </div>
           <div className="toolbar__row">
@@ -508,6 +541,11 @@ export default function MotoSyncPage() {
             </div>
           </div>
           {centerDonViError && <div className="moto-sync-message-list moto-sync-message-list--error">{centerDonViError}</div>}
+          {centerDonViWarnings.some((warning) => warning.includes('MaSoGTVT')) && (
+            <div className="moto-sync-message-list moto-sync-message-list--warning">
+              Target không có cột MaSoGTVT; hãy chọn Mã Sở GTVT bằng dòng MaDV cấp tỉnh/Sở, ví dụ 01, 66, 99.
+            </div>
+          )}
           <MessageList title="Cảnh báo danh mục" items={centerDonViWarnings} variant="warning" />
           {centerDonViOptions.length > 0 && (
             <div className="table-responsive">
@@ -526,7 +564,7 @@ export default function MotoSyncPage() {
                     <tr key={`${option.maDV}-${option.maSoGTVT ?? ''}`}>
                       <td><code>{option.maDV}</code></td>
                       <td>{option.tenDV ?? '-'}</td>
-                      <td>{option.maSoGTVT ?? '-'}</td>
+                      <td>{option.maSoGTVT ?? 'Không có'}</td>
                       <td>{option.displayText}</td>
                       <td>
                         <div className="toolbar__actions">
@@ -542,6 +580,25 @@ export default function MotoSyncPage() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+          {(selectedCenterMaCSDTMoiLabel || selectedCenterMaSoGTVTMoiLabel) && (
+            <div className="moto-sync-message-list moto-sync-message-list--success">
+              {selectedCenterMaCSDTMoiLabel && <div>{selectedCenterMaCSDTMoiLabel}</div>}
+              {selectedCenterMaSoGTVTMoiLabel && <div>{selectedCenterMaSoGTVTMoiLabel}</div>}
+            </div>
+          )}
+          {centerSuggestedMaSoGTVTMoi && !trimmedCenterMaSoGTVTMoi && (
+            <div className="moto-sync-message-list moto-sync-message-list--warning">
+              Gợi ý Mã Sở GTVT từ 2 ký tự đầu của MaCSDT mới: <strong>{centerSuggestedMaSoGTVTMoi}</strong>
+              <button type="button" className="btn btn--ghost btn--sm" onClick={handleUseCenterMaSoGTVTSuggestion}>
+                Dùng gợi ý này
+              </button>
+            </div>
+          )}
+          {centerHasSameOldNewCode && (
+            <div className="moto-sync-message-list moto-sync-message-list--warning">
+              MaCSDT mới đang trùng MaCSDT cũ; chức năng này dùng để chuyển sang mã khác.
             </div>
           )}
         </div>
@@ -601,6 +658,61 @@ export default function MotoSyncPage() {
             <button type="button" className="btn btn--ghost btn--sm" onClick={() => void loadCenterHistory()} disabled={centerHistoryLoading}>
               {centerHistoryLoading ? 'Äang táº£i...' : 'Táº£i láº¡i'}
             </button>
+          </div>
+          <div className="toolbar__row">
+            <label className="field">
+              <span className="field__label">Tìm mã khóa</span>
+              <input
+                className="field__input"
+                value={centerHistoryMaKhoaHoc}
+                onChange={(event) => setCenterHistoryMaKhoaHoc(event.target.value)}
+                placeholder="66016"
+              />
+            </label>
+            <label className="field">
+              <span className="field__label">Tìm MaCSDT</span>
+              <input
+                className="field__input"
+                value={centerHistoryMaCSDT}
+                onChange={(event) => setCenterHistoryMaCSDT(event.target.value)}
+                placeholder="01001"
+              />
+            </label>
+            <label className="field">
+              <span className="field__label">Trạng thái</span>
+              <select className="field__input" value={centerHistoryStatus} onChange={(event) => setCenterHistoryStatus(event.target.value)}>
+                <option value="">Tất cả</option>
+                <option value="ThanhCong">ThanhCong</option>
+                <option value="BiChan">BiChan</option>
+                <option value="Loi">Loi</option>
+              </select>
+            </label>
+            <label className="field">
+              <span className="field__label">Executed</span>
+              <select className="field__input" value={centerHistoryExecuted} onChange={(event) => setCenterHistoryExecuted(event.target.value)}>
+                <option value="">Tất cả</option>
+                <option value="true">Đã chạy</option>
+                <option value="false">Chưa chạy</option>
+              </select>
+            </label>
+            <label className="field">
+              <span className="field__label">Số dòng</span>
+              <select
+                className="field__input"
+                value={centerHistoryTake}
+                onChange={(event) => setCenterHistoryTake(Number(event.target.value))}
+              >
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </label>
+            <div className="toolbar__actions">
+              <button type="button" className="btn btn--ghost" onClick={() => void loadCenterHistory()} disabled={centerHistoryLoading}>
+                Tải lịch sử
+              </button>
+            </div>
           </div>
           {centerHistoryError && <div className="moto-sync-message-list moto-sync-message-list--error">{centerHistoryError}</div>}
           <CenterTransferRunHistoryTable
@@ -906,6 +1018,10 @@ function formatDonViCatalogStatus(exists: boolean, tenDV: string | null) {
   return tenDV?.trim() ? `Có - ${tenDV.trim()}` : 'Có';
 }
 
+function formatDonViOptionLabel(option: MotoTargetDonViGTVTOption) {
+  return option.tenDV?.trim() ? `${option.maDV} - ${option.tenDV.trim()}` : option.maDV;
+}
+
 function PlanMetrics({ plan }: { plan: MotoSyncPlan }) {
   const rows = [
     ['sourceRows', plan.sourceRows],
@@ -1126,13 +1242,40 @@ function CenterTransferRunHistoryDetailPanel({
       {error && <div className="moto-sync-message-list moto-sync-message-list--error">{error}</div>}
       {!loading && !error && detail && (
         <>
+          <CenterTransferRunHistorySummaryChips detail={detail} />
           <CenterTransferRunHistoryDetailFields detail={detail} />
           <div className="moto-sync-plan-detail-grid">
-            <RawJsonBlock title="Plan JSON" json={detail.planJson} emptyText="KhÃ´ng cÃ³ plan JSON." />
-            <RawJsonBlock title="Summary JSON" json={detail.summaryJson} emptyText="KhÃ´ng cÃ³ summary JSON." />
+            <PrettyJsonBlock title="Plan JSON" json={detail.planJson} emptyText="Không có plan JSON." />
+            <PrettyJsonBlock title="Summary JSON" json={detail.summaryJson} emptyText="Không có summary JSON." />
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function CenterTransferRunHistorySummaryChips({ detail }: { detail: MotoCenterTransferRunHistoryDetail }) {
+  const chips: Array<[string, string | number | boolean | null]> = [
+    ['Executed', detail.executed ? 'Có' : 'Không'],
+    ['Status', detail.status],
+    ['ConfirmTextMatched', detail.confirmTextMatched ? 'Có' : 'Không'],
+    ['Copied total', detail.copiedTotal],
+    ['Updated total', detail.updatedTotal],
+    ['DurationMs', detail.durationMs],
+    ['Khóa', `${detail.maKhoaHocCu} -> ${detail.maKhoaHocMoi ?? '-'}`],
+    ['MaCSDT', `${detail.maCSDTCu} -> ${detail.maCSDTMoi}`],
+  ];
+
+  return (
+    <div className="moto-sync-metrics">
+      {chips.map(([label, value]) => (
+        <div key={label} className="moto-sync-metric">
+          <span>{label}</span>
+          <strong className={label === 'Status' ? statusClassName(String(value ?? '')) : undefined}>
+            {value === null || value === '' ? '-' : String(value)}
+          </strong>
+        </div>
+      ))}
     </div>
   );
 }
@@ -1187,20 +1330,42 @@ function CenterTransferRunHistoryDetailFields({ detail }: { detail: MotoCenterTr
   );
 }
 
-function RawJsonBlock({ title, json, emptyText }: { title: string; json: string | null; emptyText: string }) {
+function PrettyJsonBlock({ title, json, emptyText }: { title: string; json: string | null; emptyText: string }) {
+  const parsed = parseJsonForDisplay(json);
+
   return (
     <div className="moto-sync-plan-json-card">
       <SectionTitle title={title} />
-      {json ? (
-        <details className="moto-sync-raw-json">
-          <summary>Xem JSON</summary>
-          <pre>{json}</pre>
-        </details>
+      {parsed.text ? (
+        <>
+          {parsed.hasError && (
+            <div className="moto-sync-message-list moto-sync-message-list--warning">
+              Không parse được JSON, hiển thị dữ liệu thô.
+            </div>
+          )}
+          <pre>{parsed.text}</pre>
+          <details className="moto-sync-raw-json">
+            <summary>Xem JSON thô</summary>
+            <pre>{json}</pre>
+          </details>
+        </>
       ) : (
         <div className="moto-sync-muted">{emptyText}</div>
       )}
     </div>
   );
+}
+
+function parseJsonForDisplay(json: string | null): { text: string | null; hasError: boolean } {
+  if (!json?.trim()) {
+    return { text: null, hasError: false };
+  }
+
+  try {
+    return { text: JSON.stringify(JSON.parse(json), null, 2), hasError: false };
+  } catch {
+    return { text: json, hasError: true };
+  }
 }
 
 function ExecuteResult({ result }: { result: MotoSyncExecuteResult | null }) {

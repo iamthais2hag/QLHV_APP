@@ -416,12 +416,33 @@ public sealed class MotoSyncService : IMotoSyncService
 
         if (string.IsNullOrWhiteSpace(request.MaCSDTMoi))
         {
-            blockers.Add("MaCSDTMoi la bat buoc.");
+            blockers.Add("MaCSDTMoi không được để trống.");
         }
 
         if (string.IsNullOrWhiteSpace(request.MaSoGTVTMoi))
         {
-            blockers.Add("MaSoGTVTMoi la bat buoc.");
+            blockers.Add("MaSoGTVTMoi không được để trống.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.MaCSDTCu) &&
+            !string.IsNullOrWhiteSpace(request.MaCSDTMoi) &&
+            string.Equals(request.MaCSDTCu.Trim(), request.MaCSDTMoi.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            blockers.Add("MaCSDTMoi không được trùng MaCSDTCu.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.MaKhoaHocCu) &&
+            !string.IsNullOrWhiteSpace(request.MaCSDTCu) &&
+            !string.IsNullOrWhiteSpace(request.MaCSDTMoi))
+        {
+            var maKhoaHocMoi = ComputeMaKhoaHocMoi(
+                request.MaKhoaHocCu,
+                request.MaCSDTCu,
+                request.MaCSDTMoi);
+            if (string.Equals(request.MaKhoaHocCu.Trim(), maKhoaHocMoi, StringComparison.OrdinalIgnoreCase))
+            {
+                blockers.Add("MaKhoaHocMoi không thay đổi so với MaKhoaHocCu.");
+            }
         }
 
         return blockers;

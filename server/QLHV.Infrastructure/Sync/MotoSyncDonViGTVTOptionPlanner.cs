@@ -31,6 +31,17 @@ internal static class MotoSyncDonViGTVTOptionPlanner
             ? "WHERE (LTRIM(RTRIM([MaDV])) LIKE @SearchLike" +
               (shape.DisplayColumns.TenDVColumn is null ? ")" : $" OR {Quote(shape.DisplayColumns.TenDVColumn)} LIKE @SearchLike)")
             : string.Empty;
+        var orderBy = hasSearch
+            ? $@"ORDER BY
+    CASE
+        WHEN LTRIM(RTRIM([MaDV])) = @SearchExact THEN 0
+        WHEN LTRIM(RTRIM([MaDV])) LIKE @SearchPrefix THEN 1
+        WHEN LTRIM(RTRIM([MaDV])) LIKE @SearchLike THEN 2
+        {(shape.DisplayColumns.TenDVColumn is null ? string.Empty : $"WHEN {Quote(shape.DisplayColumns.TenDVColumn)} LIKE @SearchLike THEN 3")}
+        ELSE 4
+    END,
+    [MaDV]"
+            : "ORDER BY [MaDV]";
 
         return $@"
 SELECT TOP (@Take)
@@ -39,7 +50,7 @@ SELECT TOP (@Take)
     {SelectOptionalColumn(shape.DisplayColumns.MaSoGTVTColumn, "MaSoGTVT")}
 FROM dbo.DM_DonViGTVT
 {searchFilter}
-ORDER BY [MaDV];";
+{orderBy};";
     }
 
     private static string SelectOptionalColumn(string? columnName, string alias)

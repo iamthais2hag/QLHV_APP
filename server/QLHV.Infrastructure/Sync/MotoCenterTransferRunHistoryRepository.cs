@@ -85,9 +85,10 @@ public sealed class MotoCenterTransferRunHistoryRepository : IMotoCenterTransfer
         query ??= new MotoCenterTransferRunHistoryQuery();
         var connectionString = await ResolveQlhvAppAsync(cancellationToken);
         await using var connection = new SqlConnection(connectionString);
+        var parameters = BuildListParameters(query);
         var rows = await connection.QueryAsync<CenterTransferRunHistoryRow>(new CommandDefinition(
-            SelectListSql,
-            new { Take = NormalizeTake(query.Take) },
+            BuildListSql(query),
+            parameters,
             commandTimeout: _options.TimeoutSeconds,
             cancellationToken: cancellationToken));
 
@@ -111,6 +112,69 @@ public sealed class MotoCenterTransferRunHistoryRepository : IMotoCenterTransfer
 
     internal static int NormalizeTake(int take)
         => take <= 0 ? DefaultTake : Math.Min(take, MaxTake);
+
+    internal static string BuildListSql(MotoCenterTransferRunHistoryQuery query)
+    {
+        query ??= new MotoCenterTransferRunHistoryQuery();
+        var filters = new List<string>();
+        if (!string.IsNullOrWhiteSpace(query.MaKhoaHoc))
+        {
+            filters.Add("(MaKhoaHocCu LIKE @MaKhoaHocLike OR MaKhoaHocMoi LIKE @MaKhoaHocLike)");
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.MaCSDT))
+        {
+            filters.Add("(MaCSDTCu LIKE @MaCSDTLike OR MaCSDTMoi LIKE @MaCSDTLike)");
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.Status))
+        {
+            filters.Add("Status = @Status");
+        }
+
+        if (query.Executed.HasValue)
+        {
+            filters.Add("Executed = @Executed");
+        }
+
+        var whereSql = filters.Count == 0
+            ? string.Empty
+            : $"WHERE {string.Join($"{Environment.NewLine}  AND ", filters)}";
+
+        return $@"
+SELECT TOP (@Take)
+{SelectColumns}
+FROM dbo.App_MotoCenterTransferRunHistory
+{whereSql}
+{ListOrderBySql};";
+    }
+
+    private static DynamicParameters BuildListParameters(MotoCenterTransferRunHistoryQuery query)
+    {
+        var parameters = new DynamicParameters();
+        parameters.Add("Take", NormalizeTake(query.Take));
+        if (!string.IsNullOrWhiteSpace(query.MaKhoaHoc))
+        {
+            parameters.Add("MaKhoaHocLike", $"%{query.MaKhoaHoc.Trim()}%");
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.MaCSDT))
+        {
+            parameters.Add("MaCSDTLike", $"%{query.MaCSDT.Trim()}%");
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.Status))
+        {
+            parameters.Add("Status", query.Status.Trim());
+        }
+
+        if (query.Executed.HasValue)
+        {
+            parameters.Add("Executed", query.Executed.Value);
+        }
+
+        return parameters;
+    }
 
     internal static string? Sanitize(string? value)
     {

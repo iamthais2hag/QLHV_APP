@@ -152,6 +152,14 @@ export interface MotoCenterTransferRunHistoryListItem {
   endedAt: string | null;
 }
 
+export interface MotoCenterTransferRunHistoryQuery {
+  take?: number;
+  maKhoaHoc?: string;
+  maCSDT?: string;
+  status?: string;
+  executed?: boolean | null;
+}
+
 export interface MotoCenterTransferRunHistoryDetail extends MotoCenterTransferRunHistoryListItem {
   copiedKhoaHoc: number;
   copiedBaoCaoI: number;
