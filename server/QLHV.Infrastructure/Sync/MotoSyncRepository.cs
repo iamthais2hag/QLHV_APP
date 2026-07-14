@@ -2941,7 +2941,10 @@ WHERE MaDK LIKE @MaDkPrefixLike
         command.Parameters.Add(new SqlParameter("@Take", normalizedTake));
         if (hasSearch)
         {
-            command.Parameters.Add(new SqlParameter("@SearchLike", $"%{search!.Trim()}%"));
+            var normalizedSearch = search!.Trim();
+            command.Parameters.Add(new SqlParameter("@SearchExact", normalizedSearch));
+            command.Parameters.Add(new SqlParameter("@SearchPrefix", $"{normalizedSearch}%"));
+            command.Parameters.Add(new SqlParameter("@SearchLike", $"%{normalizedSearch}%"));
         }
 
         var rows = new List<DonViGTVTOptionRow>();

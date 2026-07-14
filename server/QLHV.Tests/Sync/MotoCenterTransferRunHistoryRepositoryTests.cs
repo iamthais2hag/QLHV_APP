@@ -23,6 +23,67 @@ public sealed class MotoCenterTransferRunHistoryRepositoryTests
     }
 
     [Fact]
+    public void List_query_filters_by_ma_khoa_hoc()
+    {
+        var sql = MotoCenterTransferRunHistoryRepository.BuildListSql(new()
+        {
+            MaKhoaHoc = "66016",
+        });
+
+        Assert.Contains("MaKhoaHocCu LIKE @MaKhoaHocLike", sql, StringComparison.Ordinal);
+        Assert.Contains("MaKhoaHocMoi LIKE @MaKhoaHocLike", sql, StringComparison.Ordinal);
+        Assert.Contains("ORDER BY StartedAt DESC, Id DESC", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("66016", sql, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void List_query_filters_by_ma_csdt()
+    {
+        var sql = MotoCenterTransferRunHistoryRepository.BuildListSql(new()
+        {
+            MaCSDT = "01001",
+        });
+
+        Assert.Contains("MaCSDTCu LIKE @MaCSDTLike", sql, StringComparison.Ordinal);
+        Assert.Contains("MaCSDTMoi LIKE @MaCSDTLike", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("01001", sql, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void List_query_filters_by_status_and_executed()
+    {
+        var sql = MotoCenterTransferRunHistoryRepository.BuildListSql(new()
+        {
+            Status = "ThanhCong",
+            Executed = true,
+        });
+
+        Assert.Contains("Status = @Status", sql, StringComparison.Ordinal);
+        Assert.Contains("Executed = @Executed", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("ThanhCong", sql, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void List_query_combines_filters_and_keeps_newest_first()
+    {
+        var sql = MotoCenterTransferRunHistoryRepository.BuildListSql(new()
+        {
+            MaKhoaHoc = "66016",
+            MaCSDT = "01001",
+            Status = "BiChan",
+            Executed = false,
+        });
+
+        Assert.Contains("WHERE", sql, StringComparison.Ordinal);
+        Assert.Contains("  AND ", sql, StringComparison.Ordinal);
+        Assert.Contains("MaKhoaHocCu LIKE @MaKhoaHocLike", sql, StringComparison.Ordinal);
+        Assert.Contains("MaCSDTCu LIKE @MaCSDTLike", sql, StringComparison.Ordinal);
+        Assert.Contains("Status = @Status", sql, StringComparison.Ordinal);
+        Assert.Contains("Executed = @Executed", sql, StringComparison.Ordinal);
+        Assert.Contains("ORDER BY StartedAt DESC, Id DESC", sql, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Sanitize_masks_connection_secret_tokens()
     {
         var sanitized = MotoCenterTransferRunHistoryRepository.Sanitize(

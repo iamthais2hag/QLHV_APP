@@ -167,6 +167,74 @@ public sealed class MotoSyncServiceTests
     }
 
     [Fact]
+    public async Task Center_transfer_plan_blocks_when_new_center_equals_old_center()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan());
+        var service = new MotoSyncService(repo);
+
+        var result = await service.GetCenterTransferPlanAsync(new MotoCenterTransferPlanRequest
+        {
+            SourceProfileCode = "CSDT_V1",
+            TargetProfileCode = "CSDT_V2",
+            MaKhoaHocCu = "66016K26A1003",
+            MaCSDTCu = "66016",
+            MaCSDTMoi = "66016",
+            MaSoGTVTMoi = "66",
+        });
+
+        Assert.False(result.Executable);
+        Assert.Contains("MaCSDTMoi không được trùng MaCSDTCu.", result.Blockers);
+        Assert.Contains("MaKhoaHocMoi không thay đổi so với MaKhoaHocCu.", result.Blockers);
+        Assert.Equal(0, repo.CenterTransferPlanCalls);
+        Assert.Equal(0, repo.CenterTransferExecuteCalls);
+    }
+
+    [Fact]
+    public async Task Center_transfer_plan_blocks_blank_new_center_and_new_gtvt()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan());
+        var service = new MotoSyncService(repo);
+
+        var result = await service.GetCenterTransferPlanAsync(new MotoCenterTransferPlanRequest
+        {
+            SourceProfileCode = "CSDT_V1",
+            TargetProfileCode = "CSDT_V2",
+            MaKhoaHocCu = "66016K26A1003",
+            MaCSDTCu = "66016",
+            MaCSDTMoi = " ",
+            MaSoGTVTMoi = " ",
+        });
+
+        Assert.False(result.Executable);
+        Assert.Contains("MaCSDTMoi không được để trống.", result.Blockers);
+        Assert.Contains("MaSoGTVTMoi không được để trống.", result.Blockers);
+        Assert.Equal(0, repo.CenterTransferPlanCalls);
+    }
+
+    [Fact]
+    public async Task Center_transfer_execute_refuses_before_repository_write_when_same_center_blocks()
+    {
+        var repo = new FakeMotoSyncRepository(CleanPlan());
+        var service = new MotoSyncService(repo);
+
+        var result = await service.ExecuteCenterTransferTestAsync(new MotoCenterTransferTestRequest
+        {
+            SourceProfileCode = "CSDT_V1",
+            TargetProfileCode = "CSDT_V2",
+            MaKhoaHocCu = "66016K26A1003",
+            MaCSDTCu = "66016",
+            MaCSDTMoi = "66016",
+            MaSoGTVTMoi = "66",
+            ConfirmText = MotoSyncService.CenterTransferConfirmationText,
+        });
+
+        Assert.False(result.Executed);
+        Assert.Contains("MaCSDTMoi không được trùng MaCSDTCu.", result.Plan!.Blockers);
+        Assert.Equal(0, repo.CenterTransferPlanCalls);
+        Assert.Equal(0, repo.CenterTransferExecuteCalls);
+    }
+
+    [Fact]
     public async Task Center_transfer_plan_includes_donvigttv_names_when_codes_exist()
     {
         var repo = new FakeMotoSyncRepository(CleanPlan())

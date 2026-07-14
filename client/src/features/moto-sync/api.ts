@@ -3,6 +3,7 @@ import type {
   MotoCenterTransferExecuteResult,
   MotoCenterTransferPlan,
   MotoCenterTransferPlanRequest,
+  MotoCenterTransferRunHistoryQuery,
   MotoCenterTransferRunHistoryDetail,
   MotoCenterTransferRunHistoryListItem,
   MotoSyncExecuteRequest,
@@ -149,11 +150,24 @@ export async function executeMotoCenterTransferTest(
 }
 
 export async function getMotoCenterTransferRunHistory(
-  take = 50,
+  request: MotoCenterTransferRunHistoryQuery | number = 50,
   signal?: AbortSignal,
 ): Promise<MotoCenterTransferRunHistoryListItem[]> {
+  const normalizedRequest = typeof request === 'number' ? { take: request } : request;
   const query = new URLSearchParams();
-  query.set('take', String(take));
+  query.set('take', String(normalizedRequest.take ?? 50));
+  if (normalizedRequest.maKhoaHoc?.trim()) {
+    query.set('maKhoaHoc', normalizedRequest.maKhoaHoc.trim());
+  }
+  if (normalizedRequest.maCSDT?.trim()) {
+    query.set('maCSDT', normalizedRequest.maCSDT.trim());
+  }
+  if (normalizedRequest.status?.trim()) {
+    query.set('status', normalizedRequest.status.trim());
+  }
+  if (typeof normalizedRequest.executed === 'boolean') {
+    query.set('executed', normalizedRequest.executed ? 'true' : 'false');
+  }
 
   const response = await fetch(`${API_BASE}/dong-bo-v2/moto/center-transfer-runs?${query.toString()}`, {
     method: 'GET',

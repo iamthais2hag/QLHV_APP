@@ -246,6 +246,14 @@ public sealed class MotoCenterTransferSummaryDto
 public sealed class MotoCenterTransferRunHistoryQuery
 {
     public int Take { get; set; } = 50;
+
+    public string? MaKhoaHoc { get; set; }
+
+    public string? MaCSDT { get; set; }
+
+    public string? Status { get; set; }
+
+    public bool? Executed { get; set; }
 }
 
 public class MotoCenterTransferRunHistoryListItemDto
