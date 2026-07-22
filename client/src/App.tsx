@@ -7,6 +7,7 @@ import HocVienPage from './features/hoc-vien/HocVienPage';
 import HocVienCardPrintPage from './features/hoc-vien/HocVienCardPrintPage';
 import MotoSyncPage from './features/moto-sync/MotoSyncPage';
 import QlhvImportPage from './features/qlhv-import/QlhvImportPage';
+import RuntimeStatusPage from './features/runtime-status/RuntimeStatusPage';
 import LoginPage from './features/auth/LoginPage';
 import { useAuth } from './features/auth/AuthContext';
 import { canAccessMenuItem, MENU_ITEMS } from './navigation/menu';
@@ -38,13 +39,27 @@ export default function App() {
         <Route path="/dong-bo-v2" element={user.role === 'Admin' ? <MotoSyncPage /> : viewerRedirect} />
         <Route path="/qlhv-import" element={<QlhvImportPage />} />
         <Route
+          path="/trang-thai-he-thong"
+          element={user.role === 'Admin'
+            ? <RuntimeStatusPage />
+            : <Navigate to="/qlhv-import" replace />}
+        />
+        <Route
           path="/cau-hinh-ket-noi-csdt"
           element={user.role === 'Admin'
             ? <CsdtConnectionProfilesPage />
             : <Navigate to="/qlhv-import" replace />}
         />
         {visibleMenuItems.filter((item) =>
-          !['/', '/hoc-vien', '/in-the-hoc-vien', '/dong-bo-v2', '/qlhv-import', '/cau-hinh-ket-noi-csdt'].includes(item.path),
+          ![
+            '/',
+            '/hoc-vien',
+            '/in-the-hoc-vien',
+            '/dong-bo-v2',
+            '/qlhv-import',
+            '/trang-thai-he-thong',
+            '/cau-hinh-ket-noi-csdt',
+          ].includes(item.path),
         ).map((item) => (
           <Route
             key={item.path}

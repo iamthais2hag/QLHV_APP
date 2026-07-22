@@ -105,6 +105,13 @@ export const MENU_ITEMS: MenuItem[] = [
     icon: '⇩',
   },
   {
+    path: '/trang-thai-he-thong',
+    label: 'Trạng thái hệ thống',
+    description: 'Kiểm tra trạng thái sẵn sàng của database, profile BAK và lưu trữ tệp.',
+    icon: '◉',
+    requiredRole: 'Admin',
+  },
+  {
     path: '/cau-hinh-ket-noi-csdt',
     label: 'Cấu hình kết nối CSDT',
     description: 'Quản lý 7 profile kết nối CSDT/DATA/QLHV_APP an toàn.',
@@ -132,6 +139,9 @@ export const MENU_ITEMS: MenuItem[] = [
 ];
 
 export function canAccessMenuItem(item: MenuItem, role: AppUserRole): boolean {
+  if (item.requiredRole === 'Admin' && role !== 'Admin') {
+    return false;
+  }
   if (role === 'Admin') {
     return true;
   }

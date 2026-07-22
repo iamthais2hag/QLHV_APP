@@ -8,11 +8,48 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.OpenApi.Models;
 using QLHV.Api.Auth;
+using QLHV.Api.Runtime;
 using QLHV.Application;
 using QLHV.Application.Auth;
+using QLHV.Application.Runtime;
 using QLHV.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
+var runtimeConfigurationState = ProductionLocalConfigurationLoader.Load(
+    builder.Configuration,
+    builder.Environment,
+    args);
+builder.Services.AddSingleton(runtimeConfigurationState);
+
+if (builder.Environment.IsProduction())
+{
+    // Production must not persist raw console output because framework/third-party exceptions can
+    // contain environment details. The runtime uses only the bounded, redacting file provider.
+    builder.Logging.ClearProviders();
+    if (builder.Configuration.GetValue("QlhvRuntime:FileLogging:Enabled", true))
+    {
+        try
+        {
+            var runtimeRoot = builder.Configuration["QlhvRuntime:Root"];
+            if (string.IsNullOrWhiteSpace(runtimeRoot))
+            {
+                runtimeRoot = ProductionLocalConfigurationLoader.DefaultRuntimeRoot;
+            }
+
+            var logDirectory = Path.Combine(Path.GetFullPath(runtimeRoot), "logs");
+            builder.Logging.AddProvider(new QlhvRollingFileLoggerProvider(
+                logDirectory,
+                builder.Configuration.GetValue<long?>("QlhvRuntime:FileLogging:MaxFileSizeBytes")
+                    ?? 10 * 1024 * 1024,
+                builder.Configuration.GetValue<int?>("QlhvRuntime:FileLogging:RetainedFileCount")
+                    ?? 14));
+        }
+        catch
+        {
+            // Launcher diagnostics remain available. Never echo configuration values here.
+        }
+    }
+}
 
 // MVC controllers
 builder.Services.AddControllers();
@@ -119,12 +156,34 @@ app.UseStaticFiles();
 // Keep endpoint selection after the static middleware so the catch-all SPA
 // endpoint cannot pre-empt real files under wwwroot.
 app.UseRouting();
+app.Use(async (context, next) =>
+{
+    context.Response.Headers["X-Correlation-ID"] = context.TraceIdentifier;
+    await next();
+});
 app.UseCors(FrontendCors);
 app.UseAuthentication();
 app.UseAuthorization();
 
-// Minimal health endpoint to keep the host observable.
-app.MapGet("/health", () => Results.Ok(new { status = "ok" }))
+// Liveness proves only that the process and HTTP pipeline are responding.
+app.MapGet("/health/live", () => Results.Ok(new { status = "live" }))
+    .AllowAnonymous();
+
+// Preserve the legacy liveness alias for installed launchers during an update.
+app.MapGet("/health", () => Results.Ok(new { status = "live" }))
+    .AllowAnonymous();
+
+app.MapGet("/health/ready", async (
+        IRuntimeReadinessService readiness,
+        CancellationToken cancellationToken) =>
+    {
+        var status = await readiness.GetStatusAsync(cancellationToken);
+        return Results.Json(
+            status,
+            statusCode: status.IsReady
+                ? StatusCodes.Status200OK
+                : StatusCodes.Status503ServiceUnavailable);
+    })
     .AllowAnonymous();
 
 app.MapControllers();

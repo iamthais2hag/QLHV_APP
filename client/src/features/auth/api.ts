@@ -2,6 +2,20 @@ import { apiFetch } from '../../api/apiFetch';
 import { API_BASE } from '../../api/apiBase';
 import type { AuthenticatedUser, LoginRequest } from './types';
 
+export type LoginFailureKind = 'invalid-credentials' | 'locked' | 'runtime-unavailable' | 'unexpected';
+
+export class LoginRequestError extends Error {
+  constructor(
+    message: string,
+    public readonly kind: LoginFailureKind,
+    public readonly status: number | null,
+    public readonly correlationId: string | null = null,
+  ) {
+    super(message);
+    this.name = 'LoginRequestError';
+  }
+}
+
 export async function getCurrentUser(signal?: AbortSignal): Promise<AuthenticatedUser | null> {
   const response = await apiFetch(`${API_BASE}/auth/me`, {
     method: 'GET',
@@ -20,22 +34,59 @@ export async function getCurrentUser(signal?: AbortSignal): Promise<Authenticate
 }
 
 export async function login(request: LoginRequest): Promise<AuthenticatedUser> {
-  const response = await apiFetch(`${API_BASE}/auth/login`, {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(request),
-  });
+  let response: Response;
+  try {
+    response = await apiFetch(`${API_BASE}/auth/login`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    });
+  } catch {
+    throw new LoginRequestError(
+      'Hệ thống chưa sẵn sàng. Vui lòng liên hệ quản trị viên.',
+      'runtime-unavailable',
+      null,
+    );
+  }
 
   if (!response.ok) {
-    throw new Error(await getSafeErrorMessage(
-      response,
-      response.status === 401
-        ? 'Tên đăng nhập hoặc mật khẩu không đúng.'
-        : 'Không thể đăng nhập.',
-    ));
+    const payload = await tryReadJson<{ correlationId?: unknown; traceId?: unknown }>(response);
+    const correlationId = parseCorrelationId(payload?.correlationId ?? payload?.traceId);
+
+    if (response.status === 401) {
+      throw new LoginRequestError(
+        'Tên đăng nhập hoặc mật khẩu không đúng.',
+        'invalid-credentials',
+        response.status,
+        correlationId,
+      );
+    }
+    if (response.status === 423) {
+      throw new LoginRequestError(
+        'Tài khoản tạm thời bị khóa. Vui lòng thử lại sau hoặc liên hệ quản trị viên.',
+        'locked',
+        response.status,
+        correlationId,
+      );
+    }
+    if (response.status === 503) {
+      throw new LoginRequestError(
+        'Hệ thống chưa sẵn sàng. Vui lòng liên hệ quản trị viên.',
+        'runtime-unavailable',
+        response.status,
+        correlationId,
+      );
+    }
+
+    throw new LoginRequestError(
+      'Không thể đăng nhập. Vui lòng liên hệ quản trị viên.',
+      'unexpected',
+      response.status,
+      correlationId,
+    );
   }
 
   return parseUser(await tryReadJson<unknown>(response));
@@ -86,6 +137,19 @@ function sanitizePublicMessage(value: unknown): string | null {
     return null;
   }
   return message;
+}
+
+function parseCorrelationId(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const correlationId = value.trim();
+  return correlationId.length > 0
+    && correlationId.length <= 100
+    && /^[a-zA-Z0-9._:-]+$/.test(correlationId)
+    ? correlationId
+    : null;
 }
 
 async function tryReadJson<T>(response: Response): Promise<T | null> {

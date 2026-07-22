@@ -81,6 +81,43 @@ public sealed class ClientAuthorizationSourceTests
         Assert.DoesNotContain("confirmText", combined, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void Login_classifies_runtime_auth_failures_and_waits_for_readiness()
+    {
+        var authApi = ReadClientFile("features", "auth", "api.ts");
+        var loginPage = ReadClientFile("features", "auth", "LoginPage.tsx");
+
+        Assert.Contains("response.status === 401", authApi, StringComparison.Ordinal);
+        Assert.Contains("response.status === 423", authApi, StringComparison.Ordinal);
+        Assert.Contains("response.status === 503", authApi, StringComparison.Ordinal);
+        Assert.Contains("'invalid-credentials'", authApi, StringComparison.Ordinal);
+        Assert.Contains("'locked'", authApi, StringComparison.Ordinal);
+        Assert.Contains("'runtime-unavailable'", authApi, StringComparison.Ordinal);
+        Assert.Contains("correlationId", authApi, StringComparison.Ordinal);
+        Assert.Contains("getRuntimeStatus", loginPage, StringComparison.Ordinal);
+        Assert.Contains("readiness !== 'ready'", loginPage, StringComparison.Ordinal);
+        Assert.Contains("checkReadiness", loginPage, StringComparison.Ordinal);
+        Assert.Contains("onRetry", loginPage, StringComparison.Ordinal);
+        Assert.Contains("runtimeStatus?.version", loginPage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Runtime_status_page_and_menu_are_admin_only()
+    {
+        var app = ReadClientFile("App.tsx");
+        var menu = ReadClientFile("navigation", "menu.ts");
+        var page = ReadClientFile("features", "runtime-status", "RuntimeStatusPage.tsx");
+
+        Assert.Contains("/trang-thai-he-thong", app, StringComparison.Ordinal);
+        Assert.Contains("user.role === 'Admin'", app, StringComparison.Ordinal);
+        Assert.Contains("<RuntimeStatusPage", app, StringComparison.Ordinal);
+        Assert.Contains("path: '/trang-thai-he-thong'", menu, StringComparison.Ordinal);
+        Assert.Contains("requiredRole: 'Admin'", menu, StringComparison.Ordinal);
+        Assert.Contains("getRuntimeStatus", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("connectionString", page, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("passwordHash", page, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string ReadClientFile(params string[] pathParts)
         => File.ReadAllText(FindWorkspaceFile(
             new[] { "client", "src" }.Concat(pathParts).ToArray()));

@@ -46,58 +46,72 @@ function Test-IsQlhvRuntimeProcess {
         [Regex]::IsMatch($commandLine, $dllArgumentPattern)
 }
 
-if (-not (Test-Path -LiteralPath $PidFile -PathType Leaf)) {
-    if (-not $Quiet) {
-        Write-Host 'QLHV is not running (no runtime PID file).'
+function Get-QlhvRuntimeProcessIds {
+    return @(Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { Test-IsQlhvRuntimeProcess -ProcessRecord $_ } |
+        Select-Object -ExpandProperty ProcessId -Unique)
+}
+
+function Stop-VerifiedQlhvProcess {
+    param([Parameter(Mandatory = $true)][int]$ProcessId)
+
+    $record = Get-ProcessRecord -ProcessId $ProcessId
+    if (-not (Test-IsQlhvRuntimeProcess -ProcessRecord $record)) {
+        throw "PID $ProcessId does not belong to D:\QLHV_APP_RUNTIME\app\QLHV.Api. No process was stopped."
     }
-    return
-}
 
-$rawPid = (Get-Content -Raw -LiteralPath $PidFile).Trim()
-$runtimeProcessId = 0
-if (-not [int]::TryParse($rawPid, [ref]$runtimeProcessId) -or $runtimeProcessId -le 0) {
-    throw "The QLHV PID file is invalid: $PidFile. No process was stopped."
-}
-
-$record = Get-ProcessRecord -ProcessId $runtimeProcessId
-if ($null -eq $record) {
-    Remove-Item -LiteralPath $PidFile -Force
-    if (-not $Quiet) {
-        Write-Host "QLHV process $runtimeProcessId is no longer running. Removed the stale PID file."
+    # Validate PID, command line and executable path again immediately before stop.
+    $record = Get-ProcessRecord -ProcessId $ProcessId
+    if (-not (Test-IsQlhvRuntimeProcess -ProcessRecord $record)) {
+        throw "QLHV process identity changed before stop. No process was stopped."
     }
-    return
-}
-
-if (-not (Test-IsQlhvRuntimeProcess -ProcessRecord $record)) {
-    throw "PID $runtimeProcessId does not belong to D:\QLHV_APP_RUNTIME\app\QLHV.Api. No process was stopped."
-}
-
-# Validate the PID and executable path immediately before stopping. Never stop all dotnet/node processes.
-$record = Get-ProcessRecord -ProcessId $runtimeProcessId
-if (-not (Test-IsQlhvRuntimeProcess -ProcessRecord $record)) {
-    throw "QLHV process identity changed before stop. No process was stopped."
-}
-$liveProcess = Get-Process -Id $runtimeProcessId -ErrorAction Stop
-$liveExecutablePath = Get-NormalizedPath $liveProcess.Path
-$recordedExecutablePath = Get-NormalizedPath ([string]$record.ExecutablePath)
-if (-not [string]::Equals(
+    $liveProcess = Get-Process -Id $ProcessId -ErrorAction Stop
+    $liveExecutablePath = Get-NormalizedPath $liveProcess.Path
+    $recordedExecutablePath = Get-NormalizedPath ([string]$record.ExecutablePath)
+    if (-not [string]::Equals(
         $liveExecutablePath,
         $recordedExecutablePath,
         [System.StringComparison]::OrdinalIgnoreCase)) {
-    throw "QLHV process executable path changed before stop. No process was stopped."
+        throw "QLHV process executable path changed before stop. No process was stopped."
+    }
+
+    Stop-Process -Id $ProcessId -Force -ErrorAction Stop
+    try {
+        Wait-Process -Id $ProcessId -Timeout 15 -ErrorAction Stop
+    }
+    catch {
+        if (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) {
+            throw "QLHV PID $ProcessId could not be stopped."
+        }
+    }
 }
 
-Stop-Process -Id $runtimeProcessId -Force -ErrorAction Stop
-try {
-    Wait-Process -Id $runtimeProcessId -Timeout 15 -ErrorAction Stop
+$runtimeIds = @(Get-QlhvRuntimeProcessIds)
+$recordedId = 0
+if (Test-Path -LiteralPath $PidFile -PathType Leaf) {
+    $rawPid = (Get-Content -Raw -LiteralPath $PidFile -ErrorAction SilentlyContinue).Trim()
+    [void][int]::TryParse($rawPid, [ref]$recordedId)
 }
-catch {
-    if (Get-Process -Id $runtimeProcessId -ErrorAction SilentlyContinue) {
-        throw "QLHV PID $runtimeProcessId could not be stopped."
-    }
+
+# Prefer the recorded exact runtime, then reconcile every other exact published
+# runtime process. A stale/missing PID file never causes a broad dotnet kill.
+$orderedIds = @()
+if ($recordedId -gt 0 -and $runtimeIds -contains $recordedId) {
+    $orderedIds += $recordedId
+}
+$orderedIds += @($runtimeIds | Where-Object { $_ -ne $recordedId })
+$orderedIds = @($orderedIds | Select-Object -Unique)
+
+foreach ($runtimeProcessId in $orderedIds) {
+    Stop-VerifiedQlhvProcess -ProcessId ([int]$runtimeProcessId)
 }
 
 Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
 if (-not $Quiet) {
-    Write-Host "Stopped QLHV runtime PID $runtimeProcessId."
+    if ($orderedIds.Count -eq 0) {
+        Write-Host 'QLHV is not running. Any stale runtime PID file was removed.'
+    }
+    else {
+        Write-Host "Stopped verified QLHV runtime PID(s): $($orderedIds -join ', ')."
+    }
 }

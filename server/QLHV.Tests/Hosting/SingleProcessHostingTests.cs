@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using QLHV.Application.Auth;
+using QLHV.Application.Runtime;
 
 namespace QLHV.Tests.Hosting;
 
@@ -19,7 +20,7 @@ public sealed class SingleProcessHostingTests
         using var factory = new LanHostFactory();
         using var client = factory.CreateClient(ClientOptions());
 
-        foreach (var route in new[] { "/", "/login", "/qlhv-import" })
+        foreach (var route in new[] { "/", "/login", "/qlhv-import", "/trang-thai-he-thong" })
         {
             using var response = await client.GetAsync(route);
             var body = await response.Content.ReadAsStringAsync();
@@ -232,6 +233,7 @@ public sealed class SingleProcessHostingTests
                     ["Authentication:Cookie:SecurePolicy"] = "SameAsRequest",
                     ["Sync:DryRun"] = "true",
                     ["SyncExecution:EnableTargetWrites"] = "false",
+                    ["QlhvRuntime:FileLogging:Enabled"] = "false",
                     ["ConnectionStrings:QLHV_APP"] =
                         "Server=__TEST_SERVER__;Database=__TEST_DATABASE__;Integrated Security=True;",
                 });
@@ -240,8 +242,10 @@ public sealed class SingleProcessHostingTests
             {
                 services.RemoveAll<IAuthService>();
                 services.RemoveAll<IAppUserRepository>();
+                services.RemoveAll<IRuntimeReadinessService>();
                 services.AddSingleton<IAuthService, TestAuthService>();
                 services.AddSingleton<IAppUserRepository>(_users);
+                services.AddSingleton<IRuntimeReadinessService, ReadyReadinessService>();
                 services.RemoveAll<IHostedService>();
             });
         }
@@ -267,6 +271,28 @@ public sealed class SingleProcessHostingTests
                 // Best-effort cleanup only; the unique folder is under the OS temp path.
             }
         }
+    }
+
+    private sealed class ReadyReadinessService : IRuntimeReadinessService
+    {
+        public Task<RuntimeStatusDto> GetStatusAsync(
+            CancellationToken cancellationToken = default) => Task.FromResult(new RuntimeStatusDto
+        {
+            IsReady = true,
+            Version = "test",
+            Environment = "Production",
+            ConfigurationReady = true,
+            DatabaseConnected = true,
+            DatabaseName = "QLHV_APP",
+            AuthenticationReady = true,
+            RequiredSchemaReady = true,
+            BackupProfilesReady = true,
+            BackupStorageReady = true,
+            FileStorageReady = true,
+            RuntimeStorageReady = true,
+            CheckedAtUtc = DateTime.UtcNow,
+            Messages = ["ready"],
+        });
     }
 
     private sealed class TestAuthService : IAuthService

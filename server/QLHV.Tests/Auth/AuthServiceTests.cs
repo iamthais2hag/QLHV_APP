@@ -85,7 +85,7 @@ public sealed class AuthServiceTests
         });
 
         Assert.False(result.Succeeded);
-        Assert.Equal("INVALID_CREDENTIALS", result.FailureCode);
+        Assert.Equal("ACCOUNT_LOCKED", result.FailureCode);
         Assert.Equal(0, repository.SuccessfulLoginCalls);
         Assert.Equal(0, repository.FailedLoginCalls);
     }
