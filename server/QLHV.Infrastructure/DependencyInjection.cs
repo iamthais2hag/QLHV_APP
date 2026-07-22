@@ -25,6 +25,7 @@ public static class DependencyInjection
 
         services.Configure<AppSyncOptions>(configuration.GetSection(AppSyncOptions.SectionName));
         services.Configure<SyncExecutionOptions>(configuration.GetSection(SyncExecutionOptions.SectionName));
+        services.Configure<QlhvOperationsOptions>(configuration.GetSection(QlhvOperationsOptions.SectionName));
         services.Configure<FileStorageOptions>(configuration.GetSection(FileStorageOptions.SectionName));
         if (!string.IsNullOrWhiteSpace(contentRootPath))
         {
@@ -47,6 +48,15 @@ public static class DependencyInjection
         services.AddScoped<IQlhvImportWriteRepository>(provider =>
             provider.GetRequiredService<QlhvHocVienTargetRepository>());
         services.AddScoped<IQlhvImportReadRepository, QlhvImportReadRepository>();
+        services.AddScoped<QlhvOperationConnectionResolver>();
+        services.AddScoped<IQlhvOperationsRepository, QlhvOperationsRepository>();
+        services.AddScoped<IQlhvOperationHistoryRepository, QlhvOperationHistoryRepository>();
+        services.AddScoped<IQlhvSourceOperationLock, QlhvSqlSourceOperationLock>();
+        services.AddScoped<IQlhvBackupRefreshExecutor, QlhvBackupRefreshExecutor>();
+        services.AddSingleton<QlhvRefreshBackupQueue>();
+        services.AddSingleton<IQlhvRefreshBackupQueue>(provider =>
+            provider.GetRequiredService<QlhvRefreshBackupQueue>());
+        services.AddHostedService<QlhvRefreshBackupWorker>();
         services.AddScoped<IMotoSyncRepository, MotoSyncRepository>();
         services.AddScoped<IMotoSyncRunHistoryRepository, MotoSyncRunHistoryRepository>();
         services.AddScoped<IMotoCenterTransferRunHistoryRepository, MotoCenterTransferRunHistoryRepository>();

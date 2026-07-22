@@ -137,6 +137,25 @@ public sealed class QlhvImportServiceTests
     }
 
     [Fact]
+    public async Task Plan_does_not_open_bak_when_source_operation_lock_is_busy()
+    {
+        var reads = OneOtoRow(new QlhvImportTargetSnapshot());
+        var operationLock = new FakeOperationLock { ShouldAcquire = false };
+        var service = CreateService(
+            reads,
+            new FakeTargetRepository(),
+            operationLock: operationLock);
+
+        var plan = await service.GetPlanAsync(OtoRequest());
+
+        Assert.False(plan.Executable);
+        Assert.Contains(plan.Blockers, blocker => blocker.Contains("dang refresh BAK hoac full sync", StringComparison.Ordinal));
+        Assert.Equal(1, operationLock.AcquireCalls);
+        Assert.Equal(0, reads.SourceReads);
+        Assert.Equal(0, reads.TargetReads);
+    }
+
+    [Fact]
     public async Task Execute_rejects_wrong_confirmation_before_any_read_or_write()
     {
         var reads = new FakeReadRepository();
@@ -414,6 +433,7 @@ public sealed class QlhvImportServiceTests
             SourceProfileCode = "CSDT_MOTO",
             MaCSDT = "66030",
             ConfirmText = QlhvImportService.ConfirmationText,
+            ExpectedSnapshotToken = "snapshot-token",
         });
 
         Assert.True(result.Executed);
@@ -444,24 +464,161 @@ public sealed class QlhvImportServiceTests
         Assert.Empty(target.WrittenRows);
     }
 
+    [Fact]
+    public async Task Execute_acquires_cross_process_lock_before_creating_running_history()
+    {
+        var events = new List<string>();
+        var operationLock = new FakeOperationLock { OnAcquire = () => events.Add("lock") };
+        var history = new FakeOperationHistoryRepository { OnTryCreate = () => events.Add("history") };
+        var target = new FakeTargetRepository
+        {
+            FullSyncResult = new QlhvImportFullSyncWriteResult(1, 0, 0, 0, 0, 0, 0, 0),
+        };
+        var service = CreateService(
+            OneOtoRow(new QlhvImportTargetSnapshot()),
+            target,
+            dryRun: false,
+            enableWrites: true,
+            operationLock: operationLock,
+            operationHistory: history);
+
+        var result = await service.ExecuteAsync(ExecuteRequest());
+
+        Assert.True(result.Executed);
+        Assert.Equal(new[] { "lock", "history" }, events.Take(2));
+        Assert.Equal(1, operationLock.AcquireCalls);
+        var created = Assert.Single(history.Created);
+        Assert.Equal(QlhvOperationTypes.Running, created.Status);
+        Assert.NotNull(created.StartedAtUtc);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("stale-token")]
+    public async Task Execute_rejects_missing_or_stale_snapshot_and_terminalizes_history(string? expectedToken)
+    {
+        var history = new FakeOperationHistoryRepository();
+        var target = new FakeTargetRepository();
+        var service = CreateService(
+            OneOtoRow(new QlhvImportTargetSnapshot()),
+            target,
+            dryRun: false,
+            enableWrites: true,
+            operationHistory: history);
+        var request = ExecuteRequest();
+        request.ExpectedSnapshotToken = expectedToken;
+
+        var result = await service.ExecuteAsync(request);
+
+        Assert.False(result.Executed);
+        Assert.NotNull(result.OperationId);
+        Assert.Equal(0, target.UpsertCalls);
+        var completion = Assert.Single(history.Completed);
+        Assert.Equal(QlhvOperationTypes.Failed, completion.Value.Status);
+        Assert.False(completion.Token.CanBeCanceled);
+        Assert.Contains(
+            result.Plan.Blockers,
+            blocker => blocker.Contains(
+                expectedToken is null ? "ExpectedSnapshotToken" : "Plan da cu",
+                StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public async Task Execute_configuration_guards_do_not_lock_or_create_history(
+        bool dryRun,
+        bool enableWrites)
+    {
+        var operationLock = new FakeOperationLock();
+        var history = new FakeOperationHistoryRepository();
+        var service = CreateService(
+            OneOtoRow(new QlhvImportTargetSnapshot()),
+            new FakeTargetRepository(),
+            dryRun,
+            enableWrites,
+            operationLock: operationLock,
+            operationHistory: history);
+
+        var result = await service.ExecuteAsync(ExecuteRequest());
+
+        Assert.False(result.Executed);
+        Assert.Equal(0, operationLock.AcquireCalls);
+        Assert.Empty(history.Created);
+        Assert.Empty(history.Completed);
+    }
+
+    [Fact]
+    public async Task Execute_lock_conflict_does_not_create_phantom_history_operation()
+    {
+        var operationLock = new FakeOperationLock { ShouldAcquire = false };
+        var history = new FakeOperationHistoryRepository();
+        var service = CreateService(
+            OneOtoRow(new QlhvImportTargetSnapshot()),
+            new FakeTargetRepository(),
+            dryRun: false,
+            enableWrites: true,
+            operationLock: operationLock,
+            operationHistory: history);
+
+        var result = await service.ExecuteAsync(ExecuteRequest());
+
+        Assert.False(result.Executed);
+        Assert.Null(result.OperationId);
+        Assert.Empty(history.Created);
+        Assert.Empty(history.Completed);
+    }
+
+    [Fact]
+    public async Task Execute_reports_committed_data_when_success_history_cannot_be_persisted()
+    {
+        var history = new FakeOperationHistoryRepository
+        {
+            CompleteException = new InvalidOperationException("history unavailable"),
+        };
+        var target = new FakeTargetRepository
+        {
+            FullSyncResult = new QlhvImportFullSyncWriteResult(1, 0, 0, 0, 0, 0, 0, 0),
+        };
+        var service = CreateService(
+            OneOtoRow(new QlhvImportTargetSnapshot()),
+            target,
+            dryRun: false,
+            enableWrites: true,
+            operationHistory: history);
+
+        var result = await service.ExecuteAsync(ExecuteRequest());
+
+        Assert.True(result.Executed);
+        Assert.Equal(1, result.InsertedHocVienRows);
+        Assert.Contains("da commit", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, target.UpsertCalls);
+        Assert.True(history.CompleteCalls >= 2);
+    }
+
     private static QlhvImportService CreateService(
         FakeReadRepository reads,
         FakeTargetRepository target,
         bool dryRun = true,
         bool enableWrites = false,
-        int batchSize = 1000)
+        int batchSize = 1000,
+        IQlhvSourceOperationLock? operationLock = null,
+        IQlhvOperationHistoryRepository? operationHistory = null)
         => new(
             reads,
             target,
             target,
             Options.Create(new AppSyncOptions { DryRun = dryRun, BatchSize = batchSize }),
-            Options.Create(new SyncExecutionOptions { EnableTargetWrites = enableWrites }));
+            Options.Create(new SyncExecutionOptions { EnableTargetWrites = enableWrites }),
+            operationLock ?? new FakeOperationLock(),
+            operationHistory ?? new FakeOperationHistoryRepository());
 
     private static QlhvImportExecuteRequest ExecuteRequest() => new()
     {
         SourceProfileCode = "CSDT_OTO",
         MaCSDT = "66029",
         ConfirmText = QlhvImportService.ConfirmationText,
+        ExpectedSnapshotToken = "snapshot-token",
     };
 
     private static QlhvImportRequest OtoRequest() => new()
@@ -509,6 +666,10 @@ public sealed class QlhvImportServiceTests
                 SourceDatabaseName = string.IsNullOrWhiteSpace(Source.SourceDatabaseName)
                     ? request.SourceProfileCode == "CSDT_MOTO" ? "CSDL_MOTO_BAK" : "CSDL_OTO_BAK"
                     : Source.SourceDatabaseName,
+                BackupSnapshotToken = string.IsNullOrWhiteSpace(Source.BackupSnapshotToken)
+                    ? "snapshot-token"
+                    : Source.BackupSnapshotToken,
+                GeneratedAtUtc = Source.GeneratedAtUtc == default ? DateTime.UtcNow : Source.GeneratedAtUtc,
                 HocVienRows = Source.HocVienRows,
                 KhoaHocRows = Source.KhoaHocRows,
             });
@@ -603,5 +764,80 @@ public sealed class QlhvImportServiceTests
 
             return Task.FromResult(FullSyncResult);
         }
+    }
+
+    private sealed class FakeOperationLock : IQlhvSourceOperationLock
+    {
+        public bool ShouldAcquire { get; init; } = true;
+        public int AcquireCalls { get; private set; }
+        public Action? OnAcquire { get; init; }
+
+        public Task<IAsyncDisposable?> TryAcquireAsync(
+            QlhvOperationSourceDefinition source,
+            CancellationToken cancellationToken = default)
+        {
+            AcquireCalls++;
+            OnAcquire?.Invoke();
+            return Task.FromResult<IAsyncDisposable?>(ShouldAcquire ? new Lease() : null);
+        }
+
+        private sealed class Lease : IAsyncDisposable
+        {
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class FakeOperationHistoryRepository : IQlhvOperationHistoryRepository
+    {
+        public bool TryCreateResult { get; init; } = true;
+        public int CompleteCalls { get; private set; }
+        public Action? OnTryCreate { get; init; }
+        public Exception? CompleteException { get; init; }
+        public List<QlhvOperationHistoryCreate> Created { get; } = new();
+        public List<(QlhvOperationHistoryCompletion Value, CancellationToken Token)> Completed { get; } = new();
+
+        public Task<bool> TryCreateAsync(
+            QlhvOperationHistoryCreate entry,
+            CancellationToken cancellationToken = default)
+        {
+            OnTryCreate?.Invoke();
+            Created.Add(entry);
+            return Task.FromResult(TryCreateResult);
+        }
+
+        public Task MarkRunningAsync(Guid operationId, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task CompleteAsync(
+            QlhvOperationHistoryCompletion completion,
+            CancellationToken cancellationToken = default)
+        {
+            CompleteCalls++;
+            if (CompleteException is not null)
+            {
+                return Task.FromException(CompleteException);
+            }
+
+            Completed.Add((completion, cancellationToken));
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<QlhvOperationHistoryDto>> SearchAsync(
+            string sourceType,
+            int take,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<QlhvOperationHistoryDto>>(
+                Array.Empty<QlhvOperationHistoryDto>());
+
+        public Task<QlhvOperationHistoryDto?> GetActiveAsync(
+            string sourceType,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<QlhvOperationHistoryDto?>(null);
+
+        public Task<QlhvOperationHistoryDto?> GetLatestCompletedAsync(
+            string sourceType,
+            string operationType,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<QlhvOperationHistoryDto?>(null);
     }
 }

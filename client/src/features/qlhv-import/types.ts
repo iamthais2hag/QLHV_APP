@@ -2,19 +2,19 @@ export type QlhvImportSourceKind = 'OTO' | 'MOTO';
 
 export type QlhvImportSourceProfileCode = 'CSDT_OTO' | 'CSDT_MOTO';
 
-export interface QlhvImportFormState {
-  sourceKind: QlhvImportSourceKind;
-  maKhoaHocInput: string;
-}
+export type QlhvOperationState = 'idle' | 'refreshing' | 'syncing' | 'succeeded' | 'failed';
+
+export type QlhvOperationType = 'REFRESH_BACKUP' | 'FULL_SYNC';
 
 export interface QlhvImportRequest {
   sourceProfileCode: QlhvImportSourceProfileCode;
   maCSDT: string;
-  maKhoaHoc: string | null;
+  maKhoaHoc: null;
 }
 
 export interface QlhvImportExecuteRequest extends QlhvImportRequest {
   confirmText: string;
+  expectedSnapshotToken: string;
 }
 
 export interface QlhvImportDiagnostics {
@@ -50,6 +50,8 @@ export interface QlhvImportPlan {
   sourceProfileCode: string;
   maCSDT: string;
   maKhoaHoc: string | null;
+  backupSnapshotToken: string;
+  generatedAtUtc: string;
   sourceHocVienRows: number;
   sourceDistinctMaDkRows: number;
   duplicateSourceMaDkRows: number;
@@ -94,3 +96,58 @@ export interface QlhvImportSnapshot<T> {
 export type QlhvImportExecuteOutcome =
   | { kind: 'executed'; httpStatus: number; result: QlhvImportExecuteResult }
   | { kind: 'blocked'; httpStatus: number; result: QlhvImportExecuteResult };
+
+export interface QlhvOperationsRowCounts {
+  nguoiLX: number;
+  nguoiLXHoSo: number;
+  khoaHoc: number;
+}
+
+export interface QlhvOperationsStatus {
+  sourceType: QlhvImportSourceKind;
+  liveDatabaseName: string;
+  backupDatabaseName: string;
+  maCSDT: string;
+  sourceProfileCode: QlhvImportSourceProfileCode;
+  state: QlhvOperationState;
+  activeOperationId: string | null;
+  backupLastRefreshTimeUtc: string | null;
+  backupSnapshotToken: string | null;
+  liveRows: QlhvOperationsRowCounts;
+  backupRows: QlhvOperationsRowCounts;
+  targetActiveRows: number;
+  lastSyncTimeUtc: string | null;
+  lastError: string | null;
+  canRefresh: boolean;
+  canSync: boolean;
+}
+
+export interface QlhvRefreshBackupRequest {
+  sourceType: QlhvImportSourceKind;
+  confirmText: string;
+}
+
+export interface QlhvRefreshBackupResult {
+  operationId: string;
+  sourceType: QlhvImportSourceKind;
+  status: string;
+  message: string;
+}
+
+export interface QlhvOperationHistoryItem {
+  operationId: string;
+  sourceType: QlhvImportSourceKind;
+  operationType: QlhvOperationType;
+  status: string;
+  startedAtUtc: string | null;
+  completedAtUtc: string | null;
+  sourceRows: number;
+  insertedRows: number;
+  updatedRows: number;
+  reactivatedRows: number;
+  softDeletedRows: number;
+  skippedRows: number;
+  snapshotToken: string | null;
+  errorMessage: string | null;
+  detailJson: string | null;
+}

@@ -12,6 +12,8 @@ public class QlhvImportRequest
 public sealed class QlhvImportExecuteRequest : QlhvImportRequest
 {
     public string? ConfirmText { get; set; }
+
+    public string? ExpectedSnapshotToken { get; set; }
 }
 
 public sealed class QlhvImportPlanDto
@@ -21,6 +23,10 @@ public sealed class QlhvImportPlanDto
     public string SourceProfileCode { get; init; } = string.Empty;
 
     public string SourceDatabaseName { get; init; } = string.Empty;
+
+    public string BackupSnapshotToken { get; init; } = string.Empty;
+
+    public DateTime GeneratedAtUtc { get; init; }
 
     public string MaCSDT { get; init; } = string.Empty;
 
@@ -73,6 +79,8 @@ public sealed class QlhvImportPlanDto
 
 public sealed class QlhvImportExecuteResultDto
 {
+    public Guid? OperationId { get; init; }
+
     public bool Executed { get; init; }
 
     public string Status { get; init; } = string.Empty;
@@ -146,6 +154,10 @@ public sealed class QlhvImportDiagnosticsDto
 public sealed class QlhvImportSourceSnapshot
 {
     public string SourceDatabaseName { get; init; } = string.Empty;
+
+    public string BackupSnapshotToken { get; init; } = string.Empty;
+
+    public DateTime GeneratedAtUtc { get; init; }
 
     public IReadOnlyList<V2HocVienSourceRow> HocVienRows { get; init; } = Array.Empty<V2HocVienSourceRow>();
 
