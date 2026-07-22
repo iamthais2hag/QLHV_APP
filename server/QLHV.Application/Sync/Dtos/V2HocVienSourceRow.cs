@@ -53,4 +53,12 @@ public sealed class V2HocVienSourceRow
 
     /// <summary>Người nhận hồ sơ (V2: NguoiLX_HoSo.NguoiNhanHSo).</summary>
     public string? NguoiNhanHoSo { get; init; }
+
+    public string? DuongDanAnh { get; init; }
+
+    public int? ChatLuongAnh { get; init; }
+
+    public DateTime? NgayThuNhanAnh { get; init; }
+
+    public string? NguoiThuNhanAnh { get; init; }
 }

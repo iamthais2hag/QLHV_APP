@@ -154,6 +154,8 @@ function isExecuteResult(value: unknown): value is QlhvImportExecuteResult {
     && hasFiniteNumbers(value, [
       'insertedHocVienRows',
       'updatedHocVienRows',
+      'reactivatedHocVienRows',
+      'softDeletedHocVienRows',
       'skippedHocVienRows',
     ]);
 }
@@ -165,15 +167,25 @@ function isImportPlan(value: unknown): value is QlhvImportPlan {
 
   return typeof value.isReadOnly === 'boolean'
     && typeof value.executable === 'boolean'
+    && typeof value.sourceProfileConstraintExists === 'boolean'
+    && typeof value.sourceProfileAllowedByConstraint === 'boolean'
     && isStringArray(value.blockers)
     && isStringArray(value.warnings)
     && hasFiniteNumbers(value, [
       'sourceHocVienRows',
+      'sourceDistinctMaDkRows',
+      'duplicateSourceMaDkRows',
       'sourceKhoaHocRows',
       'currentAppHocVienRows',
       'currentAppKhoaHocRows',
+      'targetRowsForSourceProfile',
+      'targetExactIdentityMatches',
+      'targetMaDkConflictsOtherProfiles',
+      'softDeletedIdentityConflicts',
       'plannedInsertHocVienRows',
       'plannedUpdateHocVienRows',
+      'plannedReactivateHocVienRows',
+      'plannedSoftDeleteHocVienRows',
       'plannedSkipHocVienRows',
       'plannedUpsertHocVienRows',
       'plannedUpsertKhoaHocRows',
@@ -186,6 +198,7 @@ function isImportDiagnostics(value: unknown): value is QlhvImportDiagnostics {
   }
 
   return typeof value.isReadOnly === 'boolean'
+    && typeof value.executable === 'boolean'
     && typeof value.sourceProfileConstraintExists === 'boolean'
     && typeof value.sourceProfileAllowedByConstraint === 'boolean'
     && isStringArray(value.blockers)
@@ -199,11 +212,18 @@ function isImportDiagnostics(value: unknown): value is QlhvImportDiagnostics {
       'targetExactIdentityMatches',
       'targetMaDkConflictsOtherProfiles',
       'softDeletedIdentityConflicts',
+      'plannedInsertHocVienRows',
+      'plannedUpdateHocVienRows',
+      'plannedReactivateHocVienRows',
+      'plannedSoftDeleteHocVienRows',
+      'plannedSkipHocVienRows',
+      'plannedUpsertHocVienRows',
     ]);
 }
 
 function hasImportIdentity(value: Record<string, unknown>): boolean {
-  return typeof value.sourceProfileCode === 'string'
+  return typeof value.sourceDatabaseName === 'string'
+    && typeof value.sourceProfileCode === 'string'
     && typeof value.maCSDT === 'string'
     && (value.maKhoaHoc === null || typeof value.maKhoaHoc === 'string');
 }

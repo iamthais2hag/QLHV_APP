@@ -214,10 +214,10 @@ export default function QlhvImportPage() {
       <section className="panel qlhv-import-hero">
         <div>
           <span className="qlhv-import-eyebrow">QLHV_APP</span>
-          <h2>Nhập dữ liệu CSĐT</h2>
-          <p>Chẩn đoán và lập kế hoạch ở chế độ chỉ đọc trước khi cho phép nhập học viên.</p>
+          <h2>Đồng bộ toàn bộ dữ liệu CSĐT</h2>
+          <p>Chẩn đoán snapshot BAK và lập kế hoạch chỉ đọc trước khi ghi vào QLHV_APP.</p>
         </div>
-        <span className="qlhv-import-badge">Luồng riêng có bảo vệ</span>
+        <span className="qlhv-import-badge">Full snapshot có bảo vệ</span>
       </section>
 
       <section className="panel qlhv-import-source-section">
@@ -244,8 +244,13 @@ export default function QlhvImportPage() {
           </label>
 
           <label className="field">
-            <span className="field__label">Profile nguồn</span>
+            <span className="field__label">Phân vùng đích (SourceProfileCode)</span>
             <input className="field__input" value={source.sourceProfileCode} readOnly />
+          </label>
+
+          <label className="field">
+            <span className="field__label">Database snapshot nguồn</span>
+            <input className="field__input" value={source.sourceDatabaseName} readOnly />
           </label>
 
           <label className="field">
@@ -266,9 +271,16 @@ export default function QlhvImportPage() {
         </div>
 
         <div className="qlhv-import-source-summary">
-          <strong>Mapping cố định:</strong>{' '}
-          {form.sourceKind} → {source.sourceProfileCode} / {source.maCSDT}
+          <strong>Luồng cố định:</strong>{' '}
+          {form.sourceKind} → {source.sourceDatabaseName} → QLHV_APP / phân vùng {source.sourceProfileCode}
+          {' '}/ CSĐT {source.maCSDT}
           {request.maKhoaHoc ? ` / khóa ${request.maKhoaHoc}` : ' / tất cả khóa'}
+        </div>
+
+        <div className="qlhv-import-full-sync-warning" role="alert">
+          <strong>Đây là đồng bộ toàn bộ snapshot.</strong>{' '}
+          Học viên không còn trong {source.sourceDatabaseName} sẽ bị xóa mềm,
+          chỉ trong phân vùng {source.sourceProfileCode}. Snapshot rỗng sẽ bị chặn.
         </div>
 
         <div className="qlhv-import-actions">
@@ -286,7 +298,7 @@ export default function QlhvImportPage() {
             onClick={() => void loadPlan()}
             disabled={planLoading || executing}
           >
-            {planLoading ? 'Đang lập kế hoạch...' : 'Lập kế hoạch nhập'}
+            {planLoading ? 'Đang lập kế hoạch...' : 'Lập kế hoạch full sync'}
           </button>
         </div>
       </section>
@@ -304,7 +316,7 @@ export default function QlhvImportPage() {
       </section>
 
       <section className="panel">
-        <SectionHeading title="3. Kế hoạch nhập" hint="GET chỉ đọc, không tự chạy" />
+        <SectionHeading title="3. Kế hoạch full sync" hint="GET chỉ đọc, không tự chạy" />
         {planError && <ErrorBanner message={planError} />}
         {planLoading && <EmptyState text="Đang lập kế hoạch nhập dữ liệu..." />}
         {!planLoading && !plan && !planError && (
@@ -323,7 +335,7 @@ export default function QlhvImportPage() {
             onClick={openConfirmation}
             disabled={!canExecute}
           >
-            Thực hiện nhập dữ liệu
+            Thực hiện full sync
           </button>
         </div>
         {executeError && <ErrorBanner message={executeError} />}
@@ -347,18 +359,23 @@ export default function QlhvImportPage() {
               void handleExecute();
             }}
           >
-            <SectionHeading title="Xác nhận nhập dữ liệu" />
+            <SectionHeading title="Xác nhận full sync" />
             <h3 id="qlhv-import-confirm-title" className="qlhv-import-modal__title">
-              Kiểm tra lần cuối trước khi ghi vào QLHV_APP
+              Kiểm tra snapshot và phân vùng lần cuối trước khi ghi
             </h3>
             <div className="qlhv-import-confirm-summary">
-              <SummaryRow label="Profile nguồn" value={plan.request.sourceProfileCode} />
+              <SummaryRow label="Database snapshot nguồn" value={plan.data.sourceDatabaseName} />
+              <SummaryRow label="Phân vùng đích" value={plan.request.sourceProfileCode} />
               <SummaryRow label="Mã CSĐT" value={plan.request.maCSDT} />
               <SummaryRow label="Mã khóa học" value={plan.request.maKhoaHoc ?? 'Tất cả khóa'} />
-              <SummaryRow
-                label="Dự kiến upsert học viên"
-                value={formatNumber(plan.data.plannedUpsertHocVienRows)}
-              />
+              <SummaryRow label="Dự kiến thêm" value={formatNumber(plan.data.plannedInsertHocVienRows)} />
+              <SummaryRow label="Dự kiến cập nhật" value={formatNumber(plan.data.plannedUpdateHocVienRows)} />
+              <SummaryRow label="Dự kiến khôi phục" value={formatNumber(plan.data.plannedReactivateHocVienRows)} />
+              <SummaryRow label="Dự kiến xóa mềm" value={formatNumber(plan.data.plannedSoftDeleteHocVienRows)} />
+            </div>
+            <div className="qlhv-import-full-sync-warning" role="alert">
+              Full sync sẽ xóa mềm các dòng không còn trong snapshot,
+              chỉ trong phân vùng <strong>{plan.request.sourceProfileCode}</strong>.
             </div>
             <p className="qlhv-import-confirm-instruction">
               Nhập chính xác <code>{QLHV_IMPORT_CONFIRM_TEXT}</code> để mở khóa nút xác nhận cuối.
@@ -389,7 +406,7 @@ export default function QlhvImportPage() {
                 className="btn btn--primary"
                 disabled={!executeRequest}
               >
-                {executing ? 'Đang thực hiện...' : 'Xác nhận và nhập dữ liệu'}
+                {executing ? 'Đang thực hiện...' : 'Xác nhận và full sync'}
               </button>
             </div>
           </form>
@@ -401,22 +418,29 @@ export default function QlhvImportPage() {
 
 function DiagnosticsView({ diagnostics }: { diagnostics: QlhvImportDiagnostics }) {
   const metrics: MetricItem[] = [
-    ['Học viên nguồn', diagnostics.sourceHocVienRows],
+    ['Học viên nguồn', diagnostics.sourceHocVienRows, diagnostics.sourceHocVienRows > 0 ? 'ok' : 'blocked'],
     ['MaDK nguồn phân biệt', diagnostics.sourceDistinctMaDkRows],
     ['MaDK nguồn trùng', diagnostics.duplicateSourceMaDkRows, diagnostics.duplicateSourceMaDkRows > 0 ? 'blocked' : 'ok'],
     ['Học viên hiện có trong app', diagnostics.currentAppHocVienRows],
     ['Dòng theo profile nguồn', diagnostics.targetRowsForSourceProfile],
     ['Khớp đúng định danh', diagnostics.targetExactIdentityMatches],
-    ['Xung đột MaDK profile khác', diagnostics.targetMaDkConflictsOtherProfiles, diagnostics.targetMaDkConflictsOtherProfiles > 0 ? 'blocked' : 'ok'],
-    ['Xung đột bản ghi đã xóa mềm', diagnostics.softDeletedIdentityConflicts, diagnostics.softDeletedIdentityConflicts > 0 ? 'blocked' : 'ok'],
+    ['MaDK cũng có ở profile khác', diagnostics.targetMaDkConflictsOtherProfiles, diagnostics.targetMaDkConflictsOtherProfiles > 0 ? 'warning' : 'ok'],
+    ['Dòng đang xóa mềm sẽ khôi phục', diagnostics.softDeletedIdentityConflicts, diagnostics.softDeletedIdentityConflicts > 0 ? 'warning' : 'ok'],
     ['Có constraint profile nguồn', diagnostics.sourceProfileConstraintExists ? 'Có' : 'Không', diagnostics.sourceProfileConstraintExists ? 'ok' : 'blocked'],
     ['Profile được constraint cho phép', diagnostics.sourceProfileAllowedByConstraint ? 'Có' : 'Không', diagnostics.sourceProfileAllowedByConstraint ? 'ok' : 'blocked'],
+    ['Dự kiến thêm', diagnostics.plannedInsertHocVienRows],
+    ['Dự kiến cập nhật', diagnostics.plannedUpdateHocVienRows],
+    ['Dự kiến khôi phục', diagnostics.plannedReactivateHocVienRows],
+    ['Dự kiến xóa mềm', diagnostics.plannedSoftDeleteHocVienRows, diagnostics.plannedSoftDeleteHocVienRows > 0 ? 'warning' : 'ok'],
+    ['Dự kiến bỏ qua', diagnostics.plannedSkipHocVienRows],
+    ['Có thể thực hiện', diagnostics.executable ? 'Có' : 'Không', diagnostics.executable ? 'ok' : 'blocked'],
   ];
 
   return (
     <>
       <ReadOnlySummary
         isReadOnly={diagnostics.isReadOnly}
+        sourceDatabaseName={diagnostics.sourceDatabaseName}
         profile={diagnostics.sourceProfileCode}
         maCSDT={diagnostics.maCSDT}
         maKhoaHoc={diagnostics.maKhoaHoc}
@@ -431,11 +455,17 @@ function DiagnosticsView({ diagnostics }: { diagnostics: QlhvImportDiagnostics }
 function PlanView({ plan }: { plan: QlhvImportPlan }) {
   const metrics: MetricItem[] = [
     ['Học viên nguồn', plan.sourceHocVienRows, plan.sourceHocVienRows > 0 ? 'ok' : 'blocked'],
+    ['MaDK nguồn phân biệt', plan.sourceDistinctMaDkRows],
+    ['MaDK nguồn trùng', plan.duplicateSourceMaDkRows, plan.duplicateSourceMaDkRows > 0 ? 'blocked' : 'ok'],
     ['Khóa học nguồn', plan.sourceKhoaHocRows],
     ['Học viên hiện có trong app', plan.currentAppHocVienRows],
     ['Khóa học hiện có trong app', plan.currentAppKhoaHocRows],
+    ['Dòng theo phân vùng', plan.targetRowsForSourceProfile],
+    ['Khớp đúng định danh', plan.targetExactIdentityMatches],
     ['Dự kiến thêm học viên', plan.plannedInsertHocVienRows],
     ['Dự kiến cập nhật học viên', plan.plannedUpdateHocVienRows],
+    ['Dự kiến khôi phục học viên', plan.plannedReactivateHocVienRows],
+    ['Dự kiến xóa mềm học viên', plan.plannedSoftDeleteHocVienRows, plan.plannedSoftDeleteHocVienRows > 0 ? 'warning' : 'ok'],
     ['Dự kiến bỏ qua học viên', plan.plannedSkipHocVienRows],
     ['Tổng upsert học viên', plan.plannedUpsertHocVienRows],
     ['Dự kiến upsert khóa học', plan.plannedUpsertKhoaHocRows],
@@ -446,6 +476,7 @@ function PlanView({ plan }: { plan: QlhvImportPlan }) {
     <>
       <ReadOnlySummary
         isReadOnly={plan.isReadOnly}
+        sourceDatabaseName={plan.sourceDatabaseName}
         profile={plan.sourceProfileCode}
         maCSDT={plan.maCSDT}
         maKhoaHoc={plan.maKhoaHoc}
@@ -463,16 +494,19 @@ function ResultView({ snapshot }: { snapshot: QlhvImportLastResult }) {
   return (
     <div className={`qlhv-import-result qlhv-import-result--${successful ? 'success' : 'blocked'}`}>
       <div className="qlhv-import-result__heading">
-        <strong>{successful ? 'Nhập dữ liệu thành công' : 'Yêu cầu không được thực hiện'}</strong>
+        <strong>{successful ? 'Full sync thành công' : 'Yêu cầu không được thực hiện'}</strong>
         <span>{result.status || (successful ? 'Executed' : 'Blocked')}</span>
       </div>
       <p>{result.message}</p>
       <div className="qlhv-import-result-grid">
-        <SummaryRow label="Profile nguồn" value={snapshot.request.sourceProfileCode} />
+        <SummaryRow label="Database snapshot nguồn" value={result.plan.sourceDatabaseName} />
+        <SummaryRow label="Phân vùng đích" value={snapshot.request.sourceProfileCode} />
         <SummaryRow label="Mã CSĐT" value={snapshot.request.maCSDT} />
         <SummaryRow label="Mã khóa học" value={snapshot.request.maKhoaHoc ?? 'Tất cả khóa'} />
         <SummaryRow label="Đã thêm học viên" value={formatNumber(result.insertedHocVienRows)} />
         <SummaryRow label="Đã cập nhật học viên" value={formatNumber(result.updatedHocVienRows)} />
+        <SummaryRow label="Đã khôi phục học viên" value={formatNumber(result.reactivatedHocVienRows)} />
+        <SummaryRow label="Đã xóa mềm học viên" value={formatNumber(result.softDeletedHocVienRows)} />
         <SummaryRow label="Đã bỏ qua học viên" value={formatNumber(result.skippedHocVienRows)} />
       </div>
       {!successful && (
@@ -484,11 +518,13 @@ function ResultView({ snapshot }: { snapshot: QlhvImportLastResult }) {
 
 function ReadOnlySummary({
   isReadOnly,
+  sourceDatabaseName,
   profile,
   maCSDT,
   maKhoaHoc,
 }: {
   isReadOnly: boolean;
+  sourceDatabaseName: string;
   profile: string;
   maCSDT: string;
   maKhoaHoc: string | null;
@@ -498,6 +534,7 @@ function ReadOnlySummary({
       <span className={isReadOnly ? 'is-ok' : 'is-blocked'}>
         Chế độ chỉ đọc: {isReadOnly ? 'Có' : 'Không'}
       </span>
+      <span>DB nguồn: {sourceDatabaseName}</span>
       <span>{profile}</span>
       <span>CSĐT {maCSDT}</span>
       <span>{maKhoaHoc ? `Khóa ${maKhoaHoc}` : 'Tất cả khóa'}</span>
@@ -505,7 +542,7 @@ function ReadOnlySummary({
   );
 }
 
-type MetricTone = 'default' | 'ok' | 'blocked';
+type MetricTone = 'default' | 'ok' | 'warning' | 'blocked';
 type MetricItem = [label: string, value: string | number, tone?: MetricTone];
 
 function MetricGrid({ items }: { items: MetricItem[] }) {

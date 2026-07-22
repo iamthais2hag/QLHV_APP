@@ -32,7 +32,11 @@ SELECT
     dvhc.TenDayDu                         AS NoiTTTenDayDu,
     hs.SoGPLXDaCo                         AS SoGPLXDaCo,
     hs.HangGPLXDaCo                       AS HangGPLXDaCo,
-    hs.NguoiNhanHSo                       AS NguoiNhanHoSo
+    hs.NguoiNhanHSo                       AS NguoiNhanHoSo,
+    hs.DuongDanAnh                        AS DuongDanAnh,
+    hs.ChatLuongAnh                       AS ChatLuongAnh,
+    hs.NgayThuNhanAnh                     AS NgayThuNhanAnh,
+    hs.NguoiThuNhanAnh                    AS NguoiThuNhanAnh
 FROM dbo.NguoiLX AS nlx
 INNER JOIN dbo.NguoiLX_HoSo AS hs ON hs.MaDK = nlx.MaDK
 LEFT JOIN dbo.KhoaHoc AS kh ON kh.MaKH = hs.MaKhoaHoc

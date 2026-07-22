@@ -13,7 +13,6 @@ public sealed class QlhvImportServiceTests
     public async Task Plan_uses_actual_profile_identity_and_reports_counts_without_writing()
     {
         var sourceRows = new[] { Source("66029-001"), Source("66029-002") };
-        var existingKey = HocVienSourceIdentityKey.Create("CSDT_OTO", "66029-002");
         var reads = new FakeReadRepository
         {
             Source = new QlhvImportSourceSnapshot
@@ -25,9 +24,9 @@ public sealed class QlhvImportServiceTests
             {
                 CurrentAppHocVienRows = 1,
                 AppKhoaHocRows = 4,
-                ExistingHocVienHashes = new Dictionary<string, string>
+                HocVienRows = new[]
                 {
-                    [existingKey] = "old-hash",
+                    new QlhvFullSyncTargetRow("66029-002", "old-hash", IsDeleted: false),
                 },
             },
         };
@@ -75,7 +74,46 @@ public sealed class QlhvImportServiceTests
     }
 
     [Fact]
-    public async Task Plan_supports_empty_moto_source()
+    public async Task Plan_rejects_course_filter_before_any_repository_read()
+    {
+        var reads = new FakeReadRepository();
+        var target = new FakeTargetRepository();
+        var service = CreateService(reads, target);
+
+        var plan = await service.GetPlanAsync(new QlhvImportRequest
+        {
+            SourceProfileCode = "CSDT_OTO",
+            MaCSDT = "66029",
+            MaKhoaHoc = "66029K01",
+        });
+
+        Assert.False(plan.Executable);
+        Assert.Contains(plan.Blockers, blocker => blocker.Contains("maKhoaHoc phai de trong", StringComparison.Ordinal));
+        Assert.Equal(0, reads.SourceReads);
+        Assert.Equal(0, target.DiagnosticsReads);
+    }
+
+    [Fact]
+    public async Task Plan_blocks_source_database_that_is_not_expected_bak_database()
+    {
+        var reads = new FakeReadRepository
+        {
+            Source = new QlhvImportSourceSnapshot
+            {
+                SourceDatabaseName = "CSDL_OTO",
+                HocVienRows = new[] { Source("66029-001") },
+            },
+        };
+        var service = CreateService(reads, new FakeTargetRepository());
+
+        var plan = await service.GetPlanAsync(OtoRequest());
+
+        Assert.False(plan.Executable);
+        Assert.Contains(plan.Blockers, blocker => blocker.Contains("bat buoc phai la CSDL_OTO_BAK", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Plan_blocks_empty_moto_source()
     {
         var reads = new FakeReadRepository
         {
@@ -91,10 +129,10 @@ public sealed class QlhvImportServiceTests
             MaCSDT = "66030",
         });
 
-        Assert.True(plan.Executable);
+        Assert.False(plan.Executable);
         Assert.Equal(0, plan.SourceHocVienRows);
         Assert.Equal(0, plan.PlannedUpsertHocVienRows);
-        Assert.Contains(plan.Warnings, warning => warning.Contains("Khong co hoc vien nguon", StringComparison.Ordinal));
+        Assert.Contains(plan.Blockers, blocker => blocker.Contains("0 hoc vien", StringComparison.Ordinal));
         Assert.Equal(0, target.UpsertCalls);
     }
 
@@ -185,7 +223,7 @@ public sealed class QlhvImportServiceTests
     }
 
     [Fact]
-    public async Task Diagnostics_moto_supports_an_empty_source_read_only()
+    public async Task Diagnostics_moto_reports_empty_source_as_blocker()
     {
         var reads = new FakeReadRepository();
         var target = new FakeTargetRepository();
@@ -202,7 +240,8 @@ public sealed class QlhvImportServiceTests
         Assert.Equal(0, diagnostics.SourceHocVienRows);
         Assert.Equal(0, diagnostics.SourceDistinctMaDkRows);
         Assert.Equal(0, diagnostics.DuplicateSourceMaDkRows);
-        Assert.Empty(diagnostics.Blockers);
+        Assert.False(diagnostics.Executable);
+        Assert.Contains(diagnostics.Blockers, blocker => blocker.Contains("0 hoc vien", StringComparison.Ordinal));
         Assert.Equal(0, target.UpsertCalls);
     }
 
@@ -238,7 +277,7 @@ public sealed class QlhvImportServiceTests
     }
 
     [Fact]
-    public async Task Other_profile_ma_dk_conflict_is_a_blocker()
+    public async Task Other_profile_ma_dk_collision_is_informational_for_composite_identity()
     {
         var reads = OneOtoRow(new QlhvImportTargetSnapshot
         {
@@ -248,21 +287,27 @@ public sealed class QlhvImportServiceTests
 
         var plan = await service.GetPlanAsync(OtoRequest());
 
-        Assert.Contains(plan.Blockers, blocker => blocker.Contains("MaDK trung voi profile khac", StringComparison.Ordinal));
+        Assert.Empty(plan.Blockers);
+        Assert.Contains(plan.Warnings, warning => warning.Contains("profile khac", StringComparison.Ordinal));
     }
 
     [Fact]
-    public async Task Soft_deleted_identity_conflict_is_a_blocker()
+    public async Task Soft_deleted_identity_is_planned_for_reactivation()
     {
         var reads = OneOtoRow(new QlhvImportTargetSnapshot
         {
             SoftDeletedIdentityConflicts = 1,
+            HocVienRows = new[]
+            {
+                new QlhvFullSyncTargetRow("66029-001", "same-or-old-hash", IsDeleted: true),
+            },
         });
         var service = CreateService(reads, new FakeTargetRepository());
 
         var plan = await service.GetPlanAsync(OtoRequest());
 
-        Assert.Contains(plan.Blockers, blocker => blocker.Contains("da xoa mem", StringComparison.Ordinal));
+        Assert.Empty(plan.Blockers);
+        Assert.Equal(1, plan.PlannedReactivateHocVienRows);
     }
 
     [Fact]
@@ -309,7 +354,7 @@ public sealed class QlhvImportServiceTests
         };
         var target = new FakeTargetRepository
         {
-            UpsertResult = new UpsertCounts(1, 0, 0),
+            FullSyncResult = new QlhvImportFullSyncWriteResult(1, 0, 0, 0, 0, 0, 0, 0),
         };
         var service = CreateService(reads, target, dryRun: false, enableWrites: true);
 
@@ -336,7 +381,7 @@ public sealed class QlhvImportServiceTests
         };
         var target = new FakeTargetRepository
         {
-            UpsertResult = new UpsertCounts(2, 0, 0),
+            FullSyncResult = new QlhvImportFullSyncWriteResult(2, 0, 0, 0, 0, 0, 0, 0),
         };
         var service = CreateService(reads, target, dryRun: false, enableWrites: true, batchSize: 1);
 
@@ -349,12 +394,43 @@ public sealed class QlhvImportServiceTests
     }
 
     [Fact]
-    public async Task Execute_rejects_a_soft_delete_conflict_rechecked_inside_write_transaction()
+    public async Task Execute_moto_stages_only_the_moto_logical_partition()
+    {
+        var reads = new FakeReadRepository
+        {
+            Source = new QlhvImportSourceSnapshot
+            {
+                HocVienRows = new[] { Source("66030-001") },
+            },
+        };
+        var target = new FakeTargetRepository
+        {
+            FullSyncResult = new QlhvImportFullSyncWriteResult(1, 0, 0, 0, 0, 0, 0, 0),
+        };
+        var service = CreateService(reads, target, dryRun: false, enableWrites: true);
+
+        var result = await service.ExecuteAsync(new QlhvImportExecuteRequest
+        {
+            SourceProfileCode = "CSDT_MOTO",
+            MaCSDT = "66030",
+            ConfirmText = QlhvImportService.ConfirmationText,
+        });
+
+        Assert.True(result.Executed);
+        Assert.Equal("CSDT_MOTO", target.LastFullSyncProfile);
+        var model = Assert.Single(target.WrittenRows);
+        Assert.Equal("CSDT_MOTO", model.SourceProfileCode);
+        Assert.Equal("66030-001", model.SourceMaDK);
+        Assert.DoesNotContain(target.WrittenRows, row => row.SourceProfileCode == "CSDT_OTO");
+    }
+
+    [Fact]
+    public async Task Execute_rejects_duplicate_target_identity_rechecked_inside_write_transaction()
     {
         var reads = OneOtoRow(new QlhvImportTargetSnapshot());
         var target = new FakeTargetRepository
         {
-            AtomicSoftDeletedIdentityConflicts = 1,
+            FullSyncResult = new QlhvImportFullSyncWriteResult(0, 0, 0, 0, 0, 0, 0, 1),
         };
         var service = CreateService(reads, target, dryRun: false, enableWrites: true);
 
@@ -363,7 +439,7 @@ public sealed class QlhvImportServiceTests
         Assert.False(result.Executed);
         Assert.Contains(
             result.Plan.Blockers,
-            blocker => blocker.Contains("da xoa mem tai thoi diem ghi", StringComparison.Ordinal));
+            blocker => blocker.Contains("identity target bi trung", StringComparison.Ordinal));
         Assert.Equal(1, target.UpsertCalls);
         Assert.Empty(target.WrittenRows);
     }
@@ -428,7 +504,14 @@ public sealed class QlhvImportServiceTests
             CancellationToken cancellationToken = default)
         {
             SourceReads++;
-            return Task.FromResult(Source);
+            return Task.FromResult(new QlhvImportSourceSnapshot
+            {
+                SourceDatabaseName = string.IsNullOrWhiteSpace(Source.SourceDatabaseName)
+                    ? request.SourceProfileCode == "CSDT_MOTO" ? "CSDL_MOTO_BAK" : "CSDL_OTO_BAK"
+                    : Source.SourceDatabaseName,
+                HocVienRows = Source.HocVienRows,
+                KhoaHocRows = Source.KhoaHocRows,
+            });
         }
 
         public Task<QlhvImportTargetSnapshot> ReadTargetAsync(
@@ -447,8 +530,11 @@ public sealed class QlhvImportServiceTests
     {
         public int DiagnosticsReads { get; private set; }
         public int UpsertCalls { get; private set; }
-        public List<HocVienTargetWriteModel> WrittenRows { get; } = new();
+        public string? LastFullSyncProfile { get; private set; }
+        public List<QlhvImportHocVienWriteModel> WrittenRows { get; } = new();
         public UpsertCounts UpsertResult { get; init; } = UpsertCounts.Empty;
+        public QlhvImportFullSyncWriteResult FullSyncResult { get; init; } =
+            new(0, 0, 0, 0, 0, 0, 0, 0);
         public int AtomicTargetMaDkConflictsOtherProfiles { get; init; }
         public int AtomicSoftDeletedIdentityConflicts { get; init; }
 
@@ -497,11 +583,25 @@ public sealed class QlhvImportServiceTests
                     AtomicSoftDeletedIdentityConflicts));
             }
 
-            WrittenRows.AddRange(rows);
             return Task.FromResult(new QlhvImportGuardedUpsertResult(
                 UpsertResult,
                 0,
                 0));
+        }
+
+        public Task<QlhvImportFullSyncWriteResult> FullSyncAsync(
+            string sourceProfileCode,
+            IReadOnlyList<QlhvImportHocVienWriteModel> rows,
+            CancellationToken cancellationToken = default)
+        {
+            UpsertCalls++;
+            LastFullSyncProfile = sourceProfileCode;
+            if (!FullSyncResult.HasConflicts)
+            {
+                WrittenRows.AddRange(rows);
+            }
+
+            return Task.FromResult(FullSyncResult);
         }
     }
 }

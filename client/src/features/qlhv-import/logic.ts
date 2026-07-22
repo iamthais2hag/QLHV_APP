@@ -14,11 +14,13 @@ export const QLHV_IMPORT_SOURCES = {
     label: 'Ô tô',
     sourceProfileCode: 'CSDT_OTO',
     maCSDT: '66029',
+    sourceDatabaseName: 'CSDL_OTO_BAK',
   },
   MOTO: {
     label: 'Mô tô',
     sourceProfileCode: 'CSDT_MOTO',
     maCSDT: '66030',
+    sourceDatabaseName: 'CSDL_MOTO_BAK',
   },
 } as const;
 
@@ -48,7 +50,16 @@ export function requestsEqual(left: QlhvImportRequest, right: QlhvImportRequest)
 export function planMatchesRequest(plan: QlhvImportPlan, request: QlhvImportRequest): boolean {
   return plan.sourceProfileCode === request.sourceProfileCode
     && plan.maCSDT === request.maCSDT
-    && (plan.maKhoaHoc ?? '') === (request.maKhoaHoc ?? '');
+    && (plan.maKhoaHoc ?? '') === (request.maKhoaHoc ?? '')
+    && sourceDatabaseMatchesRequest(plan.sourceDatabaseName, request);
+}
+
+export function sourceDatabaseMatchesRequest(
+  sourceDatabaseName: string,
+  request: QlhvImportRequest,
+): boolean {
+  const expectedDatabaseName = getExpectedSourceDatabaseName(request.sourceProfileCode);
+  return expectedDatabaseName !== null && sourceDatabaseName === expectedDatabaseName;
 }
 
 export function canOpenExecute(
@@ -94,16 +105,21 @@ export function getExecuteDisabledReason(
     return 'Biểu mẫu đã thay đổi. Vui lòng lập lại kế hoạch.';
   }
 
+  if (!sourceDatabaseMatchesRequest(plan.data.sourceDatabaseName, currentRequest)) {
+    const expectedDatabaseName = getExpectedSourceDatabaseName(currentRequest.sourceProfileCode);
+    return `Database nguồn không khớp. Kế hoạch phải đọc từ ${expectedDatabaseName ?? 'database BAK đã cấu hình'}.`;
+  }
+
   if (!planMatchesRequest(plan.data, currentRequest)) {
     return 'Kế hoạch backend trả về không khớp biểu mẫu hiện tại.';
   }
 
-  if (plan.data.blockers.length > 0 || !plan.data.executable) {
-    return 'Kế hoạch đang có điểm chặn và không thể thực hiện.';
+  if (plan.data.sourceHocVienRows <= 0) {
+    return 'Snapshot nguồn không có học viên; không được phép thực hiện hoặc xóa mềm phân vùng.';
   }
 
-  if (plan.data.sourceHocVienRows <= 0) {
-    return 'Nguồn không có học viên phù hợp để nhập.';
+  if (plan.data.blockers.length > 0 || !plan.data.executable) {
+    return 'Kế hoạch đang có điểm chặn và không thể thực hiện.';
   }
 
   if (busy) {
@@ -115,4 +131,10 @@ export function getExecuteDisabledReason(
 
 export function isSourceKind(value: string): value is QlhvImportSourceKind {
   return value === 'OTO' || value === 'MOTO';
+}
+
+function getExpectedSourceDatabaseName(sourceProfileCode: string): string | null {
+  const source = Object.values(QLHV_IMPORT_SOURCES)
+    .find((candidate) => candidate.sourceProfileCode === sourceProfileCode);
+  return source?.sourceDatabaseName ?? null;
 }

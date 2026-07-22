@@ -48,6 +48,41 @@ public sealed class QlhvImportSafetySourceTests
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Import_reader_binds_logical_profiles_to_exact_bak_databases()
+    {
+        var source = File.ReadAllText(FindWorkspaceFile(
+            "server", "QLHV.Infrastructure", "Sync", "QlhvImportReadRepository.cs"));
+
+        Assert.Contains("CsdtConnectionProfileCodes.CsdtOtoBak", source, StringComparison.Ordinal);
+        Assert.Contains("\"CSDL_OTO_BAK\"", source, StringComparison.Ordinal);
+        Assert.Contains("CsdtConnectionProfileCodes.CsdtMotoBak", source, StringComparison.Ordinal);
+        Assert.Contains("\"CSDL_MOTO_BAK\"", source, StringComparison.Ordinal);
+        Assert.Contains("SELECT DB_NAME();", source, StringComparison.Ordinal);
+        Assert.Contains("StringComparison.Ordinal", source, StringComparison.Ordinal);
+        Assert.Contains("SourceDatabaseName = sourceDatabaseName", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Bak_profile_patch_is_transactional_idempotent_and_has_no_secret()
+    {
+        var patch = File.ReadAllText(FindWorkspaceFile(
+            "database", "patches", "20260722_add_bak_csdt_connection_profiles.sql"));
+
+        Assert.Contains("USE [QLHV_APP];", patch, StringComparison.Ordinal);
+        Assert.Contains("SET XACT_ABORT ON;", patch, StringComparison.Ordinal);
+        Assert.Contains("BEGIN TRANSACTION;", patch, StringComparison.Ordinal);
+        Assert.Contains("CSDT_OTO_BAK", patch, StringComparison.Ordinal);
+        Assert.Contains("CSDL_OTO_BAK", patch, StringComparison.Ordinal);
+        Assert.Contains("CSDT_MOTO_BAK", patch, StringComparison.Ordinal);
+        Assert.Contains("CSDL_MOTO_BAK", patch, StringComparison.Ordinal);
+        Assert.Contains("AuthMode = N'Windows'", patch, StringComparison.Ordinal);
+        Assert.Contains("PasswordCipherText = NULL", patch, StringComparison.Ordinal);
+        Assert.Contains("WHERE NOT EXISTS", patch, StringComparison.Ordinal);
+        Assert.DoesNotContain("CSDT_OTO'", patch, StringComparison.Ordinal);
+        Assert.DoesNotContain("CSDT_MOTO'", patch, StringComparison.Ordinal);
+    }
+
     private static string FindWorkspaceFile(
         string firstPathPart,
         params string[] remainingPathParts)
