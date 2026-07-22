@@ -95,6 +95,12 @@ export const MENU_ITEMS: MenuItem[] = [
     icon: '🔄',
   },
   {
+    path: '/qlhv-import',
+    label: 'Nhập dữ liệu CSĐT',
+    description: 'Chẩn đoán, lập kế hoạch và nhập học viên từ CSĐT vào QLHV_APP.',
+    icon: '⇩',
+  },
+  {
     path: '/cau-hinh-ket-noi-csdt',
     label: 'Cấu hình kết nối CSDT',
     description: 'Quản lý 7 profile kết nối CSDT/DATA/QLHV_APP an toàn.',
