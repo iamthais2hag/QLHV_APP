@@ -23,6 +23,34 @@ public sealed class MotoSyncDonViGTVTOptionPlannerTests
     }
 
     [Fact]
+    public void Detect_columns_uses_ma_dvql_when_ma_so_gtvt_is_missing()
+    {
+        var display = MotoSyncDonViGTVTOptionPlanner.DetectDisplayColumns(["MaDV", "TenDV", "MaDVQL"]);
+
+        Assert.Equal("MaDVQL", display.MaSoGTVTColumn);
+    }
+
+    [Fact]
+    public void Detect_columns_prefers_ma_so_gtvt_over_ma_dvql()
+    {
+        var display = MotoSyncDonViGTVTOptionPlanner.DetectDisplayColumns(
+            ["MaDV", "TenDV", "MaDVQL", "MaSoGTVT"]);
+
+        Assert.Equal("MaSoGTVT", display.MaSoGTVTColumn);
+    }
+
+    [Theory]
+    [InlineData("MaDVQL", "Target dbo.DM_DonViGTVT khong co cot MaSoGTVT; su dung MaDVQL lam MaSoGTVT goi y.")]
+    [InlineData(null, "Target dbo.DM_DonViGTVT khong co cot MaSoGTVT; truong MaSoGTVT se de trong.")]
+    [InlineData("MaSoGTVT", null)]
+    public void Warning_matches_selected_ma_so_gtvt_source(string? column, string? expected)
+    {
+        var display = new MotoSyncDonViGTVTDisplayColumns("TenDV", column);
+
+        Assert.Equal(expected, MotoSyncDonViGTVTOptionPlanner.GetMaSoGTVTWarning(display));
+    }
+
+    [Fact]
     public void Build_options_sql_searches_by_ma_dv_and_ten_dv_with_parameter()
     {
         var shape = new MotoSyncDonViGTVTQueryShape(
@@ -55,6 +83,18 @@ public sealed class MotoSyncDonViGTVTOptionPlannerTests
 
         Assert.Contains("CAST(NULL AS nvarchar(4000)) AS [MaSoGTVT]", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("WHERE", sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Build_options_sql_returns_ma_dvql_as_ma_so_gtvt_fallback()
+    {
+        var shape = new MotoSyncDonViGTVTQueryShape(
+            new MotoSyncDonViGTVTDisplayColumns("TenDV", "MaDVQL"));
+
+        var sql = MotoSyncDonViGTVTOptionPlanner.BuildOptionsSql(shape, hasSearch: false);
+
+        Assert.Contains("[MaDVQL] AS [MaSoGTVT]", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("CAST(NULL AS nvarchar(4000)) AS [MaSoGTVT]", sql, StringComparison.Ordinal);
     }
 
     [Fact]
