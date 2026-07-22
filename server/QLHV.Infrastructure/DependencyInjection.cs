@@ -41,7 +41,12 @@ public static class DependencyInjection
         services.AddScoped<IHocVienPhotoService, HocVienPhotoService>();
         services.AddSingleton<ISyncConnectionProvider, SyncConnectionProvider>();
         services.AddScoped<IV2HocVienSourceRepository, V2HocVienSourceRepository>();
-        services.AddScoped<IQlhvHocVienTargetRepository, QlhvHocVienTargetRepository>();
+        services.AddScoped<QlhvHocVienTargetRepository>();
+        services.AddScoped<IQlhvHocVienTargetRepository>(provider =>
+            provider.GetRequiredService<QlhvHocVienTargetRepository>());
+        services.AddScoped<IQlhvImportWriteRepository>(provider =>
+            provider.GetRequiredService<QlhvHocVienTargetRepository>());
+        services.AddScoped<IQlhvImportReadRepository, QlhvImportReadRepository>();
         services.AddScoped<IMotoSyncRepository, MotoSyncRepository>();
         services.AddScoped<IMotoSyncRunHistoryRepository, MotoSyncRunHistoryRepository>();
         services.AddScoped<IMotoCenterTransferRunHistoryRepository, MotoCenterTransferRunHistoryRepository>();
