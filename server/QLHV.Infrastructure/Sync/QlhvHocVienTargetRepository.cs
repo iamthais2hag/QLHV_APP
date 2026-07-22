@@ -15,7 +15,9 @@ namespace QLHV.Infrastructure.Sync;
 /// Read and guarded write access to QLHV_APP.dbo.App_HocVien.
 /// Writes use SqlBulkCopy into a temp staging table and MERGE in a transaction; no physical delete.
 /// </summary>
-public sealed class QlhvHocVienTargetRepository : IQlhvHocVienTargetRepository
+public sealed class QlhvHocVienTargetRepository :
+    IQlhvHocVienTargetRepository,
+    IQlhvImportWriteRepository
 {
     private readonly IConnectionSettingsProvider _connections;
     private readonly AppSyncOptions _options;
@@ -226,14 +228,50 @@ WHERE SourceProfileCode = @SourceProfileCode
             cancellationToken);
     }
 
+    public async Task<QlhvImportGuardedUpsertResult> UpsertWithGuardsAsync(
+        IReadOnlyList<HocVienTargetWriteModel> rows,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureWritesEnabled();
+
+        if (rows.Count == 0)
+        {
+            return QlhvImportGuardedUpsertResult.Empty;
+        }
+
+        ValidateSourceIdentity(rows);
+
+        var connectionString = await ResolveUsableTargetAsync(cancellationToken);
+        return await SyncRetryPolicyFactory.CreateDefault(_options.MaxRetryAttempts).ExecuteAsync(
+            ct => UpsertCoreAsync(
+                connectionString,
+                rows,
+                enforceImportGuards: true,
+                cancellationToken: ct),
+            cancellationToken);
+    }
+
     private async Task<UpsertCounts> UpsertBatchCoreAsync(
         string connectionString,
         IReadOnlyList<HocVienTargetWriteModel> rows,
         CancellationToken cancellationToken)
+        => (await UpsertCoreAsync(
+            connectionString,
+            rows,
+            enforceImportGuards: false,
+            cancellationToken)).Counts;
+
+    private async Task<QlhvImportGuardedUpsertResult> UpsertCoreAsync(
+        string connectionString,
+        IReadOnlyList<HocVienTargetWriteModel> rows,
+        bool enforceImportGuards,
+        CancellationToken cancellationToken)
     {
         await using var connection = new SqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
-        await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(
+            enforceImportGuards ? IsolationLevel.Serializable : IsolationLevel.ReadCommitted,
+            cancellationToken);
 
         try
         {
@@ -259,6 +297,24 @@ WHERE SourceProfileCode = @SourceProfileCode
                 await bulkCopy.WriteToServerAsync(table, cancellationToken);
             }
 
+            if (enforceImportGuards)
+            {
+                var guard = await connection.QuerySingleAsync<AtomicImportGuardRow>(new CommandDefinition(
+                    AtomicImportGuardSql,
+                    transaction: transaction,
+                    commandTimeout: _options.TimeoutSeconds,
+                    cancellationToken: cancellationToken));
+                if (guard.TargetMaDkConflictsOtherProfiles > 0 ||
+                    guard.SoftDeletedIdentityConflicts > 0)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return new QlhvImportGuardedUpsertResult(
+                        UpsertCounts.Empty,
+                        guard.TargetMaDkConflictsOtherProfiles,
+                        guard.SoftDeletedIdentityConflicts);
+                }
+            }
+
             var actions = await connection.QueryAsync<string>(new CommandDefinition(
                 HocVienTargetMergeSql.MergeStatement,
                 transaction: transaction,
@@ -277,12 +333,30 @@ WHERE SourceProfileCode = @SourceProfileCode
             var inserted = actionList.Count(a => string.Equals(a, "INSERT", StringComparison.OrdinalIgnoreCase));
             var updated = actionList.Count(a => string.Equals(a, "UPDATE", StringComparison.OrdinalIgnoreCase));
             var skipped = Math.Max(0, rows.Count - inserted - updated);
-            return new UpsertCounts(inserted, updated, skipped);
+            return new QlhvImportGuardedUpsertResult(
+                new UpsertCounts(inserted, updated, skipped),
+                0,
+                0);
         }
         catch
         {
             await transaction.RollbackAsync(cancellationToken);
             throw;
+        }
+    }
+
+    private void EnsureWritesEnabled()
+    {
+        if (_options.DryRun)
+        {
+            throw new InvalidOperationException(
+                "Ghi vao QLHV_APP bi chan: Sync:DryRun = true.");
+        }
+
+        if (!_execution.EnableTargetWrites)
+        {
+            throw new InvalidOperationException(
+                "Ghi vao QLHV_APP bi chan: SyncExecution.EnableTargetWrites = false.");
         }
     }
 
@@ -401,6 +475,25 @@ SELECT
     CAST(CASE WHEN OBJECT_ID(N'dbo.App_DongBoLog', N'U') IS NULL THEN 0 ELSE 1 END AS bit) AS AppDongBoLogExists,
     CAST(CASE WHEN COL_LENGTH(N'dbo.App_HocVien', N'IsDeleted') IS NULL THEN 0 ELSE 1 END AS bit) AS IsDeletedColumnExists;";
 
+    private const string AtomicImportGuardSql = @"
+SELECT
+    (
+        SELECT COUNT(DISTINCT staging.MaDK)
+        FROM #Sync_HocVien_Staging AS staging
+        INNER JOIN dbo.App_HocVien AS target WITH (UPDLOCK, HOLDLOCK)
+            ON target.MaDK = staging.MaDK
+        WHERE target.SourceProfileCode IS NULL
+           OR target.SourceProfileCode <> staging.SourceProfileCode
+    ) AS TargetMaDkConflictsOtherProfiles,
+    (
+        SELECT COUNT(DISTINCT staging.SourceMaDK)
+        FROM #Sync_HocVien_Staging AS staging
+        INNER JOIN dbo.App_HocVien AS target WITH (UPDLOCK, HOLDLOCK)
+            ON target.SourceProfileCode = staging.SourceProfileCode
+           AND target.SourceMaDK = staging.SourceMaDK
+        WHERE target.IsDeleted = 1
+    ) AS SoftDeletedIdentityConflicts;";
+
     private const string RequiredColumnsSql = @"
 SELECT
     requiredColumns.ColumnName,
@@ -448,5 +541,11 @@ ORDER BY requiredColumns.SortOrder;";
         public string SourceProfileCode { get; init; } = string.Empty;
         public string SourceMaDK { get; init; } = string.Empty;
         public string? V2RowHash { get; init; }
+    }
+
+    private sealed class AtomicImportGuardRow
+    {
+        public int TargetMaDkConflictsOtherProfiles { get; init; }
+        public int SoftDeletedIdentityConflicts { get; init; }
     }
 }
