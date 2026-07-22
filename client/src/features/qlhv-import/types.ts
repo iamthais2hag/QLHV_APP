@@ -19,6 +19,7 @@ export interface QlhvImportExecuteRequest extends QlhvImportRequest {
 
 export interface QlhvImportDiagnostics {
   isReadOnly: boolean;
+  sourceDatabaseName: string;
   sourceProfileCode: string;
   maCSDT: string;
   maKhoaHoc: string | null;
@@ -32,21 +33,39 @@ export interface QlhvImportDiagnostics {
   softDeletedIdentityConflicts: number;
   sourceProfileConstraintExists: boolean;
   sourceProfileAllowedByConstraint: boolean;
+  plannedInsertHocVienRows: number;
+  plannedUpdateHocVienRows: number;
+  plannedReactivateHocVienRows: number;
+  plannedSoftDeleteHocVienRows: number;
+  plannedSkipHocVienRows: number;
+  plannedUpsertHocVienRows: number;
+  executable: boolean;
   blockers: string[];
   warnings: string[];
 }
 
 export interface QlhvImportPlan {
   isReadOnly: boolean;
+  sourceDatabaseName: string;
   sourceProfileCode: string;
   maCSDT: string;
   maKhoaHoc: string | null;
   sourceHocVienRows: number;
+  sourceDistinctMaDkRows: number;
+  duplicateSourceMaDkRows: number;
   sourceKhoaHocRows: number;
   currentAppHocVienRows: number;
   currentAppKhoaHocRows: number;
+  targetRowsForSourceProfile: number;
+  targetExactIdentityMatches: number;
+  targetMaDkConflictsOtherProfiles: number;
+  softDeletedIdentityConflicts: number;
+  sourceProfileConstraintExists: boolean;
+  sourceProfileAllowedByConstraint: boolean;
   plannedInsertHocVienRows: number;
   plannedUpdateHocVienRows: number;
+  plannedReactivateHocVienRows: number;
+  plannedSoftDeleteHocVienRows: number;
   plannedSkipHocVienRows: number;
   plannedUpsertHocVienRows: number;
   plannedUpsertKhoaHocRows: number;
@@ -62,6 +81,8 @@ export interface QlhvImportExecuteResult {
   plan: QlhvImportPlan;
   insertedHocVienRows: number;
   updatedHocVienRows: number;
+  reactivatedHocVienRows: number;
+  softDeletedHocVienRows: number;
   skippedHocVienRows: number;
 }
 

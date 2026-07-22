@@ -2012,7 +2012,7 @@
 
 .qlhv-import-source-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 12px;
 }
 
@@ -2092,6 +2092,11 @@
   background: #f0fbf4;
 }
 
+.qlhv-import-metric.is-warning {
+  border-color: #f4c27a;
+  background: #fff8ed;
+}
+
 .qlhv-import-metric.is-blocked {
   border-color: #f1b8b2;
   background: #fff4f2;
@@ -2122,6 +2127,16 @@
   border: 1px solid #f4c27a;
   background: #fff8ed;
   color: #7c4a03;
+}
+
+.qlhv-import-full-sync-warning {
+  padding: 11px 12px;
+  border: 1px solid #f4c27a;
+  border-radius: 8px;
+  background: #fff8ed;
+  color: #7c4a03;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .qlhv-import-empty {

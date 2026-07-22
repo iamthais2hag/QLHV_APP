@@ -12,11 +12,11 @@ public sealed class QlhvImportService : IQlhvImportService
     public const string AppKhoaHocNotSupportedWarning =
         "App_KhoaHoc import chua duoc ho tro trong task nay.";
 
-    private static readonly IReadOnlyDictionary<string, string> SupportedProfiles =
-        new Dictionary<string, string>(StringComparer.Ordinal)
+    private static readonly IReadOnlyDictionary<string, ImportSourceDefinition> SupportedProfiles =
+        new Dictionary<string, ImportSourceDefinition>(StringComparer.Ordinal)
         {
-            [CsdtConnectionProfileCodes.CsdtMoto] = "66030",
-            [CsdtConnectionProfileCodes.CsdtOto] = "66029",
+            [CsdtConnectionProfileCodes.CsdtMoto] = new("66030", "CSDL_MOTO_BAK"),
+            [CsdtConnectionProfileCodes.CsdtOto] = new("66029", "CSDL_OTO_BAK"),
         };
 
     private readonly IQlhvImportReadRepository _readRepository;
@@ -48,34 +48,31 @@ public sealed class QlhvImportService : IQlhvImportService
         QlhvImportRequest request,
         CancellationToken cancellationToken = default)
     {
-        var context = await BuildPlanContextAsync(Normalize(request), cancellationToken);
-        var normalizedMaDks = context.SourceRows
-            .Where(row => !string.IsNullOrWhiteSpace(row.MaDK))
-            .Select(row => row.MaDK.Trim())
-            .ToArray();
-        var distinctMaDks = normalizedMaDks
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Count();
-        var duplicateMaDks = CountDuplicateSourceMaDks(normalizedMaDks);
-        var target = context.Target;
-
+        var plan = (await BuildPlanContextAsync(Normalize(request), cancellationToken)).Plan;
         return new QlhvImportDiagnosticsDto
         {
-            SourceProfileCode = context.Plan.SourceProfileCode,
-            MaCSDT = context.Plan.MaCSDT,
-            MaKhoaHoc = context.Plan.MaKhoaHoc,
-            SourceHocVienRows = context.Plan.SourceHocVienRows,
-            SourceDistinctMaDkRows = distinctMaDks,
-            DuplicateSourceMaDkRows = duplicateMaDks,
-            CurrentAppHocVienRows = context.Plan.CurrentAppHocVienRows,
-            TargetRowsForSourceProfile = target?.TargetRowsForSourceProfile ?? 0,
-            TargetExactIdentityMatches = target?.TargetExactIdentityMatches ?? 0,
-            TargetMaDkConflictsOtherProfiles = target?.TargetMaDkConflictsOtherProfiles ?? 0,
-            SoftDeletedIdentityConflicts = target?.SoftDeletedIdentityConflicts ?? 0,
-            SourceProfileConstraintExists = target?.SourceProfileConstraintExists ?? false,
-            SourceProfileAllowedByConstraint = target?.SourceProfileAllowedByConstraint ?? false,
-            Blockers = context.Plan.Blockers,
-            Warnings = context.Plan.Warnings,
+            SourceProfileCode = plan.SourceProfileCode,
+            SourceDatabaseName = plan.SourceDatabaseName,
+            MaCSDT = plan.MaCSDT,
+            MaKhoaHoc = plan.MaKhoaHoc,
+            SourceHocVienRows = plan.SourceHocVienRows,
+            SourceDistinctMaDkRows = plan.SourceDistinctMaDkRows,
+            DuplicateSourceMaDkRows = plan.DuplicateSourceMaDkRows,
+            CurrentAppHocVienRows = plan.CurrentAppHocVienRows,
+            TargetRowsForSourceProfile = plan.TargetRowsForSourceProfile,
+            TargetExactIdentityMatches = plan.TargetExactIdentityMatches,
+            TargetMaDkConflictsOtherProfiles = plan.TargetMaDkConflictsOtherProfiles,
+            SoftDeletedIdentityConflicts = plan.SoftDeletedIdentityConflicts,
+            SourceProfileConstraintExists = plan.SourceProfileConstraintExists,
+            SourceProfileAllowedByConstraint = plan.SourceProfileAllowedByConstraint,
+            PlannedInsertHocVienRows = plan.PlannedInsertHocVienRows,
+            PlannedUpdateHocVienRows = plan.PlannedUpdateHocVienRows,
+            PlannedReactivateHocVienRows = plan.PlannedReactivateHocVienRows,
+            PlannedSoftDeleteHocVienRows = plan.PlannedSoftDeleteHocVienRows,
+            PlannedSkipHocVienRows = plan.PlannedSkipHocVienRows,
+            PlannedUpsertHocVienRows = plan.PlannedUpsertHocVienRows,
+            Blockers = plan.Blockers,
+            Warnings = plan.Warnings,
         };
     }
 
@@ -116,51 +113,50 @@ public sealed class QlhvImportService : IQlhvImportService
 
         try
         {
-            var sourceIdentity = CreateSourceIdentity(normalized.SourceProfileCode);
-            var models = context.SourceRows
-                .Select(row => HocVienSyncMapper.MapAndValidate(row, sourceIdentity))
-                .Where(result => !result.ShouldSkip && result.Model is not null)
-                .Select(result => result.Model!)
-                .ToArray();
-
-            // One repository call keeps the complete import inside the target repository's
-            // single SqlBulkCopy + MERGE transaction. This prevents partially committed imports.
-            var guardedWrite = models.Length == 0
-                ? QlhvImportGuardedUpsertResult.Empty
-                : await _writeRepository.UpsertWithGuardsAsync(models, cancellationToken);
-            if (guardedWrite.HasConflicts)
+            var write = await _writeRepository.FullSyncAsync(
+                context.Plan.SourceProfileCode,
+                context.SourceModels,
+                cancellationToken);
+            if (write.HasConflicts)
             {
                 var blockedPlan = context.Plan;
-                if (guardedWrite.TargetMaDkConflictsOtherProfiles > 0)
+                if (write.InvalidSourceProfileRows > 0)
                 {
                     blockedPlan = AddBlocker(
                         blockedPlan,
-                        $"Target co {guardedWrite.TargetMaDkConflictsOtherProfiles} MaDK trung voi profile khac tai thoi diem ghi.");
+                        $"Transaction guard phat hien {write.InvalidSourceProfileRows} dong staging sai SourceProfileCode.");
                 }
 
-                if (guardedWrite.SoftDeletedIdentityConflicts > 0)
+                if (write.InvalidTargetIdentityRows > 0)
                 {
                     blockedPlan = AddBlocker(
                         blockedPlan,
-                        $"Target co {guardedWrite.SoftDeletedIdentityConflicts} identity da xoa mem tai thoi diem ghi.");
+                        $"Transaction guard phat hien {write.InvalidTargetIdentityRows} dong target thieu SourceMaDK.");
+                }
+
+                if (write.DuplicateTargetIdentityRows > 0)
+                {
+                    blockedPlan = AddBlocker(
+                        blockedPlan,
+                        $"Transaction guard phat hien {write.DuplicateTargetIdentityRows} identity target bi trung.");
                 }
 
                 return Blocked(
                     blockedPlan,
-                    "Import bi chan boi kiem tra conflict trong giao dich ghi.");
+                    "Full sync bi chan boi kiem tra an toan trong transaction.");
             }
-
-            var counts = guardedWrite.Counts;
 
             return new QlhvImportExecuteResultDto
             {
                 Executed = true,
                 Status = "ThanhCong",
-                Message = "Import hoc vien vao QLHV_APP hoan tat.",
+                Message = "Full sync hoc vien tu CSDT BAK vao QLHV_APP hoan tat.",
                 Plan = context.Plan,
-                InsertedHocVienRows = counts.Inserted,
-                UpdatedHocVienRows = counts.Updated,
-                SkippedHocVienRows = counts.Skipped,
+                InsertedHocVienRows = write.Inserted,
+                UpdatedHocVienRows = write.Updated,
+                ReactivatedHocVienRows = write.Reactivated,
+                SoftDeletedHocVienRows = write.SoftDeleted,
+                SkippedHocVienRows = write.Skipped,
             };
         }
         catch (OperationCanceledException)
@@ -171,7 +167,7 @@ public sealed class QlhvImportService : IQlhvImportService
         {
             return Blocked(
                 AddBlocker(context.Plan, $"Import that bai. Chi tiet: {ex.GetType().Name}."),
-                "Import hoc vien vao QLHV_APP that bai.");
+                "Full sync hoc vien vao QLHV_APP that bai.");
         }
     }
 
@@ -182,13 +178,14 @@ public sealed class QlhvImportService : IQlhvImportService
         var blockers = Validate(request).ToList();
         if (blockers.Count > 0)
         {
-            return new PlanContext(CreateBasePlan(request, blockers), Array.Empty<V2HocVienSourceRow>(), null);
+            return new PlanContext(
+                CreateBasePlan(request, blockers),
+                Array.Empty<QlhvImportHocVienWriteModel>());
         }
 
-        QlhvHocVienTargetDiagnosticsDto targetDiagnostics;
         try
         {
-            targetDiagnostics = await _targetRepository.GetDiagnosticsAsync(cancellationToken);
+            var targetDiagnostics = await _targetRepository.GetDiagnosticsAsync(cancellationToken);
             if (!targetDiagnostics.AppHocVienExists)
             {
                 blockers.Add("Target QLHV_APP thieu bang dbo.App_HocVien.");
@@ -212,12 +209,13 @@ public sealed class QlhvImportService : IQlhvImportService
         catch (Exception ex)
         {
             blockers.Add($"Khong doc duoc schema QLHV_APP. Chi tiet: {ex.GetType().Name}.");
-            return new PlanContext(CreateBasePlan(request, blockers), Array.Empty<V2HocVienSourceRow>(), null);
         }
 
         if (blockers.Count > 0)
         {
-            return new PlanContext(CreateBasePlan(request, blockers), Array.Empty<V2HocVienSourceRow>(), null);
+            return new PlanContext(
+                CreateBasePlan(request, blockers),
+                Array.Empty<QlhvImportHocVienWriteModel>());
         }
 
         QlhvImportSourceSnapshot source;
@@ -232,12 +230,23 @@ public sealed class QlhvImportService : IQlhvImportService
         catch (QlhvImportReadException ex)
         {
             blockers.Add(ex.Message);
-            return new PlanContext(CreateBasePlan(request, blockers), Array.Empty<V2HocVienSourceRow>(), null);
+            return new PlanContext(
+                CreateBasePlan(request, blockers),
+                Array.Empty<QlhvImportHocVienWriteModel>());
         }
         catch (Exception ex)
         {
             blockers.Add($"Khong doc duoc nguon {request.SourceProfileCode}. Chi tiet: {ex.GetType().Name}.");
-            return new PlanContext(CreateBasePlan(request, blockers), Array.Empty<V2HocVienSourceRow>(), null);
+            return new PlanContext(
+                CreateBasePlan(request, blockers),
+                Array.Empty<QlhvImportHocVienWriteModel>());
+        }
+
+        var definition = SupportedProfiles[request.SourceProfileCode];
+        if (!string.Equals(source.SourceDatabaseName, definition.ExpectedDatabaseName, StringComparison.Ordinal))
+        {
+            blockers.Add(
+                $"Source database la {source.SourceDatabaseName}; bat buoc phai la {definition.ExpectedDatabaseName}.");
         }
 
         var normalizedSourceMaDks = source.HocVienRows
@@ -250,15 +259,48 @@ public sealed class QlhvImportService : IQlhvImportService
         var duplicateSourceMaDks = CountDuplicateSourceMaDks(normalizedSourceMaDks);
         if (duplicateSourceMaDks > 0)
         {
-            blockers.Add($"Nguon co {duplicateSourceMaDks} MaDK bi trung trong pham vi import.");
+            blockers.Add($"Nguon co {duplicateSourceMaDks} MaDK bi trung trong pham vi full sync.");
         }
 
-        var sourceMaDks = distinctSourceMaDks;
+        if (source.HocVienRows.Count == 0)
+        {
+            blockers.Add(
+                "Nguon co 0 hoc vien; full sync bi chan de khong soft-delete toan bo partition.");
+        }
+
+        var blankSourceKeys = source.HocVienRows.Count - normalizedSourceMaDks.Length;
+        if (blankSourceKeys > 0)
+        {
+            blockers.Add($"Nguon co {blankSourceKeys} dong thieu MaDK/SourceMaDK.");
+        }
+
+        var sourceIdentity = new HocVienSourceIdentityContext(request.SourceProfileCode, "V2");
+        var sourceModels = new List<QlhvImportHocVienWriteModel>(source.HocVienRows.Count);
+        var warnings = new List<string> { AppKhoaHocNotSupportedWarning };
+        foreach (var sourceRow in source.HocVienRows)
+        {
+            var mapped = QlhvImportHocVienMapper.MapAndValidate(sourceRow, sourceIdentity);
+            warnings.AddRange(mapped.Warnings.Select(warning =>
+                $"{warning.MaDK}: {warning.Message}"));
+            blockers.AddRange(mapped.Blockers);
+            if (!mapped.ShouldSkip && mapped.Model is not null)
+            {
+                sourceModels.Add(mapped.Model);
+            }
+        }
+
+        if (source.HocVienRows.Count > 0 && sourceModels.Count == 0)
+        {
+            blockers.Add("Khong co dong hoc vien nao map duoc an toan de full sync.");
+        }
 
         QlhvImportTargetSnapshot target;
         try
         {
-            target = await _readRepository.ReadTargetAsync(request, sourceMaDks, cancellationToken);
+            target = await _readRepository.ReadTargetAsync(
+                request,
+                distinctSourceMaDks,
+                cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -267,14 +309,26 @@ public sealed class QlhvImportService : IQlhvImportService
         catch (QlhvImportReadException ex)
         {
             blockers.Add(ex.Message);
-            var failedPlan = CreateBasePlan(request, blockers, source.HocVienRows.Count, source.KhoaHocRows);
-            return new PlanContext(failedPlan, source.HocVienRows, null);
+            return new PlanContext(
+                CreateBasePlan(
+                    request,
+                    blockers,
+                    source,
+                    distinctSourceMaDks.Length,
+                    duplicateSourceMaDks),
+                sourceModels);
         }
         catch (Exception ex)
         {
             blockers.Add($"Khong doc duoc du lieu hien tai trong QLHV_APP. Chi tiet: {ex.GetType().Name}.");
-            var failedPlan = CreateBasePlan(request, blockers, source.HocVienRows.Count, source.KhoaHocRows);
-            return new PlanContext(failedPlan, source.HocVienRows, null);
+            return new PlanContext(
+                CreateBasePlan(
+                    request,
+                    blockers,
+                    source,
+                    distinctSourceMaDks.Length,
+                    duplicateSourceMaDks),
+                sourceModels);
         }
 
         if (target.SourceProfileConstraintExists && !target.SourceProfileAllowedByConstraint)
@@ -283,52 +337,83 @@ public sealed class QlhvImportService : IQlhvImportService
                 $"CHECK constraint cua App_HocVien.SourceProfileCode hien khong cho phep {request.SourceProfileCode}.");
         }
 
+        if (target.DuplicateTargetIdentityRows > 0)
+        {
+            blockers.Add(
+                $"Target co {target.DuplicateTargetIdentityRows} identity SourceProfileCode + SourceMaDK bi trung.");
+        }
+
+        var invalidTargetIdentities = target.HocVienRows.Count(row =>
+            string.IsNullOrWhiteSpace(row.SourceMaDK));
+        if (invalidTargetIdentities > 0)
+        {
+            blockers.Add(
+                $"Target partition co {invalidTargetIdentities} dong thieu SourceMaDK.");
+        }
+
         if (target.TargetMaDkConflictsOtherProfiles > 0)
         {
-            blockers.Add(
-                $"Target co {target.TargetMaDkConflictsOtherProfiles} MaDK trung voi profile khac.");
+            warnings.Add(
+                $"Co {target.TargetMaDkConflictsOtherProfiles} MaDK cung xuat hien o profile khac; " +
+                "full sync van tach biet bang SourceProfileCode + SourceMaDK.");
         }
 
-        if (target.SoftDeletedIdentityConflicts > 0)
+        QlhvFullSyncPlan? fullSyncPlan = null;
+        if (sourceModels.Count > 0 &&
+            duplicateSourceMaDks == 0 &&
+            target.DuplicateTargetIdentityRows == 0 &&
+            invalidTargetIdentities == 0)
         {
-            blockers.Add(
-                $"Target co {target.SoftDeletedIdentityConflicts} identity da xoa mem trong pham vi import; task nay khong tu khoi phuc dong da xoa.");
+            try
+            {
+                fullSyncPlan = QlhvFullSyncPlanner.BuildPlan(sourceModels, target.HocVienRows);
+            }
+            catch (InvalidOperationException ex)
+            {
+                blockers.Add(ex.Message);
+            }
         }
 
-        var sourceIdentity = CreateSourceIdentity(request.SourceProfileCode);
-        var hocVienPlan = HocVienSyncPlanner.BuildPlan(
-            source.HocVienRows,
-            target.ExistingHocVienHashes,
-            sourceIdentity);
-        var warnings = new List<string> { AppKhoaHocNotSupportedWarning };
-        warnings.AddRange(hocVienPlan.Warnings
-            .Select(warning => $"{warning.MaDK}: {warning.Message}")
+        warnings = warnings
+            .Where(value => !string.IsNullOrWhiteSpace(value))
             .Distinct(StringComparer.Ordinal)
-            .Take(50));
-        if (source.HocVienRows.Count == 0)
-        {
-            warnings.Add("Khong co hoc vien nguon khop bo loc; plan van hop le va khong ghi du lieu.");
-        }
+            .Take(100)
+            .ToList();
+        blockers = blockers
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
 
         var plan = new QlhvImportPlanDto
         {
             SourceProfileCode = request.SourceProfileCode,
+            SourceDatabaseName = source.SourceDatabaseName,
             MaCSDT = request.MaCSDT,
             MaKhoaHoc = request.MaKhoaHoc,
             SourceHocVienRows = source.HocVienRows.Count,
+            SourceDistinctMaDkRows = distinctSourceMaDks.Length,
+            DuplicateSourceMaDkRows = duplicateSourceMaDks,
             SourceKhoaHocRows = source.KhoaHocRows,
             CurrentAppHocVienRows = target.CurrentAppHocVienRows,
             CurrentAppKhoaHocRows = target.AppKhoaHocRows,
-            PlannedInsertHocVienRows = hocVienPlan.PlannedInsert,
-            PlannedUpdateHocVienRows = hocVienPlan.PlannedUpdate,
-            PlannedSkipHocVienRows = hocVienPlan.PlannedSkip,
-            PlannedUpsertHocVienRows = hocVienPlan.PlannedInsert + hocVienPlan.PlannedUpdate,
+            TargetRowsForSourceProfile = target.TargetRowsForSourceProfile,
+            TargetExactIdentityMatches = target.TargetExactIdentityMatches,
+            TargetMaDkConflictsOtherProfiles = target.TargetMaDkConflictsOtherProfiles,
+            SoftDeletedIdentityConflicts = target.SoftDeletedIdentityConflicts,
+            SourceProfileConstraintExists = target.SourceProfileConstraintExists,
+            SourceProfileAllowedByConstraint = target.SourceProfileAllowedByConstraint,
+            PlannedInsertHocVienRows = fullSyncPlan?.PlannedInsertHocVienRows ?? 0,
+            PlannedUpdateHocVienRows = fullSyncPlan?.PlannedUpdateHocVienRows ?? 0,
+            PlannedReactivateHocVienRows = fullSyncPlan?.PlannedReactivateHocVienRows ?? 0,
+            PlannedSoftDeleteHocVienRows = fullSyncPlan?.PlannedSoftDeleteHocVienRows ?? 0,
+            PlannedSkipHocVienRows = fullSyncPlan?.PlannedSkipHocVienRows ?? 0,
+            PlannedUpsertHocVienRows = fullSyncPlan?.PlannedUpsertHocVienRows ?? 0,
             PlannedUpsertKhoaHocRows = 0,
             Blockers = blockers,
             Warnings = warnings,
         };
 
-        return new PlanContext(plan, source.HocVienRows, target);
+        return new PlanContext(plan, sourceModels);
     }
 
     private static QlhvImportRequest Normalize(QlhvImportRequest? request)
@@ -349,7 +434,7 @@ public sealed class QlhvImportService : IQlhvImportService
     private static IReadOnlyList<string> Validate(QlhvImportRequest request)
     {
         var blockers = new List<string>();
-        if (!SupportedProfiles.TryGetValue(request.SourceProfileCode, out var expectedMaCsdt))
+        if (!SupportedProfiles.TryGetValue(request.SourceProfileCode, out var definition))
         {
             blockers.Add("SourceProfileCode chi ho tro CSDT_MOTO hoac CSDT_OTO.");
         }
@@ -358,30 +443,39 @@ public sealed class QlhvImportService : IQlhvImportService
         {
             blockers.Add("MaCSDT la bat buoc.");
         }
-        else if (expectedMaCsdt is not null &&
-                 !string.Equals(request.MaCSDT, expectedMaCsdt, StringComparison.Ordinal))
+        else if (definition is not null &&
+                 !string.Equals(request.MaCSDT, definition.MaCsdt, StringComparison.Ordinal))
         {
-            blockers.Add($"MaCSDT khong khop profile {request.SourceProfileCode}; gia tri mong doi la {expectedMaCsdt}.");
+            blockers.Add(
+                $"MaCSDT khong khop profile {request.SourceProfileCode}; " +
+                $"gia tri mong doi la {definition.MaCsdt}.");
+        }
+
+        if (request.MaKhoaHoc is not null)
+        {
+            blockers.Add(
+                "Full snapshot chi ho tro toan bo maCSDT; maKhoaHoc phai de trong de tranh soft-delete ngoai pham vi.");
         }
 
         return blockers;
     }
 
-    private static HocVienSourceIdentityContext CreateSourceIdentity(string sourceProfileCode)
-        => new(sourceProfileCode, "V2");
-
     private static QlhvImportPlanDto CreateBasePlan(
         QlhvImportRequest request,
         IReadOnlyList<string> blockers,
-        int sourceHocVienRows = 0,
-        int sourceKhoaHocRows = 0)
+        QlhvImportSourceSnapshot? source = null,
+        int sourceDistinctMaDkRows = 0,
+        int duplicateSourceMaDkRows = 0)
         => new()
         {
             SourceProfileCode = request.SourceProfileCode,
+            SourceDatabaseName = source?.SourceDatabaseName ?? string.Empty,
             MaCSDT = request.MaCSDT,
             MaKhoaHoc = request.MaKhoaHoc,
-            SourceHocVienRows = sourceHocVienRows,
-            SourceKhoaHocRows = sourceKhoaHocRows,
+            SourceHocVienRows = source?.HocVienRows.Count ?? 0,
+            SourceDistinctMaDkRows = sourceDistinctMaDkRows,
+            DuplicateSourceMaDkRows = duplicateSourceMaDkRows,
+            SourceKhoaHocRows = source?.KhoaHocRows ?? 0,
             PlannedUpsertKhoaHocRows = 0,
             Blockers = blockers,
             Warnings = new[] { AppKhoaHocNotSupportedWarning },
@@ -391,18 +485,29 @@ public sealed class QlhvImportService : IQlhvImportService
         => new()
         {
             SourceProfileCode = plan.SourceProfileCode,
+            SourceDatabaseName = plan.SourceDatabaseName,
             MaCSDT = plan.MaCSDT,
             MaKhoaHoc = plan.MaKhoaHoc,
             SourceHocVienRows = plan.SourceHocVienRows,
+            SourceDistinctMaDkRows = plan.SourceDistinctMaDkRows,
+            DuplicateSourceMaDkRows = plan.DuplicateSourceMaDkRows,
             SourceKhoaHocRows = plan.SourceKhoaHocRows,
             CurrentAppHocVienRows = plan.CurrentAppHocVienRows,
             CurrentAppKhoaHocRows = plan.CurrentAppKhoaHocRows,
+            TargetRowsForSourceProfile = plan.TargetRowsForSourceProfile,
+            TargetExactIdentityMatches = plan.TargetExactIdentityMatches,
+            TargetMaDkConflictsOtherProfiles = plan.TargetMaDkConflictsOtherProfiles,
+            SoftDeletedIdentityConflicts = plan.SoftDeletedIdentityConflicts,
+            SourceProfileConstraintExists = plan.SourceProfileConstraintExists,
+            SourceProfileAllowedByConstraint = plan.SourceProfileAllowedByConstraint,
             PlannedInsertHocVienRows = plan.PlannedInsertHocVienRows,
             PlannedUpdateHocVienRows = plan.PlannedUpdateHocVienRows,
+            PlannedReactivateHocVienRows = plan.PlannedReactivateHocVienRows,
+            PlannedSoftDeleteHocVienRows = plan.PlannedSoftDeleteHocVienRows,
             PlannedSkipHocVienRows = plan.PlannedSkipHocVienRows,
             PlannedUpsertHocVienRows = plan.PlannedUpsertHocVienRows,
             PlannedUpsertKhoaHocRows = plan.PlannedUpsertKhoaHocRows,
-            Blockers = plan.Blockers.Concat(new[] { blocker }).ToArray(),
+            Blockers = plan.Blockers.Concat(new[] { blocker }).Distinct(StringComparer.Ordinal).ToArray(),
             Warnings = plan.Warnings,
         };
 
@@ -415,8 +520,9 @@ public sealed class QlhvImportService : IQlhvImportService
             Plan = plan,
         };
 
+    private sealed record ImportSourceDefinition(string MaCsdt, string ExpectedDatabaseName);
+
     private sealed record PlanContext(
         QlhvImportPlanDto Plan,
-        IReadOnlyList<V2HocVienSourceRow> SourceRows,
-        QlhvImportTargetSnapshot? Target);
+        IReadOnlyList<QlhvImportHocVienWriteModel> SourceModels);
 }

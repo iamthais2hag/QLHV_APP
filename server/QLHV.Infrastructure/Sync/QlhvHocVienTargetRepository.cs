@@ -2,6 +2,7 @@ using System.Data;
 using Dapper;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
+using QLHV.Application.CsdtConnections;
 using QLHV.Application.Sync;
 using QLHV.Application.Sync.Configuration;
 using QLHV.Application.Sync.Connections;
@@ -251,6 +252,144 @@ WHERE SourceProfileCode = @SourceProfileCode
             cancellationToken);
     }
 
+    public async Task<QlhvImportFullSyncWriteResult> FullSyncAsync(
+        string sourceProfileCode,
+        IReadOnlyList<QlhvImportHocVienWriteModel> rows,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureWritesEnabled();
+
+        var normalizedProfile = NormalizeRequired(sourceProfileCode, nameof(sourceProfileCode))
+            .ToUpperInvariant();
+        if (!string.Equals(normalizedProfile, CsdtConnectionProfileCodes.CsdtOto, StringComparison.Ordinal) &&
+            !string.Equals(normalizedProfile, CsdtConnectionProfileCodes.CsdtMoto, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "Full sync chi duoc ghi vao partition CSDT_OTO hoac CSDT_MOTO.");
+        }
+
+        if (rows.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "Nguon hoc vien rong; repository tu choi full sync de bao ve partition.");
+        }
+
+        ValidateFullSyncSourceIdentity(normalizedProfile, rows);
+        var connectionString = await ResolveUsableTargetAsync(cancellationToken);
+        return await SyncRetryPolicyFactory.CreateDefault(_options.MaxRetryAttempts).ExecuteAsync(
+            ct => FullSyncCoreAsync(connectionString, normalizedProfile, rows, ct),
+            cancellationToken);
+    }
+
+    private async Task<QlhvImportFullSyncWriteResult> FullSyncCoreAsync(
+        string connectionString,
+        string sourceProfileCode,
+        IReadOnlyList<QlhvImportHocVienWriteModel> rows,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(
+            IsolationLevel.Serializable,
+            cancellationToken);
+
+        try
+        {
+            await connection.ExecuteAsync(new CommandDefinition(
+                QlhvFullSnapshotSyncSql.CreateStagingTable,
+                transaction: transaction,
+                commandTimeout: _options.TimeoutSeconds,
+                cancellationToken: cancellationToken));
+
+            using (var bulkCopy = new SqlBulkCopy(connection, SqlBulkCopyOptions.CheckConstraints, transaction)
+            {
+                DestinationTableName = QlhvFullSnapshotSyncSql.StagingTableName,
+                BatchSize = Math.Max(1, _options.BatchSize),
+                BulkCopyTimeout = _options.TimeoutSeconds,
+            })
+            {
+                using var table = BuildFullSyncStagingTable(rows);
+                foreach (DataColumn column in table.Columns)
+                {
+                    bulkCopy.ColumnMappings.Add(column.ColumnName, column.ColumnName);
+                }
+
+                await bulkCopy.WriteToServerAsync(table, cancellationToken);
+            }
+
+            var guard = await connection.QuerySingleAsync<FullSyncAtomicGuardRow>(new CommandDefinition(
+                QlhvFullSnapshotSyncSql.AtomicGuard,
+                new { SourceProfileCode = sourceProfileCode },
+                transaction: transaction,
+                commandTimeout: _options.TimeoutSeconds,
+                cancellationToken: cancellationToken));
+            if (guard.StagedRows != rows.Count ||
+                guard.InvalidSourceProfileRows > 0 ||
+                guard.InvalidTargetIdentityRows > 0 ||
+                guard.DuplicateTargetIdentityRows > 0)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return new QlhvImportFullSyncWriteResult(
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    guard.InvalidSourceProfileRows + (guard.StagedRows == rows.Count ? 0 : 1),
+                    guard.InvalidTargetIdentityRows,
+                    guard.DuplicateTargetIdentityRows);
+            }
+
+            var mergeActions = (await connection.QueryAsync<string>(new CommandDefinition(
+                QlhvFullSnapshotSyncSql.Merge,
+                transaction: transaction,
+                commandTimeout: _options.TimeoutSeconds,
+                cancellationToken: cancellationToken))).ToList();
+            var softDeleteActions = (await connection.QueryAsync<string>(new CommandDefinition(
+                QlhvFullSnapshotSyncSql.SoftDeleteMissing,
+                new { SourceProfileCode = sourceProfileCode },
+                transaction: transaction,
+                commandTimeout: _options.TimeoutSeconds,
+                cancellationToken: cancellationToken))).ToList();
+
+            await connection.ExecuteAsync(new CommandDefinition(
+                QlhvFullSnapshotSyncSql.DropStagingTable,
+                transaction: transaction,
+                commandTimeout: _options.TimeoutSeconds,
+                cancellationToken: cancellationToken));
+            await transaction.CommitAsync(cancellationToken);
+
+            var inserted = mergeActions.Count(action =>
+                string.Equals(action, "INSERT", StringComparison.OrdinalIgnoreCase));
+            var reactivated = mergeActions.Count(action =>
+                string.Equals(action, "REACTIVATE", StringComparison.OrdinalIgnoreCase));
+            var updated = mergeActions.Count(action =>
+                string.Equals(action, "UPDATE", StringComparison.OrdinalIgnoreCase));
+            var softDeleted = softDeleteActions.Count(action =>
+                string.Equals(action, "SOFT_DELETE", StringComparison.OrdinalIgnoreCase));
+            var skipped = Math.Max(0, rows.Count - inserted - updated - reactivated);
+
+            return new QlhvImportFullSyncWriteResult(
+                inserted,
+                updated,
+                reactivated,
+                softDeleted,
+                skipped,
+                0,
+                0,
+                0);
+        }
+        catch
+        {
+            if (transaction.Connection is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+
+            throw;
+        }
+    }
+
     private async Task<UpsertCounts> UpsertBatchCoreAsync(
         string connectionString,
         IReadOnlyList<HocVienTargetWriteModel> rows,
@@ -419,6 +558,94 @@ WHERE SourceProfileCode = @SourceProfileCode
         return table;
     }
 
+    private static DataTable BuildFullSyncStagingTable(
+        IReadOnlyList<QlhvImportHocVienWriteModel> rows)
+    {
+        var table = new DataTable();
+        table.Columns.Add("SourceProfileCode", typeof(string));
+        table.Columns.Add("SourceMaDK", typeof(string));
+        table.Columns.Add("SourceSystem", typeof(string));
+        table.Columns.Add("SourceVersion", typeof(string));
+        table.Columns.Add("MaDK", typeof(string));
+        table.Columns.Add("MaKhoa", typeof(string));
+        table.Columns.Add("TenKhoa", typeof(string));
+        table.Columns.Add("MaHangDT", typeof(string));
+        table.Columns.Add("HangGPLXHoc", typeof(string));
+        table.Columns.Add("HoTen", typeof(string));
+        table.Columns.Add("NgaySinh", typeof(DateTime));
+        table.Columns.Add("GioiTinh", typeof(string));
+        table.Columns.Add("SoCCCD", typeof(string));
+        table.Columns.Add("DiaChiThuongTru", typeof(string));
+        table.Columns.Add("SoGPLXDaCo", typeof(string));
+        table.Columns.Add("HangGPLXDaCo", typeof(string));
+        table.Columns.Add("NguoiNhanHoSo", typeof(string));
+        table.Columns.Add("AnhRelativePath", typeof(string));
+        table.Columns.Add("ChatLuongAnh", typeof(int));
+        table.Columns.Add("NgayThuNhanAnh", typeof(DateTime));
+        table.Columns.Add("NguoiThuNhanAnh", typeof(string));
+        table.Columns.Add("SourceOfTruth", typeof(string));
+        table.Columns.Add("V2RowHash", typeof(string));
+
+        foreach (var row in rows)
+        {
+            table.Rows.Add(
+                row.SourceProfileCode,
+                row.SourceMaDK,
+                row.SourceSystem,
+                Db(row.SourceVersion),
+                row.MaDK,
+                Db(row.MaKhoa),
+                Db(row.TenKhoa),
+                Db(row.MaHangDT),
+                Db(row.HangGPLXHoc),
+                Db(row.HoTen),
+                Db(row.NgaySinh),
+                Db(row.GioiTinh),
+                Db(row.SoCCCD),
+                Db(row.DiaChiThuongTru),
+                Db(row.SoGPLXDaCo),
+                Db(row.HangGPLXDaCo),
+                Db(row.NguoiNhanHoSo),
+                Db(row.AnhRelativePath),
+                Db(row.ChatLuongAnh),
+                Db(row.NgayThuNhanAnh),
+                Db(row.NguoiThuNhanAnh),
+                row.SourceOfTruth,
+                row.V2RowHash);
+        }
+
+        return table;
+    }
+
+    private static void ValidateFullSyncSourceIdentity(
+        string sourceProfileCode,
+        IReadOnlyList<QlhvImportHocVienWriteModel> rows)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in rows)
+        {
+            var rowProfile = NormalizeRequired(row.SourceProfileCode, nameof(row.SourceProfileCode))
+                .ToUpperInvariant();
+            if (!string.Equals(rowProfile, sourceProfileCode, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "Snapshot staging chua SourceProfileCode ngoai partition duoc yeu cau.");
+            }
+
+            var sourceMaDk = NormalizeRequired(row.SourceMaDK, nameof(row.SourceMaDK));
+            if (!seen.Add(sourceMaDk))
+            {
+                throw new InvalidOperationException(
+                    $"Snapshot staging co SourceMaDK trung: {sourceMaDk}.");
+            }
+
+            _ = NormalizeRequired(row.SourceSystem, nameof(row.SourceSystem));
+            _ = NormalizeRequired(row.MaDK, nameof(row.MaDK));
+            _ = NormalizeRequired(row.SourceOfTruth, nameof(row.SourceOfTruth));
+            _ = NormalizeRequired(row.V2RowHash, nameof(row.V2RowHash));
+        }
+    }
+
     private static void ValidateSourceIdentity(IReadOnlyList<HocVienTargetWriteModel> rows)
     {
         foreach (var row in rows)
@@ -443,6 +670,7 @@ WHERE SourceProfileCode = @SourceProfileCode
 
     private static object Db(string? value) => value is null ? DBNull.Value : value;
     private static object Db(DateTime? value) => value.HasValue ? value.Value : DBNull.Value;
+    private static object Db(int? value) => value.HasValue ? value.Value : DBNull.Value;
     private static string NormalizeRequired(string? value, string name)
         => string.IsNullOrWhiteSpace(value)
             ? throw new InvalidOperationException($"Thieu thong tin dinh danh nguon bat buoc: {name}.")
@@ -547,5 +775,13 @@ ORDER BY requiredColumns.SortOrder;";
     {
         public int TargetMaDkConflictsOtherProfiles { get; init; }
         public int SoftDeletedIdentityConflicts { get; init; }
+    }
+
+    private sealed class FullSyncAtomicGuardRow
+    {
+        public int StagedRows { get; init; }
+        public int InvalidSourceProfileRows { get; init; }
+        public int InvalidTargetIdentityRows { get; init; }
+        public int DuplicateTargetIdentityRows { get; init; }
     }
 }

@@ -3,7 +3,9 @@ namespace QLHV.Application.CsdtConnections;
 public static class CsdtConnectionProfileCodes
 {
     public const string CsdtMoto = "CSDT_MOTO";
+    public const string CsdtMotoBak = "CSDT_MOTO_BAK";
     public const string CsdtOto = "CSDT_OTO";
+    public const string CsdtOtoBak = "CSDT_OTO_BAK";
     public const string CsdtMotoGplx = "CSDT_MOTO_GPLX";
     public const string CsdtOtoGplx = "CSDT_OTO_GPLX";
     public const string DataV1 = "DATA_V1";

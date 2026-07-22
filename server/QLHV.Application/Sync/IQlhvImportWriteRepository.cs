@@ -11,6 +11,27 @@ public interface IQlhvImportWriteRepository
     Task<QlhvImportGuardedUpsertResult> UpsertWithGuardsAsync(
         IReadOnlyList<HocVienTargetWriteModel> rows,
         CancellationToken cancellationToken = default);
+
+    Task<QlhvImportFullSyncWriteResult> FullSyncAsync(
+        string sourceProfileCode,
+        IReadOnlyList<QlhvImportHocVienWriteModel> rows,
+        CancellationToken cancellationToken = default);
+}
+
+public sealed record QlhvImportFullSyncWriteResult(
+    int Inserted,
+    int Updated,
+    int Reactivated,
+    int SoftDeleted,
+    int Skipped,
+    int InvalidSourceProfileRows,
+    int InvalidTargetIdentityRows,
+    int DuplicateTargetIdentityRows)
+{
+    public bool HasConflicts =>
+        InvalidSourceProfileRows > 0 ||
+        InvalidTargetIdentityRows > 0 ||
+        DuplicateTargetIdentityRows > 0;
 }
 
 public sealed record QlhvImportGuardedUpsertResult(
