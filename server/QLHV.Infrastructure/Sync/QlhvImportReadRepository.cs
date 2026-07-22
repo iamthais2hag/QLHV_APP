@@ -72,6 +72,8 @@ public sealed class QlhvImportReadRepository : IQlhvImportReadRepository
                     string.Join(", ", missingImageColumns) + ".");
             }
 
+            var snapshotBefore = await ReadSnapshotMetadataAsync(connection, ct);
+            var tokenBefore = ResolveSnapshotToken(sourceDatabaseName, snapshotBefore);
             var query = QlhvImportSqlBuilder.BuildSourceRead(request, schema.KhoaHocHasMaCsdt);
             using var grid = await connection.QueryMultipleAsync(new CommandDefinition(
                 query.Sql,
@@ -80,14 +82,53 @@ public sealed class QlhvImportReadRepository : IQlhvImportReadRepository
                 cancellationToken: ct));
             var hocVienRows = (await grid.ReadAsync<V2HocVienSourceRow>()).ToList();
             var khoaHocRows = await grid.ReadSingleAsync<int>();
+            grid.Dispose();
+            var snapshotAfter = await ReadSnapshotMetadataAsync(connection, ct);
+            var snapshotToken = ResolveSnapshotToken(sourceDatabaseName, snapshotAfter);
+            if (!string.Equals(tokenBefore, snapshotToken, StringComparison.Ordinal))
+            {
+                throw new QlhvImportReadException(
+                    "Snapshot BAK thay doi trong luc doc plan; hay lap plan lai sau khi refresh ket thuc.");
+            }
 
             return new QlhvImportSourceSnapshot
             {
                 SourceDatabaseName = sourceDatabaseName,
+                BackupSnapshotToken = snapshotToken,
+                GeneratedAtUtc = DateTime.UtcNow,
                 HocVienRows = hocVienRows,
                 KhoaHocRows = khoaHocRows,
             };
         }, cancellationToken);
+    }
+
+    private async Task<BackupSnapshotMetadataRow> ReadSnapshotMetadataAsync(
+        SqlConnection connection,
+        CancellationToken cancellationToken)
+        => await connection.QuerySingleAsync<BackupSnapshotMetadataRow>(new CommandDefinition(
+            BackupSnapshotMetadataSql,
+            new { SnapshotPropertyName = QlhvBackupSnapshotToken.ExtendedPropertyName },
+            commandTimeout: _options.TimeoutSeconds,
+            cancellationToken: cancellationToken));
+
+    private static string ResolveSnapshotToken(
+        string databaseName,
+        BackupSnapshotMetadataRow metadata)
+    {
+        if (!string.IsNullOrWhiteSpace(metadata.SnapshotToken))
+        {
+            return metadata.SnapshotToken.Trim();
+        }
+
+        return QlhvBackupSnapshotToken.CreateMetadataFallback(
+            databaseName,
+            DateTime.SpecifyKind(metadata.CreateDate, DateTimeKind.Utc),
+            new QlhvOperationRowCountsDto
+            {
+                NguoiLX = metadata.NguoiLXRows,
+                NguoiLXHoSo = metadata.NguoiLXHoSoRows,
+                KhoaHoc = metadata.KhoaHocRows,
+            });
     }
 
     public async Task<QlhvImportTargetSnapshot> ReadTargetAsync(
@@ -374,6 +415,23 @@ SELECT
     CAST(CASE WHEN COL_LENGTH(N'dbo.NguoiLX_HoSo', N'NgayThuNhanAnh') IS NULL THEN 0 ELSE 1 END AS bit) AS HasNgayThuNhanAnh,
     CAST(CASE WHEN COL_LENGTH(N'dbo.NguoiLX_HoSo', N'NguoiThuNhanAnh') IS NULL THEN 0 ELSE 1 END AS bit) AS HasNguoiThuNhanAnh;";
 
+    private const string BackupSnapshotMetadataSql = @"
+SELECT
+    databaseRow.create_date AS CreateDate,
+    CAST(snapshotProperty.value AS nvarchar(512)) AS SnapshotToken,
+    (SELECT COUNT(1) FROM dbo.NguoiLX) AS NguoiLXRows,
+    (SELECT COUNT(1) FROM dbo.NguoiLX_HoSo) AS NguoiLXHoSoRows,
+    (SELECT COUNT(1) FROM dbo.KhoaHoc) AS KhoaHocRows
+FROM sys.databases AS databaseRow
+OUTER APPLY
+(
+    SELECT TOP (1) extendedProperty.value
+    FROM sys.extended_properties AS extendedProperty
+    WHERE extendedProperty.class = 0
+      AND extendedProperty.name = @SnapshotPropertyName
+) AS snapshotProperty
+WHERE databaseRow.name = DB_NAME();";
+
     private const string TargetImportSchemaSql = @"
 SELECT
     CAST(CASE WHEN OBJECT_ID(N'dbo.App_KhoaHoc', N'U') IS NULL THEN 0 ELSE 1 END AS bit) AS AppKhoaHocExists,
@@ -521,6 +579,15 @@ WHERE MaDK IN @SourceMaDks
         public bool AppKhoaHocExists { get; init; }
         public bool AppKhoaHocHasMaKhoa { get; init; }
         public bool AppKhoaHocHasIsDeleted { get; init; }
+    }
+
+    private sealed class BackupSnapshotMetadataRow
+    {
+        public DateTime CreateDate { get; init; }
+        public string? SnapshotToken { get; init; }
+        public int NguoiLXRows { get; init; }
+        public int NguoiLXHoSoRows { get; init; }
+        public int KhoaHocRows { get; init; }
     }
 
     private sealed class ExistingHashRow

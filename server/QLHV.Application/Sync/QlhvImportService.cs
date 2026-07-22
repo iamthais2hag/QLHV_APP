@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using System.Text.Json;
 using QLHV.Application.CsdtConnections;
 using QLHV.Application.Sync.Configuration;
 using QLHV.Application.Sync.Dtos;
@@ -24,31 +25,37 @@ public sealed class QlhvImportService : IQlhvImportService
     private readonly IQlhvImportWriteRepository _writeRepository;
     private readonly SyncOptions _syncOptions;
     private readonly SyncExecutionOptions _executionOptions;
+    private readonly IQlhvSourceOperationLock _operationLock;
+    private readonly IQlhvOperationHistoryRepository _operationHistory;
 
     public QlhvImportService(
         IQlhvImportReadRepository readRepository,
         IQlhvHocVienTargetRepository targetRepository,
         IQlhvImportWriteRepository writeRepository,
         IOptions<SyncOptions> syncOptions,
-        IOptions<SyncExecutionOptions> executionOptions)
+        IOptions<SyncExecutionOptions> executionOptions,
+        IQlhvSourceOperationLock operationLock,
+        IQlhvOperationHistoryRepository operationHistory)
     {
         _readRepository = readRepository;
         _targetRepository = targetRepository;
         _writeRepository = writeRepository;
         _syncOptions = syncOptions.Value;
         _executionOptions = executionOptions.Value;
+        _operationLock = operationLock;
+        _operationHistory = operationHistory;
     }
 
     public async Task<QlhvImportPlanDto> GetPlanAsync(
         QlhvImportRequest request,
         CancellationToken cancellationToken = default)
-        => (await BuildPlanContextAsync(Normalize(request), cancellationToken)).Plan;
+        => (await BuildPlanContextWithReadLeaseAsync(Normalize(request), cancellationToken)).Plan;
 
     public async Task<QlhvImportDiagnosticsDto> GetDiagnosticsAsync(
         QlhvImportRequest request,
         CancellationToken cancellationToken = default)
     {
-        var plan = (await BuildPlanContextAsync(Normalize(request), cancellationToken)).Plan;
+        var plan = (await BuildPlanContextWithReadLeaseAsync(Normalize(request), cancellationToken)).Plan;
         return new QlhvImportDiagnosticsDto
         {
             SourceProfileCode = plan.SourceProfileCode,
@@ -76,6 +83,59 @@ public sealed class QlhvImportService : IQlhvImportService
         };
     }
 
+    private async Task<PlanContext> BuildPlanContextWithReadLeaseAsync(
+        QlhvImportRequest request,
+        CancellationToken cancellationToken)
+    {
+        var validation = Validate(request);
+        if (validation.Count > 0)
+        {
+            return new PlanContext(
+                CreateBasePlan(request, validation),
+                Array.Empty<QlhvImportHocVienWriteModel>());
+        }
+
+        var sourceType = TryResolveSourceType(request.SourceProfileCode);
+        if (!QlhvOperationSourceCatalog.TryGet(sourceType, out var operationSource))
+        {
+            return new PlanContext(
+                AddBlocker(CreateBasePlan(request, validation), "Nguon import khong nam trong allowlist van hanh."),
+                Array.Empty<QlhvImportHocVienWriteModel>());
+        }
+
+        IAsyncDisposable? lease;
+        try
+        {
+            lease = await _operationLock.TryAcquireAsync(operationSource, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return new PlanContext(
+                AddBlocker(
+                    CreateBasePlan(request, validation),
+                    $"Khong kiem tra duoc operation lock. Chi tiet: {ex.GetType().Name}."),
+                Array.Empty<QlhvImportHocVienWriteModel>());
+        }
+
+        if (lease is null)
+        {
+            return new PlanContext(
+                AddBlocker(
+                    CreateBasePlan(request, validation),
+                    $"Nguon {operationSource.SourceType} dang refresh BAK hoac full sync; hay lap plan lai sau."),
+                Array.Empty<QlhvImportHocVienWriteModel>());
+        }
+
+        await using (lease)
+        {
+            return await BuildPlanContextAsync(request, cancellationToken);
+        }
+    }
+
     public async Task<QlhvImportExecuteResultDto> ExecuteAsync(
         QlhvImportExecuteRequest request,
         CancellationToken cancellationToken = default)
@@ -91,28 +151,114 @@ public sealed class QlhvImportService : IQlhvImportService
             return Blocked(blockedPlan, "Import bi chan vi chuoi xac nhan khong khop.");
         }
 
-        var context = await BuildPlanContextAsync(normalized, cancellationToken);
-        if (!context.Plan.Executable)
+        if (!QlhvOperationSourceCatalog.TryGet(
+                TryResolveSourceType(normalized.SourceProfileCode),
+                out var operationSource))
         {
-            return Blocked(context.Plan, "Import bi chan vi plan co blocker.");
+            return Blocked(
+                CreateBasePlan(normalized, Validate(normalized)),
+                "Import bi chan vi nguon khong hop le.");
         }
 
+        // Safety configuration gates are evaluated before any operation-history write.
         if (_syncOptions.DryRun)
         {
             return Blocked(
-                AddBlocker(context.Plan, "Ghi vao QLHV_APP bi chan: Sync:DryRun = true."),
+                AddBlocker(
+                    CreateBasePlan(normalized, Validate(normalized)),
+                    "Ghi vao QLHV_APP bi chan: Sync:DryRun = true."),
                 "Import bi chan boi cau hinh an toan.");
         }
 
         if (!_executionOptions.EnableTargetWrites)
         {
             return Blocked(
-                AddBlocker(context.Plan, "Ghi vao QLHV_APP bi chan: SyncExecution.EnableTargetWrites = false."),
+                AddBlocker(
+                    CreateBasePlan(normalized, Validate(normalized)),
+                    "Ghi vao QLHV_APP bi chan: SyncExecution.EnableTargetWrites = false."),
                 "Import bi chan boi cau hinh an toan.");
         }
 
+        var operationId = Guid.NewGuid();
+        var historyCreated = false;
+        IAsyncDisposable? operationLease = null;
         try
         {
+            operationLease = await _operationLock.TryAcquireAsync(operationSource, cancellationToken);
+            if (operationLease is null)
+            {
+                var conflictPlan = AddBlocker(
+                    CreateBasePlan(normalized, Validate(normalized)),
+                    $"Nguon {operationSource.SourceType} dang bi khoa boi refresh hoac full sync khac.");
+                return Blocked(conflictPlan, "Full sync bi chan do thao tac cung nguon dang chay.");
+            }
+
+            bool reserved;
+            try
+            {
+                var startedAt = DateTime.UtcNow;
+                reserved = await _operationHistory.TryCreateAsync(
+                    new QlhvOperationHistoryCreate(
+                        operationId,
+                        operationSource,
+                        QlhvOperationTypes.FullSync,
+                        QlhvOperationTypes.Running,
+                        startedAt,
+                        startedAt),
+                    cancellationToken);
+            }
+            catch (QlhvOperationsStoreUnavailableException ex)
+            {
+                return Blocked(
+                    AddBlocker(CreateBasePlan(normalized, Validate(normalized)), ex.Message),
+                    "Full sync bi chan vi lich su van hanh chua san sang.");
+            }
+
+            if (!reserved)
+            {
+                return Blocked(
+                    AddBlocker(
+                        CreateBasePlan(normalized, Validate(normalized)),
+                        $"Nguon {operationSource.SourceType} dang co refresh hoac full sync chua ket thuc."),
+                    "Full sync bi chan do thao tac cung nguon dang chay.");
+            }
+
+            historyCreated = true;
+
+            // The plan and snapshot token are rebuilt only after the cross-process lock is held.
+            var context = await BuildPlanContextAsync(normalized, cancellationToken);
+            if (string.IsNullOrWhiteSpace(request.ExpectedSnapshotToken))
+            {
+                context = context with
+                {
+                    Plan = AddBlocker(
+                        context.Plan,
+                        "ExpectedSnapshotToken la bat buoc; hay lap plan lai truoc khi full sync."),
+                };
+            }
+            else if (!string.Equals(
+                         request.ExpectedSnapshotToken.Trim(),
+                         context.Plan.BackupSnapshotToken,
+                         StringComparison.Ordinal))
+            {
+                context = context with
+                {
+                    Plan = AddBlocker(
+                        context.Plan,
+                        "Plan da cu: snapshot BAK hien tai khong khop expectedSnapshotToken; hay lap plan lai."),
+                };
+            }
+
+            if (!context.Plan.Executable)
+            {
+                await CompleteFailedHistoryAsync(
+                    operationId,
+                    context.Plan,
+                    "Plan co blocker.",
+                    CancellationToken.None);
+                return WithOperation(Blocked(context.Plan, "Import bi chan vi plan co blocker."), operationId);
+            }
+
             var write = await _writeRepository.FullSyncAsync(
                 context.Plan.SourceProfileCode,
                 context.SourceModels,
@@ -141,16 +287,29 @@ public sealed class QlhvImportService : IQlhvImportService
                         $"Transaction guard phat hien {write.DuplicateTargetIdentityRows} identity target bi trung.");
                 }
 
-                return Blocked(
+                await CompleteFailedHistoryAsync(
+                    operationId,
                     blockedPlan,
-                    "Full sync bi chan boi kiem tra an toan trong transaction.");
+                    "Transaction guard phat hien conflict.",
+                    CancellationToken.None);
+                return WithOperation(
+                    Blocked(blockedPlan, "Full sync bi chan boi kiem tra an toan trong transaction."),
+                    operationId);
             }
 
+            var historyWarning = await TryCompleteSucceededHistoryAsync(
+                operationId,
+                context.Plan,
+                write,
+                cancellationToken);
             return new QlhvImportExecuteResultDto
             {
+                OperationId = operationId,
                 Executed = true,
                 Status = "ThanhCong",
-                Message = "Full sync hoc vien tu CSDT BAK vao QLHV_APP hoan tat.",
+                Message = historyWarning is null
+                    ? "Full sync hoc vien tu CSDT BAK vao QLHV_APP hoan tat."
+                    : "Full sync da commit vao QLHV_APP, nhung cap nhat lich su that bai; khong duoc retry tu dong.",
                 Plan = context.Plan,
                 InsertedHocVienRows = write.Inserted,
                 UpdatedHocVienRows = write.Updated,
@@ -161,13 +320,40 @@ public sealed class QlhvImportService : IQlhvImportService
         }
         catch (OperationCanceledException)
         {
+            if (historyCreated)
+            {
+                await CompleteFailedHistoryAsync(
+                    operationId,
+                    CreateBasePlan(normalized, Validate(normalized)),
+                    "Operation bi huy.",
+                    CancellationToken.None);
+            }
+
             throw;
         }
         catch (Exception ex)
         {
-            return Blocked(
-                AddBlocker(context.Plan, $"Import that bai. Chi tiet: {ex.GetType().Name}."),
-                "Full sync hoc vien vao QLHV_APP that bai.");
+            var failedPlan = AddBlocker(
+                CreateBasePlan(normalized, Validate(normalized)),
+                $"Import that bai. Chi tiet: {ex.GetType().Name}.");
+            if (historyCreated)
+            {
+                await CompleteFailedHistoryAsync(
+                    operationId,
+                    failedPlan,
+                    $"Import failed: {ex.GetType().Name}.",
+                    CancellationToken.None);
+            }
+
+            var blocked = Blocked(failedPlan, "Full sync hoc vien vao QLHV_APP that bai.");
+            return historyCreated ? WithOperation(blocked, operationId) : blocked;
+        }
+        finally
+        {
+            if (operationLease is not null)
+            {
+                await operationLease.DisposeAsync();
+            }
         }
     }
 
@@ -388,6 +574,8 @@ public sealed class QlhvImportService : IQlhvImportService
         {
             SourceProfileCode = request.SourceProfileCode,
             SourceDatabaseName = source.SourceDatabaseName,
+            BackupSnapshotToken = source.BackupSnapshotToken,
+            GeneratedAtUtc = source.GeneratedAtUtc == default ? DateTime.UtcNow : source.GeneratedAtUtc,
             MaCSDT = request.MaCSDT,
             MaKhoaHoc = request.MaKhoaHoc,
             SourceHocVienRows = source.HocVienRows.Count,
@@ -470,6 +658,10 @@ public sealed class QlhvImportService : IQlhvImportService
         {
             SourceProfileCode = request.SourceProfileCode,
             SourceDatabaseName = source?.SourceDatabaseName ?? string.Empty,
+            BackupSnapshotToken = source?.BackupSnapshotToken ?? string.Empty,
+            GeneratedAtUtc = source is null || source.GeneratedAtUtc == default
+                ? DateTime.UtcNow
+                : source.GeneratedAtUtc,
             MaCSDT = request.MaCSDT,
             MaKhoaHoc = request.MaKhoaHoc,
             SourceHocVienRows = source?.HocVienRows.Count ?? 0,
@@ -486,6 +678,8 @@ public sealed class QlhvImportService : IQlhvImportService
         {
             SourceProfileCode = plan.SourceProfileCode,
             SourceDatabaseName = plan.SourceDatabaseName,
+            BackupSnapshotToken = plan.BackupSnapshotToken,
+            GeneratedAtUtc = plan.GeneratedAtUtc,
             MaCSDT = plan.MaCSDT,
             MaKhoaHoc = plan.MaKhoaHoc,
             SourceHocVienRows = plan.SourceHocVienRows,
@@ -519,6 +713,136 @@ public sealed class QlhvImportService : IQlhvImportService
             Message = message,
             Plan = plan,
         };
+
+    private async Task<string?> TryCompleteSucceededHistoryAsync(
+        Guid operationId,
+        QlhvImportPlanDto plan,
+        QlhvImportFullSyncWriteResult write,
+        CancellationToken cancellationToken)
+    {
+        var completion = new QlhvOperationHistoryCompletion(
+            operationId,
+            QlhvOperationTypes.Succeeded,
+            DateTime.UtcNow,
+            plan.SourceHocVienRows,
+            write.Inserted,
+            write.Updated,
+            write.Reactivated,
+            write.SoftDeleted,
+            write.Skipped,
+            plan.BackupSnapshotToken,
+            null,
+            JsonSerializer.Serialize(new
+            {
+                plan.SourceDatabaseName,
+                plan.GeneratedAtUtc,
+                plan.Warnings,
+                ImageFilesCopied = false,
+            }),
+            BackupRows: plan.SourceHocVienRows,
+            TargetActiveRows: Math.Max(
+                0,
+                plan.CurrentAppHocVienRows + write.Inserted + write.Reactivated - write.SoftDeleted));
+        Exception? lastError = null;
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            try
+            {
+                await _operationHistory.CompleteAsync(completion, CancellationToken.None);
+                return null;
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+            }
+        }
+
+        // A SQL timeout can be reported after the UPDATE committed. Read history back before
+        // warning the caller; the data write itself must never be reported as rolled back.
+        try
+        {
+            var sourceType = QlhvOperationSourceCatalog.ResolveSourceTypeFromProfile(plan.SourceProfileCode);
+            var persisted = (await _operationHistory.SearchAsync(
+                    sourceType,
+                    50,
+                    CancellationToken.None))
+                .FirstOrDefault(row => row.OperationId == operationId);
+            if (persisted is { Status: QlhvOperationTypes.Succeeded })
+            {
+                return null;
+            }
+        }
+        catch
+        {
+            // Preserve the safe history warning below.
+        }
+
+        return lastError?.GetType().Name ?? "UnknownHistoryError";
+    }
+
+    private async Task CompleteFailedHistoryAsync(
+        Guid operationId,
+        QlhvImportPlanDto plan,
+        string safeError,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _operationHistory.CompleteAsync(
+                new QlhvOperationHistoryCompletion(
+                    operationId,
+                    QlhvOperationTypes.Failed,
+                    DateTime.UtcNow,
+                    plan.SourceHocVienRows,
+                    0, 0, 0, 0, 0,
+                    string.IsNullOrWhiteSpace(plan.BackupSnapshotToken) ? null : plan.BackupSnapshotToken,
+                    safeError.Length <= 2000 ? safeError : safeError[..2000],
+                    JsonSerializer.Serialize(new
+                    {
+                        plan.SourceDatabaseName,
+                        plan.GeneratedAtUtc,
+                        plan.Blockers,
+                        plan.Warnings,
+                        ImageFilesCopied = false,
+                    }),
+                    BackupRows: plan.SourceHocVienRows,
+                    TargetActiveRows: plan.CurrentAppHocVienRows),
+                cancellationToken);
+        }
+        catch
+        {
+            // The original cancellation/failure remains the primary result.
+        }
+    }
+
+    private static QlhvImportExecuteResultDto WithOperation(
+        QlhvImportExecuteResultDto result,
+        Guid operationId)
+        => new()
+        {
+            OperationId = operationId,
+            Executed = result.Executed,
+            Status = result.Status,
+            Message = result.Message,
+            Plan = result.Plan,
+            InsertedHocVienRows = result.InsertedHocVienRows,
+            UpdatedHocVienRows = result.UpdatedHocVienRows,
+            ReactivatedHocVienRows = result.ReactivatedHocVienRows,
+            SoftDeletedHocVienRows = result.SoftDeletedHocVienRows,
+            SkippedHocVienRows = result.SkippedHocVienRows,
+        };
+
+    private static string TryResolveSourceType(string sourceProfileCode)
+    {
+        try
+        {
+            return QlhvOperationSourceCatalog.ResolveSourceTypeFromProfile(sourceProfileCode);
+        }
+        catch (ArgumentException)
+        {
+            return string.Empty;
+        }
+    }
 
     private sealed record ImportSourceDefinition(string MaCsdt, string ExpectedDatabaseName);
 

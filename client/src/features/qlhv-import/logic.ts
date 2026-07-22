@@ -1,46 +1,46 @@
 import type {
   QlhvImportExecuteRequest,
-  QlhvImportFormState,
   QlhvImportPlan,
   QlhvImportRequest,
   QlhvImportSnapshot,
   QlhvImportSourceKind,
+  QlhvOperationsStatus,
+  QlhvRefreshBackupRequest,
 } from './types';
 
 export const QLHV_IMPORT_CONFIRM_TEXT = 'IMPORT QLHV CSĐT';
+export const QLHV_REFRESH_CONFIRM_TEXT = 'REFRESH CSDL BAK';
+
+export const QLHV_IMPORT_SOURCE_KINDS: readonly QlhvImportSourceKind[] = ['OTO', 'MOTO'];
 
 export const QLHV_IMPORT_SOURCES = {
   OTO: {
     label: 'Ô tô',
+    liveDatabaseName: 'CSDL_OTO',
+    backupDatabaseName: 'CSDL_OTO_BAK',
     sourceProfileCode: 'CSDT_OTO',
     maCSDT: '66029',
-    sourceDatabaseName: 'CSDL_OTO_BAK',
   },
   MOTO: {
     label: 'Mô tô',
+    liveDatabaseName: 'CSDL_MOTO',
+    backupDatabaseName: 'CSDL_MOTO_BAK',
     sourceProfileCode: 'CSDT_MOTO',
     maCSDT: '66030',
-    sourceDatabaseName: 'CSDL_MOTO_BAK',
   },
 } as const;
 
-export function createImportRequest(form: QlhvImportFormState): QlhvImportRequest {
-  const source = QLHV_IMPORT_SOURCES[form.sourceKind];
-  const maKhoaHoc = form.maKhoaHocInput.trim();
-
+export function createImportRequest(sourceKind: QlhvImportSourceKind): QlhvImportRequest {
+  const source = QLHV_IMPORT_SOURCES[sourceKind];
   return {
     sourceProfileCode: source.sourceProfileCode,
     maCSDT: source.maCSDT,
-    maKhoaHoc: maKhoaHoc || null,
+    maKhoaHoc: null,
   };
 }
 
 export function createRequestKey(request: QlhvImportRequest): string {
-  return JSON.stringify([
-    request.sourceProfileCode,
-    request.maCSDT,
-    request.maKhoaHoc ?? '',
-  ]);
+  return JSON.stringify([request.sourceProfileCode, request.maCSDT]);
 }
 
 export function requestsEqual(left: QlhvImportRequest, right: QlhvImportRequest): boolean {
@@ -50,7 +50,7 @@ export function requestsEqual(left: QlhvImportRequest, right: QlhvImportRequest)
 export function planMatchesRequest(plan: QlhvImportPlan, request: QlhvImportRequest): boolean {
   return plan.sourceProfileCode === request.sourceProfileCode
     && plan.maCSDT === request.maCSDT
-    && (plan.maKhoaHoc ?? '') === (request.maKhoaHoc ?? '')
+    && plan.maKhoaHoc === null
     && sourceDatabaseMatchesRequest(plan.sourceDatabaseName, request);
 }
 
@@ -62,79 +62,150 @@ export function sourceDatabaseMatchesRequest(
   return expectedDatabaseName !== null && sourceDatabaseName === expectedDatabaseName;
 }
 
+export function statusMatchesSource(
+  status: QlhvOperationsStatus,
+  sourceKind: QlhvImportSourceKind,
+): boolean {
+  const source = QLHV_IMPORT_SOURCES[sourceKind];
+  return status.sourceType === sourceKind
+    && status.liveDatabaseName === source.liveDatabaseName
+    && status.backupDatabaseName === source.backupDatabaseName
+    && status.sourceProfileCode === source.sourceProfileCode
+    && status.maCSDT === source.maCSDT;
+}
+
+export function isOperationBusy(status: QlhvOperationsStatus | null | undefined): boolean {
+  return status?.state === 'refreshing' || status?.state === 'syncing' || !!status?.activeOperationId;
+}
+
+export function isPlanSnapshotCurrent(
+  plan: QlhvImportPlan,
+  status: QlhvOperationsStatus | null | undefined,
+): boolean {
+  return !!status
+    && !!plan.backupSnapshotToken
+    && !!status.backupSnapshotToken
+    && plan.backupSnapshotToken === status.backupSnapshotToken;
+}
+
 export function canOpenExecute(
   plan: QlhvImportSnapshot<QlhvImportPlan> | null,
   currentRequest: QlhvImportRequest,
+  status: QlhvOperationsStatus | null | undefined,
   busy: boolean,
 ): boolean {
   return !!plan
+    && !!status
     && requestsEqual(plan.request, currentRequest)
     && planMatchesRequest(plan.data, currentRequest)
+    && statusMatchesRequest(status, currentRequest)
+    && isPlanSnapshotCurrent(plan.data, status)
     && plan.data.executable
     && plan.data.blockers.length === 0
     && plan.data.sourceHocVienRows > 0
+    && status.canSync
+    && !isOperationBusy(status)
     && !busy;
 }
 
 export function buildExecuteRequest(
   plan: QlhvImportSnapshot<QlhvImportPlan> | null,
   currentRequest: QlhvImportRequest,
+  status: QlhvOperationsStatus | null | undefined,
   confirmText: string,
   busy: boolean,
 ): QlhvImportExecuteRequest | null {
-  if (!plan || !canOpenExecute(plan, currentRequest, busy) || confirmText !== QLHV_IMPORT_CONFIRM_TEXT) {
+  if (!plan
+    || !canOpenExecute(plan, currentRequest, status, busy)
+    || confirmText !== QLHV_IMPORT_CONFIRM_TEXT) {
     return null;
   }
 
   return {
     ...plan.request,
     confirmText,
+    expectedSnapshotToken: plan.data.backupSnapshotToken,
   };
+}
+
+export function buildRefreshRequest(
+  sourceKind: QlhvImportSourceKind,
+  confirmText: string,
+): QlhvRefreshBackupRequest | null {
+  if (confirmText !== QLHV_REFRESH_CONFIRM_TEXT) {
+    return null;
+  }
+  return { sourceType: sourceKind, confirmText };
 }
 
 export function getExecuteDisabledReason(
   plan: QlhvImportSnapshot<QlhvImportPlan> | null,
   currentRequest: QlhvImportRequest,
+  status: QlhvOperationsStatus | null | undefined,
   busy: boolean,
 ): string | null {
+  if (!status) {
+    return 'Chưa đọc được trạng thái nguồn hiện tại.';
+  }
+  if (!statusMatchesRequest(status, currentRequest)) {
+    return 'Mapping trạng thái backend không khớp nguồn cố định; thao tác đã bị khóa.';
+  }
+  if (isOperationBusy(status)) {
+    return 'Nguồn này đang refresh hoặc đồng bộ. Vui lòng chờ thao tác hiện tại hoàn tất.';
+  }
+  if (!status.canSync) {
+    return 'Backend hiện không cho phép đồng bộ nguồn này.';
+  }
   if (!plan) {
-    return 'Cần lập kế hoạch cho lựa chọn hiện tại trước khi thực hiện.';
+    return 'Cần lập kế hoạch mới trước khi đồng bộ.';
   }
-
-  if (!requestsEqual(plan.request, currentRequest)) {
-    return 'Biểu mẫu đã thay đổi. Vui lòng lập lại kế hoạch.';
+  if (!requestsEqual(plan.request, currentRequest) || !planMatchesRequest(plan.data, currentRequest)) {
+    return 'Kế hoạch không khớp nguồn hiện tại. Vui lòng lập lại kế hoạch.';
   }
-
-  if (!sourceDatabaseMatchesRequest(plan.data.sourceDatabaseName, currentRequest)) {
-    const expectedDatabaseName = getExpectedSourceDatabaseName(currentRequest.sourceProfileCode);
-    return `Database nguồn không khớp. Kế hoạch phải đọc từ ${expectedDatabaseName ?? 'database BAK đã cấu hình'}.`;
+  if (!isPlanSnapshotCurrent(plan.data, status)) {
+    return 'Snapshot BAK đã thay đổi hoặc chưa có token. Kế hoạch cũ đã hết hiệu lực.';
   }
-
-  if (!planMatchesRequest(plan.data, currentRequest)) {
-    return 'Kế hoạch backend trả về không khớp biểu mẫu hiện tại.';
-  }
-
   if (plan.data.sourceHocVienRows <= 0) {
-    return 'Snapshot nguồn không có học viên; không được phép thực hiện hoặc xóa mềm phân vùng.';
+    return 'Snapshot nguồn rỗng; không được phép đồng bộ hoặc xóa mềm phân vùng.';
   }
-
   if (plan.data.blockers.length > 0 || !plan.data.executable) {
-    return 'Kế hoạch đang có điểm chặn và không thể thực hiện.';
+    return 'Kế hoạch có điểm chặn và không thể thực hiện.';
   }
-
   if (busy) {
-    return 'Đang xử lý yêu cầu khác.';
+    return 'Đang xử lý yêu cầu khác cho nguồn này.';
   }
-
   return null;
 }
 
-export function isSourceKind(value: string): value is QlhvImportSourceKind {
-  return value === 'OTO' || value === 'MOTO';
+export function getRefreshDisabledReason(
+  status: QlhvOperationsStatus | null | undefined,
+  sourceKind: QlhvImportSourceKind,
+  busy: boolean,
+): string | null {
+  if (!status) {
+    return 'Chưa đọc được trạng thái nguồn hiện tại.';
+  }
+  if (!statusMatchesSource(status, sourceKind)) {
+    return 'Mapping trạng thái backend không khớp nguồn cố định.';
+  }
+  if (isOperationBusy(status) || busy) {
+    return 'Nguồn này đang có thao tác vận hành.';
+  }
+  if (!status.canRefresh) {
+    return 'Backend hiện không cho phép làm mới BAK.';
+  }
+  return null;
+}
+
+function statusMatchesRequest(status: QlhvOperationsStatus, request: QlhvImportRequest): boolean {
+  const sourceKind = request.sourceProfileCode === 'CSDT_OTO' ? 'OTO' : 'MOTO';
+  return statusMatchesSource(status, sourceKind)
+    && status.sourceProfileCode === request.sourceProfileCode
+    && status.maCSDT === request.maCSDT;
 }
 
 function getExpectedSourceDatabaseName(sourceProfileCode: string): string | null {
   const source = Object.values(QLHV_IMPORT_SOURCES)
     .find((candidate) => candidate.sourceProfileCode === sourceProfileCode);
-  return source?.sourceDatabaseName ?? null;
+  return source?.backupDatabaseName ?? null;
 }

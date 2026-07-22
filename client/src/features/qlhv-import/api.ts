@@ -5,9 +5,91 @@ import type {
   QlhvImportExecuteResult,
   QlhvImportPlan,
   QlhvImportRequest,
+  QlhvImportSourceKind,
+  QlhvOperationHistoryItem,
+  QlhvOperationsRowCounts,
+  QlhvOperationsStatus,
+  QlhvRefreshBackupRequest,
+  QlhvRefreshBackupResult,
 } from './types';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api';
+
+export async function getQlhvOperationsStatus(
+  sourceType: QlhvImportSourceKind,
+  signal?: AbortSignal,
+): Promise<QlhvOperationsStatus> {
+  const query = new URLSearchParams({ sourceType });
+  const response = await fetchSafely(
+    `${API_BASE}/dong-bo-v2/qlhv/operations/status?${query}`,
+    { method: 'GET', headers: { Accept: 'application/json' }, signal },
+  );
+
+  if (!response.ok) {
+    throw new Error(await getSafeErrorMessage(response, 'Không thể đọc trạng thái vận hành CSĐT.'));
+  }
+
+  const payload = await tryReadJson<unknown>(response);
+  if (!isOperationsStatus(payload)) {
+    throw new Error('Backend không trả trạng thái vận hành hợp lệ.');
+  }
+  return payload;
+}
+
+export async function getQlhvOperationsHistory(
+  sourceType: QlhvImportSourceKind,
+  signal?: AbortSignal,
+): Promise<QlhvOperationHistoryItem[]> {
+  const query = new URLSearchParams({ sourceType });
+  const response = await fetchSafely(
+    `${API_BASE}/dong-bo-v2/qlhv/operations/history?${query}`,
+    { method: 'GET', headers: { Accept: 'application/json' }, signal },
+  );
+
+  if (!response.ok) {
+    throw new Error(await getSafeErrorMessage(response, 'Không thể đọc lịch sử vận hành CSĐT.'));
+  }
+
+  const payload = await tryReadJson<unknown>(response);
+  if (!Array.isArray(payload) || !payload.every(isOperationHistoryItem)) {
+    throw new Error('Backend không trả lịch sử vận hành hợp lệ.');
+  }
+  return payload;
+}
+
+export async function refreshQlhvBackup(
+  request: QlhvRefreshBackupRequest,
+  operationsKey: string,
+  signal?: AbortSignal,
+): Promise<QlhvRefreshBackupResult> {
+  const response = await fetchSafely(
+    `${API_BASE}/dong-bo-v2/qlhv/operations/refresh-backup`,
+    {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'X-QLHV-Operations-Key': operationsKey,
+      },
+      body: JSON.stringify(request),
+      signal,
+    },
+  );
+
+  const payload = await tryReadJson<unknown>(response);
+  if (!response.ok) {
+    throw new Error(await getSafeErrorMessage(
+      response,
+      response.status === 409
+        ? 'Nguồn đang có thao tác khác hoặc yêu cầu refresh bị chặn.'
+        : 'Không thể bắt đầu làm mới database BAK.',
+    ));
+  }
+  if (!isRefreshBackupResult(payload)) {
+    throw new Error('Backend không trả kết quả bắt đầu refresh hợp lệ.');
+  }
+  return payload;
+}
 
 export async function getQlhvImportDiagnostics(
   request: QlhvImportRequest,
@@ -15,11 +97,7 @@ export async function getQlhvImportDiagnostics(
 ): Promise<QlhvImportDiagnostics> {
   const response = await fetchSafely(
     `${API_BASE}/dong-bo-v2/qlhv/import-diagnostics?${buildQuery(request)}`,
-    {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-      signal,
-    },
+    { method: 'GET', headers: { Accept: 'application/json' }, signal },
   );
 
   if (!response.ok) {
@@ -39,11 +117,7 @@ export async function getQlhvImportPlan(
 ): Promise<QlhvImportPlan> {
   const response = await fetchSafely(
     `${API_BASE}/dong-bo-v2/qlhv/import-plan?${buildQuery(request)}`,
-    {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-      signal,
-    },
+    { method: 'GET', headers: { Accept: 'application/json' }, signal },
   );
 
   if (!response.ok) {
@@ -59,6 +133,7 @@ export async function getQlhvImportPlan(
 
 export async function executeQlhvImport(
   request: QlhvImportExecuteRequest,
+  operationsKey: string,
   signal?: AbortSignal,
 ): Promise<QlhvImportExecuteOutcome> {
   const response = await fetchSafely(
@@ -68,6 +143,7 @@ export async function executeQlhvImport(
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
+        'X-QLHV-Operations-Key': operationsKey,
       },
       body: JSON.stringify(request),
       signal,
@@ -87,22 +163,19 @@ export async function executeQlhvImport(
     throw new Error(await getSafeErrorMessage(
       response,
       response.status === 409
-        ? 'Yêu cầu nhập dữ liệu đã bị backend chặn.'
-        : 'Không thể thực hiện nhập dữ liệu CSĐT.',
+        ? 'Yêu cầu đồng bộ đã bị backend chặn.'
+        : 'Không thể thực hiện đồng bộ dữ liệu CSĐT.',
     ));
   }
 
-  throw new Error('Backend không trả kết quả nhập dữ liệu hợp lệ.');
+  throw new Error('Backend không trả kết quả đồng bộ hợp lệ.');
 }
 
 function buildQuery(request: QlhvImportRequest): string {
-  const query = new URLSearchParams();
-  query.set('sourceProfileCode', request.sourceProfileCode);
-  query.set('maCSDT', request.maCSDT);
-  if (request.maKhoaHoc) {
-    query.set('maKhoaHoc', request.maKhoaHoc);
-  }
-  return query.toString();
+  return new URLSearchParams({
+    sourceProfileCode: request.sourceProfileCode,
+    maCSDT: request.maCSDT,
+  }).toString();
 }
 
 async function fetchSafely(input: RequestInfo | URL, init: RequestInit): Promise<Response> {
@@ -142,6 +215,64 @@ async function tryReadJson<T>(response: Response): Promise<T | null> {
   }
 }
 
+function isRefreshBackupResult(value: unknown): value is QlhvRefreshBackupResult {
+  return isRecord(value)
+    && typeof value.operationId === 'string'
+    && isSourceKind(value.sourceType)
+    && typeof value.status === 'string'
+    && typeof value.message === 'string';
+}
+
+function isOperationsStatus(value: unknown): value is QlhvOperationsStatus {
+  if (!isRecord(value) || !isSourceKind(value.sourceType)) {
+    return false;
+  }
+
+  return typeof value.liveDatabaseName === 'string'
+    && typeof value.backupDatabaseName === 'string'
+    && typeof value.maCSDT === 'string'
+    && isSourceProfileCode(value.sourceProfileCode)
+    && isOperationState(value.state)
+    && isNullableString(value.activeOperationId)
+    && isNullableString(value.backupLastRefreshTimeUtc)
+    && isNullableString(value.backupSnapshotToken)
+    && isOperationsRowCounts(value.liveRows)
+    && isOperationsRowCounts(value.backupRows)
+    && isFiniteNumber(value.targetActiveRows)
+    && isNullableString(value.lastSyncTimeUtc)
+    && isNullableString(value.lastError)
+    && typeof value.canRefresh === 'boolean'
+    && typeof value.canSync === 'boolean';
+}
+
+function isOperationsRowCounts(value: unknown): value is QlhvOperationsRowCounts {
+  return isRecord(value)
+    && isFiniteNumber(value.nguoiLX)
+    && isFiniteNumber(value.nguoiLXHoSo)
+    && isFiniteNumber(value.khoaHoc);
+}
+
+function isOperationHistoryItem(value: unknown): value is QlhvOperationHistoryItem {
+  return isRecord(value)
+    && typeof value.operationId === 'string'
+    && isSourceKind(value.sourceType)
+    && (value.operationType === 'REFRESH_BACKUP' || value.operationType === 'FULL_SYNC')
+    && typeof value.status === 'string'
+    && isNullableString(value.startedAtUtc)
+    && isNullableString(value.completedAtUtc)
+    && hasFiniteNumbers(value, [
+      'sourceRows',
+      'insertedRows',
+      'updatedRows',
+      'reactivatedRows',
+      'softDeletedRows',
+      'skippedRows',
+    ])
+    && isNullableString(value.snapshotToken)
+    && isNullableString(value.errorMessage)
+    && isNullableString(value.detailJson);
+}
+
 function isExecuteResult(value: unknown): value is QlhvImportExecuteResult {
   if (!isRecord(value)) {
     return false;
@@ -166,6 +297,8 @@ function isImportPlan(value: unknown): value is QlhvImportPlan {
   }
 
   return typeof value.isReadOnly === 'boolean'
+    && typeof value.backupSnapshotToken === 'string'
+    && typeof value.generatedAtUtc === 'string'
     && typeof value.executable === 'boolean'
     && typeof value.sourceProfileConstraintExists === 'boolean'
     && typeof value.sourceProfileAllowedByConstraint === 'boolean'
@@ -229,11 +362,35 @@ function hasImportIdentity(value: Record<string, unknown>): boolean {
 }
 
 function hasFiniteNumbers(value: Record<string, unknown>, keys: string[]): boolean {
-  return keys.every((key) => typeof value[key] === 'number' && Number.isFinite(value[key]));
+  return keys.every((key) => isFiniteNumber(value[key]));
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === 'string';
 }
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+function isSourceKind(value: unknown): value is QlhvImportSourceKind {
+  return value === 'OTO' || value === 'MOTO';
+}
+
+function isSourceProfileCode(value: unknown): value is 'CSDT_OTO' | 'CSDT_MOTO' {
+  return value === 'CSDT_OTO' || value === 'CSDT_MOTO';
+}
+
+function isOperationState(value: unknown): value is QlhvOperationsStatus['state'] {
+  return value === 'idle'
+    || value === 'refreshing'
+    || value === 'syncing'
+    || value === 'succeeded'
+    || value === 'failed';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -18,6 +18,8 @@ public static class DependencyInjection
         services.AddScoped<IHocVienSourceAttributionDiagnosticsService, HocVienSourceAttributionDiagnosticsService>();
         services.AddScoped<IHocVienSyncService, HocVienSyncService>();
         services.AddScoped<IQlhvImportService, QlhvImportService>();
+        services.AddScoped<IQlhvOperationsService, QlhvOperationsService>();
+        services.AddSingleton<IQlhvOperationsKeyValidator, QlhvOperationsKeyValidator>();
         services.AddScoped<IMotoSyncService, MotoSyncService>();
         return services;
     }
