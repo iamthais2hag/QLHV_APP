@@ -1,4 +1,6 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using QLHV.Application.Auth;
 using QLHV.Application.HocVien;
 using QLHV.Application.HocVien.Dtos;
 using QLHV.Application.HocVien.Printing;
@@ -10,6 +12,7 @@ namespace QLHV.Api.Controllers;
 /// API tra cứu học viên (chỉ đọc). Dữ liệu gốc từ nguồn V2 là chỉ đọc.
 /// </summary>
 [ApiController]
+[Authorize(Policy = AuthPolicies.Admin)]
 [Route("api/hoc-vien")]
 [Produces("application/json")]
 public sealed class HocVienController : ControllerBase

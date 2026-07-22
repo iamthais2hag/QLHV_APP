@@ -22,18 +22,18 @@ public sealed class QlhvImportClientSafetySourceTests
         Assert.Contains("maCSDT: '66030'", logic, StringComparison.Ordinal);
 
         Assert.Contains("sourceType: QlhvImportSourceKind", refreshRequest, StringComparison.Ordinal);
-        Assert.Contains("confirmText: string", refreshRequest, StringComparison.Ordinal);
+        Assert.DoesNotContain("confirmText", refreshRequest, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Database", refreshRequest, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Server", refreshRequest, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Path", refreshRequest, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("maCSDT", refreshRequest, StringComparison.Ordinal);
         Assert.DoesNotContain("sourceProfileCode", refreshRequest, StringComparison.Ordinal);
         Assert.Contains("body: JSON.stringify(request)", api, StringComparison.Ordinal);
-        Assert.Contains("REFRESH CSDL BAK", logic, StringComparison.Ordinal);
+        Assert.DoesNotContain("REFRESH CSDL BAK", logic, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Operations_key_is_header_only_and_never_persisted_by_client()
+    public void Qlhv_client_has_no_operations_key_or_typed_confirmation_flow()
     {
         var api = ReadClientFile("api.ts");
         var logic = ReadClientFile("logic.ts");
@@ -41,16 +41,18 @@ public sealed class QlhvImportClientSafetySourceTests
         var types = ReadClientFile("types.ts");
         var combined = string.Join('\n', api, logic, page, types);
 
-        Assert.Contains("'X-QLHV-Operations-Key': operationsKey", api, StringComparison.Ordinal);
-        Assert.True(
-            CountOccurrences(api, "'X-QLHV-Operations-Key': operationsKey") >= 2,
-            "Both refresh and full-sync POSTs must send the operations key through the header.");
+        Assert.DoesNotContain("X-QLHV-Operations-Key", combined, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("operationsKey", combined, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("confirmText", combined, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("OperationsKeyField", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("ConfirmationField", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("REFRESH CSDL BAK", combined, StringComparison.Ordinal);
+        Assert.DoesNotContain("IMPORT QLHV CSĐT", combined, StringComparison.Ordinal);
         Assert.DoesNotContain("localStorage", combined, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("sessionStorage", combined, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("console.log", combined, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("query.set('operationsKey'", api, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("JSON.stringify({ operationsKey", api, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Key chỉ được giữ trong bộ nhớ của modal này", page, StringComparison.Ordinal);
+        Assert.Contains("refreshQlhvBackup(body)", page, StringComparison.Ordinal);
+        Assert.Contains("executeQlhvImport(body)", page, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -69,7 +71,7 @@ public sealed class QlhvImportClientSafetySourceTests
         Assert.Contains("generatedAtUtc: string", types, StringComparison.Ordinal);
         Assert.Contains("expectedSnapshotToken: string", types, StringComparison.Ordinal);
         Assert.Contains("expectedSnapshotToken: plan.data.backupSnapshotToken", logic, StringComparison.Ordinal);
-        Assert.Contains("IMPORT QLHV CSĐT", logic, StringComparison.Ordinal);
+        Assert.DoesNotContain("confirmText", logic, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -89,7 +91,6 @@ public sealed class QlhvImportClientSafetySourceTests
         Assert.Contains("window.setInterval", page, StringComparison.Ordinal);
         Assert.Contains("POLL_INTERVAL_MS", page, StringComparison.Ordinal);
         Assert.Contains("plan: null", page, StringComparison.Ordinal);
-        Assert.Contains("không sao chép file", page, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(".jp2", page, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -115,18 +116,6 @@ public sealed class QlhvImportClientSafetySourceTests
         var candidates = new[] { nextFunction, nextAsyncFunction }.Where(index => index > start).ToArray();
         var end = candidates.Length == 0 ? source.Length : candidates.Min();
         return source[start..end];
-    }
-
-    private static int CountOccurrences(string source, string value)
-    {
-        var count = 0;
-        var start = 0;
-        while ((start = source.IndexOf(value, start, StringComparison.Ordinal)) >= 0)
-        {
-            count++;
-            start += value.Length;
-        }
-        return count;
     }
 
     private static string FindWorkspaceFile(

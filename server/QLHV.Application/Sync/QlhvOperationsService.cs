@@ -6,8 +6,6 @@ namespace QLHV.Application.Sync;
 
 public sealed class QlhvOperationsService : IQlhvOperationsService
 {
-    public const string RefreshConfirmationText = "REFRESH CSDL BAK";
-
     private readonly IQlhvOperationsRepository _operations;
     private readonly IQlhvOperationHistoryRepository _history;
     private readonly IQlhvRefreshBackupQueue _queue;
@@ -132,13 +130,6 @@ public sealed class QlhvOperationsService : IQlhvOperationsService
         if (!QlhvOperationSourceCatalog.TryGet(request.SourceType, out var source))
         {
             return Rejected(request.SourceType, "SourceType chi ho tro OTO hoac MOTO.");
-        }
-
-        if (!string.Equals(request.ConfirmText, RefreshConfirmationText, StringComparison.Ordinal))
-        {
-            return Rejected(
-                source.SourceType,
-                $"ConfirmText phai khop chinh xac: {RefreshConfirmationText}.");
         }
 
         if (_syncOptions.DryRun)

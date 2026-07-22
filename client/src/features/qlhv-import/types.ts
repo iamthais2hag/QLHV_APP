@@ -13,7 +13,6 @@ export interface QlhvImportRequest {
 }
 
 export interface QlhvImportExecuteRequest extends QlhvImportRequest {
-  confirmText: string;
   expectedSnapshotToken: string;
 }
 
@@ -124,7 +123,6 @@ export interface QlhvOperationsStatus {
 
 export interface QlhvRefreshBackupRequest {
   sourceType: QlhvImportSourceKind;
-  confirmText: string;
 }
 
 export interface QlhvRefreshBackupResult {

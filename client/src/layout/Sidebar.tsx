@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom';
-import { MENU_ITEMS } from '../navigation/menu';
+import { useAuth } from '../features/auth/AuthContext';
+import { canAccessMenuItem, MENU_ITEMS } from '../navigation/menu';
 
 interface SidebarProps {
   open: boolean;
@@ -9,6 +10,11 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ open, collapsed, onToggleCollapsed, onNavigate }: SidebarProps) {
+  const { user } = useAuth();
+  const visibleItems = user
+    ? MENU_ITEMS.filter((item) => canAccessMenuItem(item, user.role))
+    : [];
+
   return (
     <>
       <aside className={`sidebar${open ? ' is-open' : ''}`}>
@@ -27,7 +33,7 @@ export default function Sidebar({ open, collapsed, onToggleCollapsed, onNavigate
           </button>
         </div>
         <nav className="sidebar__nav">
-          {MENU_ITEMS.map((item) => (
+          {visibleItems.map((item) => (
             <NavLink
               key={item.path}
               to={item.path}

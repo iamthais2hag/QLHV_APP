@@ -156,7 +156,7 @@ public sealed class QlhvImportServiceTests
     }
 
     [Fact]
-    public async Task Execute_rejects_wrong_confirmation_before_any_read_or_write()
+    public async Task Execute_rejects_unknown_source_before_any_read_or_write()
     {
         var reads = new FakeReadRepository();
         var target = new FakeTargetRepository();
@@ -164,9 +164,8 @@ public sealed class QlhvImportServiceTests
 
         var result = await service.ExecuteAsync(new QlhvImportExecuteRequest
         {
-            SourceProfileCode = "CSDT_OTO",
+            SourceProfileCode = "CUSTOM",
             MaCSDT = "66029",
-            ConfirmText = "wrong",
         });
 
         Assert.False(result.Executed);
@@ -432,7 +431,6 @@ public sealed class QlhvImportServiceTests
         {
             SourceProfileCode = "CSDT_MOTO",
             MaCSDT = "66030",
-            ConfirmText = QlhvImportService.ConfirmationText,
             ExpectedSnapshotToken = "snapshot-token",
         });
 
@@ -617,7 +615,6 @@ public sealed class QlhvImportServiceTests
     {
         SourceProfileCode = "CSDT_OTO",
         MaCSDT = "66029",
-        ConfirmText = QlhvImportService.ConfirmationText,
         ExpectedSnapshotToken = "snapshot-token",
     };
 

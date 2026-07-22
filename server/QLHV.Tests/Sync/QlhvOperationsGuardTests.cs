@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Options;
 using QLHV.Application.Sync;
 using QLHV.Application.Sync.Dtos;
 
@@ -30,29 +29,17 @@ public sealed class QlhvOperationsGuardTests
     }
 
     [Fact]
-    public void Operations_key_fails_closed_when_server_key_is_missing()
+    public void Qlhv_write_contract_no_longer_accepts_operations_key_or_confirmation_text()
     {
-        var validator = new QlhvOperationsKeyValidator(
-            Options.Create(new QlhvOperationsOptions()));
-
-        Assert.False(validator.IsConfigured);
-        Assert.False(validator.IsValid(null));
-        Assert.False(validator.IsValid(string.Empty));
-        Assert.False(validator.IsValid("any-client-value"));
-    }
-
-    [Fact]
-    public void Operations_key_accepts_only_the_exact_configured_value()
-    {
-        const string configuredKey = "test-only-operations-key";
-        var validator = new QlhvOperationsKeyValidator(
-            Options.Create(new QlhvOperationsOptions { AdminKey = configuredKey }));
-
-        Assert.True(validator.IsConfigured);
-        Assert.True(validator.IsValid(configuredKey));
-        Assert.False(validator.IsValid("wrong-key"));
-        Assert.False(validator.IsValid(configuredKey + " "));
-        Assert.False(validator.IsValid(null));
+        Assert.DoesNotContain(
+            typeof(QlhvRefreshBackupRequest).GetProperties(),
+            property => property.Name is "ConfirmText" or "OperationsKey");
+        Assert.DoesNotContain(
+            typeof(QlhvImportExecuteRequest).GetProperties(),
+            property => property.Name is "ConfirmText" or "OperationsKey");
+        Assert.DoesNotContain(
+            typeof(QlhvOperationsOptions).GetProperties(),
+            property => property.Name == "AdminKey");
     }
 
     [Fact]

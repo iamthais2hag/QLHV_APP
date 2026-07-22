@@ -1,4 +1,6 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using QLHV.Application.Auth;
 using QLHV.Application.CsdtConnections;
 using QLHV.Application.CsdtConnections.Dtos;
 
@@ -9,6 +11,7 @@ namespace QLHV.Api.Controllers;
 /// Responses never include plaintext passwords or encrypted password bytes.
 /// </summary>
 [ApiController]
+[Authorize(Policy = AuthPolicies.Admin)]
 [Route("api/csdt-connection-profiles")]
 [Produces("application/json")]
 public sealed class CsdtConnectionProfilesController : ControllerBase
