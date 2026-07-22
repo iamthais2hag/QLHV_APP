@@ -60,7 +60,7 @@ public sealed class AuthService : IAuthService
             lastFailureAtUtc > now.Subtract(LockoutDuration))
         {
             VerifyDummyPassword(request.Password);
-            return AuthLoginResult.InvalidCredentials();
+            return AuthLoginResult.LockedOut();
         }
 
         PasswordVerificationResult verification;

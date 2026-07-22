@@ -34,6 +34,11 @@ public sealed class AuthLoginResult
     {
         FailureCode = "INVALID_CREDENTIALS",
     };
+
+    public static AuthLoginResult LockedOut() => new()
+    {
+        FailureCode = "ACCOUNT_LOCKED",
+    };
 }
 
 public sealed class AppUserCredential

@@ -2,8 +2,9 @@
 param(
     [switch]$NoBrowser,
     [switch]$SuppressErrorDialog,
-    [ValidateRange(5, 300)]
-    [int]$HealthTimeoutSeconds = 60
+    [switch]$AllowLegacyRollback,
+    [ValidateRange(10, 300)]
+    [int]$HealthTimeoutSeconds = 90
 )
 
 Set-StrictMode -Version Latest
@@ -11,10 +12,17 @@ $ErrorActionPreference = 'Stop'
 
 $RuntimeRoot = 'D:\QLHV_APP_RUNTIME'
 $AppDirectory = Join-Path $RuntimeRoot 'app'
+$ConfigDirectory = Join-Path $RuntimeRoot 'config'
+$ProductionConfig = Join-Path $ConfigDirectory 'appsettings.Production.Local.json'
 $LogDirectory = Join-Path $RuntimeRoot 'logs'
 $RunDirectory = Join-Path $RuntimeRoot 'run'
 $PidFile = Join-Path $RunDirectory 'qlhv.pid'
-$HealthUrl = 'http://localhost:8088/health'
+$LegacyRuntimeMarker = Join-Path $RunDirectory 'legacy-runtime.marker'
+$LauncherLockFile = Join-Path $RunDirectory 'launcher.lock'
+$LiveUrl = 'http://localhost:8088/health/live'
+$ReadyUrl = 'http://localhost:8088/health/ready'
+$LegacyHealthUrl = 'http://localhost:8088/health'
+$RuntimeStatusUrl = 'http://localhost:8088/api/system/runtime-status'
 $ApplicationUrl = 'http://localhost:8088'
 $script:StartedProcessId = $null
 $script:StartedThisRun = $false
@@ -22,11 +30,36 @@ $script:StdOutLog = $null
 $script:StdErrLog = $null
 $script:LauncherMutex = [System.Threading.Mutex]::new($false, 'Local\QLHV-App-LAN-8088-Launcher')
 $script:LauncherMutexAcquired = $false
+$script:LauncherLockStream = $null
+$script:UseLegacyRuntime = $AllowLegacyRollback -or (Test-Path -LiteralPath $LegacyRuntimeMarker -PathType Leaf)
 
 function Get-NormalizedPath {
     param([Parameter(Mandatory = $true)][string]$Path)
 
     return [System.IO.Path]::GetFullPath($Path).TrimEnd('\')
+}
+
+function Enter-CrossSessionLauncherLock {
+    param([Parameter(Mandatory = $true)][int]$TimeoutSeconds)
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    do {
+        try {
+            # FileShare.None serializes launchers across Windows sessions/users;
+            # the in-process named mutex alone would only cover the current session.
+            $script:LauncherLockStream = [IO.File]::Open(
+                $LauncherLockFile,
+                [IO.FileMode]::OpenOrCreate,
+                [IO.FileAccess]::ReadWrite,
+                [IO.FileShare]::None)
+            return
+        }
+        catch [IO.IOException] {
+            Start-Sleep -Milliseconds 250
+        }
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    throw 'Another QLHV launcher is active in a different Windows session. Try again in a moment.'
 }
 
 function Get-ProcessRecord {
@@ -63,17 +96,190 @@ function Get-PortOwnerIds {
     return @($listeners | Select-Object -ExpandProperty OwningProcess -Unique)
 }
 
-function Test-Health {
+function Get-QlhvRuntimeProcessIds {
+    $records = @(Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue)
+    return @($records | Where-Object {
+        Test-IsQlhvRuntimeProcess -ProcessRecord $_
+    } | Select-Object -ExpandProperty ProcessId -Unique)
+}
+
+function Assert-ProductionConfiguration {
+    if (-not (Test-Path -LiteralPath $ProductionConfig -PathType Leaf)) {
+        throw "Thiếu hoặc sai cấu hình QLHV_APP. Kiểm tra: $ProductionConfig"
+    }
+
     try {
-        $response = Invoke-WebRequest -UseBasicParsing -Uri $HealthUrl -Method Get -TimeoutSec 3
-        return $response.StatusCode -ge 200 -and $response.StatusCode -lt 300
+        $configuration = Get-Content -LiteralPath $ProductionConfig -Raw -Encoding UTF8 | ConvertFrom-Json
     }
     catch {
-        return $false
+        throw "Thiếu hoặc sai cấu hình QLHV_APP. Kiểm tra JSON tại: $ProductionConfig"
+    }
+
+    if ($null -eq $configuration) {
+        throw "Thiếu hoặc sai cấu hình QLHV_APP. JSON rỗng tại: $ProductionConfig"
+    }
+    $connectionStringsProperty = $configuration.PSObject.Properties['ConnectionStrings']
+    if ($null -eq $connectionStringsProperty) {
+        throw "Thiếu hoặc sai cấu hình QLHV_APP. Thiếu section ConnectionStrings tại: $ProductionConfig"
+    }
+    $qlhvProperty = $connectionStringsProperty.Value.PSObject.Properties['QLHV_APP']
+    if ($null -eq $qlhvProperty -or [string]::IsNullOrWhiteSpace([string]$qlhvProperty.Value)) {
+        throw "Thiếu hoặc sai cấu hình QLHV_APP. Thiếu ConnectionStrings:QLHV_APP tại: $ProductionConfig"
     }
 }
 
-function Wait-ForHealth {
+function Get-LegacyConfigurationEnvironment {
+    $configuration = Get-Content -LiteralPath $ProductionConfig -Raw -Encoding UTF8 | ConvertFrom-Json
+    $result = @{}
+    $allowedSections = @(
+        'ConnectionStrings', 'ConnectionProfileEncryption', 'ConnectionProfileProtection',
+        'DataProtection', 'FileStorage', 'Sync', 'SyncExecution', 'Authentication'
+    )
+
+    function Add-ConfigurationNode {
+        param(
+            [Parameter(Mandatory = $false)]$Node,
+            [Parameter(Mandatory = $true)][string]$Prefix
+        )
+        if ($null -eq $Node) { return }
+        if ($Node -is [pscustomobject]) {
+            foreach ($property in $Node.PSObject.Properties) {
+                Add-ConfigurationNode -Node $property.Value -Prefix ($Prefix + '__' + $property.Name)
+            }
+            return
+        }
+        if ($Node -is [System.Collections.IEnumerable] -and $Node -isnot [string]) {
+            $index = 0
+            foreach ($item in $Node) {
+                Add-ConfigurationNode -Node $item -Prefix ($Prefix + '__' + $index)
+                $index++
+            }
+            return
+        }
+        $result[$Prefix] = [string]$Node
+    }
+
+    foreach ($sectionName in $allowedSections) {
+        $property = $configuration.PSObject.Properties[$sectionName]
+        if ($null -ne $property) {
+            Add-ConfigurationNode -Node $property.Value -Prefix $sectionName
+        }
+    }
+    return $result
+}
+
+function Get-SafeProbeMessage {
+    param([Parameter(Mandatory = $false)][string]$Json)
+
+    if ([string]::IsNullOrWhiteSpace($Json)) {
+        return $null
+    }
+
+    try {
+        $payload = $Json | ConvertFrom-Json
+        $messagesProperty = $payload.PSObject.Properties['messages']
+        if ($null -eq $messagesProperty) {
+            return $null
+        }
+        $message = (@($messagesProperty.Value) | Where-Object {
+            -not [string]::IsNullOrWhiteSpace([string]$_)
+        }) -join '; '
+        if ($message.Length -gt 700) {
+            $message = $message.Substring(0, 700) + '...'
+        }
+        if ($message -match '(?i)(passwordhash|set-cookie|authorization\s*:|(?:password|pwd|user\s*id|data\s*source|server|initial\s*catalog)\s*=)') {
+            return 'Runtime readiness failed; sensitive diagnostic details were omitted.'
+        }
+        return $message
+    }
+    catch {
+        return $null
+    }
+}
+
+function Invoke-HealthProbe {
+    param(
+        [Parameter(Mandatory = $true)][string]$Url,
+        [ValidateRange(2, 90)][int]$TimeoutSeconds = 4
+    )
+
+    try {
+        $response = Invoke-WebRequest -UseBasicParsing -Uri $Url -Method Get -TimeoutSec $TimeoutSeconds
+        return [pscustomobject]@{
+            Success = $response.StatusCode -ge 200 -and $response.StatusCode -lt 300
+            StatusCode = [int]$response.StatusCode
+            Message = Get-SafeProbeMessage -Json ([string]$response.Content)
+        }
+    }
+    catch {
+        $statusCode = 0
+        $errorDetailsJson = $null
+        $responseProperty = $_.Exception.PSObject.Properties['Response']
+        if ($null -ne $responseProperty -and $null -ne $responseProperty.Value) {
+            $statusProperty = $responseProperty.Value.PSObject.Properties['StatusCode']
+            if ($null -ne $statusProperty) {
+                $statusCode = [int]$statusProperty.Value
+            }
+        }
+        # ErrorDetails is optional for connection failures and some HTTP responses.
+        # StrictMode must never turn a transient readiness response into a launcher crash.
+        $errorDetailsProperty = $_.PSObject.Properties['ErrorDetails']
+        if ($null -ne $errorDetailsProperty -and $null -ne $errorDetailsProperty.Value) {
+            $messageProperty = $errorDetailsProperty.Value.PSObject.Properties['Message']
+            if ($null -ne $messageProperty) {
+                $errorDetailsJson = [string]$messageProperty.Value
+            }
+        }
+        return [pscustomobject]@{
+            Success = $false
+            StatusCode = $statusCode
+            Message = Get-SafeProbeMessage -Json $errorDetailsJson
+        }
+    }
+}
+
+function Wait-ForEndpoint {
+    param(
+        [Parameter(Mandatory = $true)][int]$ProcessId,
+        [Parameter(Mandatory = $true)][string]$Url,
+        [Parameter(Mandatory = $true)][string]$DisplayName,
+        [Parameter(Mandatory = $true)][int]$TimeoutSeconds
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $lastMessage = $null
+    do {
+        $record = Get-ProcessRecord -ProcessId $ProcessId
+        if (-not (Test-IsQlhvRuntimeProcess -ProcessRecord $record)) {
+            throw "QLHV runtime exited before $DisplayName succeeded. Review logs in $LogDirectory."
+        }
+
+        $requestTimeout = if ($DisplayName -eq 'readiness') { 45 } else { 4 }
+        $probe = Invoke-HealthProbe -Url $Url -TimeoutSeconds $requestTimeout
+        if ($probe.Success) {
+            $owners = @(Get-PortOwnerIds)
+            if ($owners -contains $ProcessId) {
+                return
+            }
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$probe.Message)) {
+            $lastMessage = [string]$probe.Message
+        }
+
+        Start-Sleep -Milliseconds 500
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    if ($DisplayName -eq 'readiness') {
+        $statusProbe = Invoke-HealthProbe -Url $RuntimeStatusUrl -TimeoutSeconds 45
+        if (-not [string]::IsNullOrWhiteSpace([string]$statusProbe.Message)) {
+            $lastMessage = [string]$statusProbe.Message
+        }
+    }
+    $reason = if ([string]::IsNullOrWhiteSpace($lastMessage)) { '' } else { " Reason: $lastMessage" }
+    throw "QLHV did not pass $DisplayName at $Url within $TimeoutSeconds seconds.$reason Review logs in $LogDirectory."
+}
+
+function Wait-ForLegacyRollbackHealth {
     param(
         [Parameter(Mandatory = $true)][int]$ProcessId,
         [Parameter(Mandatory = $true)][int]$TimeoutSeconds
@@ -83,35 +289,77 @@ function Wait-ForHealth {
     do {
         $record = Get-ProcessRecord -ProcessId $ProcessId
         if (-not (Test-IsQlhvRuntimeProcess -ProcessRecord $record)) {
-            throw "QLHV runtime exited before it became healthy. Review logs in $LogDirectory."
+            throw "Restored QLHV runtime exited before its health check succeeded. Review $LogDirectory."
         }
 
-        if (Test-Health) {
-            $owners = @(Get-PortOwnerIds)
-            if ($owners -contains $ProcessId) {
-                return
-            }
+        $live = Invoke-HealthProbe -Url $LiveUrl -TimeoutSeconds 4
+        if ($live.Success) {
+            $ready = Invoke-HealthProbe -Url $ReadyUrl -TimeoutSeconds 45
+            if ($ready.Success) { return }
         }
-
+        elseif ($live.StatusCode -eq 404) {
+            $legacy = Invoke-HealthProbe -Url $LegacyHealthUrl -TimeoutSeconds 10
+            if ($legacy.Success) { return }
+        }
         Start-Sleep -Milliseconds 500
     } while ([DateTime]::UtcNow -lt $deadline)
 
-    throw "QLHV did not pass GET /health within $TimeoutSeconds seconds. Review logs in $LogDirectory."
+    throw "Restored QLHV runtime did not pass legacy or current health checks within $TimeoutSeconds seconds."
 }
 
-function Set-ProcessEnvironmentAndStart {
-    param(
-        [Parameter(Mandatory = $true)][string]$FilePath,
-        [string[]]$ArgumentList = @()
-    )
+function Stop-QlhvProcessById {
+    param([Parameter(Mandatory = $true)][int]$ProcessId)
 
-    $environmentNames = @(
+    $record = Get-ProcessRecord -ProcessId $ProcessId
+    if (-not (Test-IsQlhvRuntimeProcess -ProcessRecord $record)) {
+        throw "PID $ProcessId is not the QLHV runtime in $AppDirectory. No process was stopped."
+    }
+
+    # Validate identity again immediately before stopping; never stop all dotnet processes.
+    $record = Get-ProcessRecord -ProcessId $ProcessId
+    if (-not (Test-IsQlhvRuntimeProcess -ProcessRecord $record)) {
+        throw "QLHV process identity changed before stop. No process was stopped."
+    }
+    Stop-Process -Id $ProcessId -Force -ErrorAction Stop
+    try {
+        Wait-Process -Id $ProcessId -Timeout 15 -ErrorAction Stop
+    }
+    catch {
+        if (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) {
+            throw "QLHV PID $ProcessId could not be stopped."
+        }
+    }
+    Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
+}
+
+function Remove-ExpiredLauncherLogs {
+    $cutoff = [DateTime]::UtcNow.AddDays(-30)
+    $files = @(Get-ChildItem -LiteralPath $LogDirectory -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like 'launcher-*' } |
+        Sort-Object LastWriteTimeUtc -Descending)
+    for ($index = 0; $index -lt $files.Count; $index++) {
+        if ($index -ge 30 -or $files[$index].LastWriteTimeUtc -lt $cutoff) {
+            Remove-Item -LiteralPath $files[$index].FullName -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Start-QlhvRuntime {
+    $legacyEnvironment = if ($script:UseLegacyRuntime) {
+        Get-LegacyConfigurationEnvironment
+    }
+    else {
+        @{}
+    }
+    $environmentNames = @(@(
         'ASPNETCORE_ENVIRONMENT',
         'ASPNETCORE_URLS',
         'HttpsRedirection__Enabled',
         'Authentication__Cookie__SecurePolicy',
-        'FileStorage__Root'
-    )
+        'QlhvRuntime__ProductionLocalConfigPath',
+        'QlhvRuntime__Root',
+        'Logging__Console__LogLevel__Default'
+    ) + @($legacyEnvironment.Keys) | Select-Object -Unique)
     $previousValues = @{}
     foreach ($name in $environmentNames) {
         $item = Get-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
@@ -125,23 +373,44 @@ function Set-ProcessEnvironmentAndStart {
         $env:ASPNETCORE_URLS = 'http://0.0.0.0:8088'
         $env:HttpsRedirection__Enabled = 'false'
         $env:Authentication__Cookie__SecurePolicy = 'SameAsRequest'
-        if ([string]::IsNullOrWhiteSpace($env:FileStorage__Root)) {
-            # Keep real student photos outside the disposable publish/runtime directory.
-            $env:FileStorage__Root = 'D:\QLHV_APP'
+        $env:QlhvRuntime__ProductionLocalConfigPath = $ProductionConfig
+        $env:QlhvRuntime__Root = $RuntimeRoot
+        # The Production rolling file logger is the durable sink. Disable raw console
+        # application logs so redirected bootstrap files stay bounded and cannot expose values.
+        $env:Logging__Console__LogLevel__Default = 'None'
+        foreach ($entry in $legacyEnvironment.GetEnumerator()) {
+            Set-Item -LiteralPath ("Env:" + $entry.Key) -Value ([string]$entry.Value)
+        }
+
+        $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+        $script:StdOutLog = Join-Path $LogDirectory "launcher-$timestamp.out.log"
+        $script:StdErrLog = Join-Path $LogDirectory "launcher-$timestamp.err.log"
+        $publishedExe = Join-Path $AppDirectory 'QLHV.Api.exe'
+        $publishedDll = Join-Path $AppDirectory 'QLHV.Api.dll'
+        if (Test-Path -LiteralPath $publishedExe -PathType Leaf) {
+            $filePath = $publishedExe
+            $argumentList = @()
+        }
+        else {
+            $filePath = (Get-Command 'dotnet.exe' -ErrorAction Stop).Source
+            $argumentList = @('"' + $publishedDll + '"')
         }
 
         $startParameters = @{
-            FilePath = $FilePath
+            FilePath = $filePath
             WorkingDirectory = $AppDirectory
+            WindowStyle = 'Hidden'
             RedirectStandardOutput = $script:StdOutLog
             RedirectStandardError = $script:StdErrLog
-            WindowStyle = 'Hidden'
             PassThru = $true
         }
-        if ($ArgumentList.Count -gt 0) {
-            $startParameters.ArgumentList = $ArgumentList
+        if ($argumentList.Count -gt 0) {
+            $startParameters.ArgumentList = $argumentList
         }
-        return Start-Process @startParameters
+        $process = Start-Process @startParameters
+        $script:StartedProcessId = [int]$process.Id
+        $script:StartedThisRun = $true
+        Set-Content -LiteralPath $PidFile -Value $script:StartedProcessId -Encoding Ascii
     }
     finally {
         foreach ($name in $environmentNames) {
@@ -153,6 +422,16 @@ function Set-ProcessEnvironmentAndStart {
             }
         }
     }
+
+}
+
+function Get-SafeLauncherMessage {
+    param([Parameter(Mandatory = $true)][string]$Message)
+
+    if ($Message -match '(?i)(passwordhash|set-cookie|authorization\s*:|(?:password|pwd|user\s*id|data\s*source|server|initial\s*catalog)\s*=)') {
+        return 'QLHV startup failed. Sensitive diagnostic details were omitted.'
+    }
+    return $Message
 }
 
 function Show-LauncherError {
@@ -167,7 +446,7 @@ function Show-LauncherError {
         Add-Type -AssemblyName System.Windows.Forms
         [void][System.Windows.Forms.MessageBox]::Show(
             $details,
-            'QLHV Thanh Cong',
+            'QLHV Thành Công',
             [System.Windows.Forms.MessageBoxButtons]::OK,
             [System.Windows.Forms.MessageBoxIcon]::Error)
     }
@@ -178,22 +457,24 @@ function Show-LauncherError {
 
 try {
     try {
-        $mutexWait = [TimeSpan]::FromSeconds($HealthTimeoutSeconds + 15)
+        $mutexWait = [TimeSpan]::FromSeconds($HealthTimeoutSeconds + 30)
         $script:LauncherMutexAcquired = $script:LauncherMutex.WaitOne($mutexWait)
     }
     catch [System.Threading.AbandonedMutexException] {
-        # The previous launcher exited unexpectedly; this process now owns the mutex.
         $script:LauncherMutexAcquired = $true
     }
     if (-not $script:LauncherMutexAcquired) {
         throw 'Another QLHV launcher is still checking or starting the runtime. Try again in a moment.'
     }
 
-    foreach ($requiredDirectory in @($RuntimeRoot, $AppDirectory, $LogDirectory, $RunDirectory)) {
+    foreach ($requiredDirectory in @($RuntimeRoot, $AppDirectory, $ConfigDirectory, $LogDirectory, $RunDirectory)) {
         if (-not (Test-Path -LiteralPath $requiredDirectory -PathType Container)) {
             throw "Runtime is not installed correctly: missing $requiredDirectory. Run Install-QLHV-App.ps1 as Administrator."
         }
     }
+    Enter-CrossSessionLauncherLock -TimeoutSeconds ($HealthTimeoutSeconds + 30)
+    Assert-ProductionConfiguration
+    Remove-ExpiredLauncherLogs
 
     $publishedExe = Join-Path $AppDirectory 'QLHV.Api.exe'
     $publishedDll = Join-Path $AppDirectory 'QLHV.Api.dll'
@@ -220,43 +501,63 @@ try {
             throw "TCP port 8088 is already used by another process (PID: $($otherOwners -join ', ')). QLHV was not started."
         }
         if ($qlhvOwners.Count -ne 1) {
-            throw "Unexpected QLHV listener state on TCP port 8088. QLHV was not started."
+            throw 'Unexpected QLHV listener state on TCP port 8088. QLHV was not started.'
         }
 
-        $script:StartedProcessId = $qlhvOwners[0]
-        Set-Content -LiteralPath $PidFile -Value $script:StartedProcessId -Encoding Ascii
-        Wait-ForHealth -ProcessId $script:StartedProcessId -TimeoutSeconds $HealthTimeoutSeconds
-    }
-    else {
-        if (Test-Path -LiteralPath $PidFile -PathType Leaf) {
-            $rawPid = (Get-Content -Raw -LiteralPath $PidFile).Trim()
-            $savedProcessId = 0
-            if ([int]::TryParse($rawPid, [ref]$savedProcessId)) {
-                $savedRecord = Get-ProcessRecord -ProcessId $savedProcessId
-                if (Test-IsQlhvRuntimeProcess -ProcessRecord $savedRecord) {
-                    throw "QLHV runtime PID $savedProcessId exists but is not healthy on port 8088. Run Stop-QLHV-App.ps1, then try again."
-                }
-            }
-            Remove-Item -LiteralPath $PidFile -Force
+        # Reconcile exact runtime executables even when their PID file is missing/stale.
+        # This prevents a listener plus an orphaned QLHV process from coexisting.
+        $orphanedRuntimeIds = @(Get-QlhvRuntimeProcessIds | Where-Object { $qlhvOwners -notcontains [int]$_ })
+        foreach ($orphanedRuntimeId in $orphanedRuntimeIds) {
+            Stop-QlhvProcessById -ProcessId ([int]$orphanedRuntimeId)
         }
 
-        $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-        $script:StdOutLog = Join-Path $LogDirectory "qlhv-$timestamp.out.log"
-        $script:StdErrLog = Join-Path $LogDirectory "qlhv-$timestamp.err.log"
-
-        if (Test-Path -LiteralPath $publishedExe -PathType Leaf) {
-            $process = Set-ProcessEnvironmentAndStart -FilePath $publishedExe
+        $existingId = $qlhvOwners[0]
+        $liveProbe = Invoke-HealthProbe -Url $LiveUrl -TimeoutSeconds 4
+        $readyProbe = Invoke-HealthProbe -Url $ReadyUrl -TimeoutSeconds 45
+        $legacyReady = $false
+        if ($script:UseLegacyRuntime -and $liveProbe.StatusCode -eq 404) {
+            $legacyProbe = Invoke-HealthProbe -Url $LegacyHealthUrl -TimeoutSeconds 10
+            $legacyReady = $legacyProbe.Success
+        }
+        if (($liveProbe.Success -and $readyProbe.Success) -or $legacyReady) {
+            $script:StartedProcessId = $existingId
+            Set-Content -LiteralPath $PidFile -Value $existingId -Encoding Ascii
         }
         else {
-            $dotnetCommand = Get-Command 'dotnet.exe' -ErrorAction Stop
-            $quotedDll = '"' + $publishedDll + '"'
-            $process = Set-ProcessEnvironmentAndStart -FilePath $dotnetCommand.Source -ArgumentList @($quotedDll)
+            # A hung or stale QLHV instance is restarted by exact, verified PID only.
+            Stop-QlhvProcessById -ProcessId $existingId
         }
+    }
+    else {
+        # A QLHV process can be hung before binding its port and its PID file may be
+        # absent. Enumerate only the exact published executable/dll and stop by PID.
+        foreach ($orphanedRuntimeId in @(Get-QlhvRuntimeProcessIds)) {
+            Stop-QlhvProcessById -ProcessId ([int]$orphanedRuntimeId)
+        }
+        if (Test-Path -LiteralPath $PidFile -PathType Leaf) {
+            $rawSavedId = (Get-Content -LiteralPath $PidFile -Raw).Trim()
+            $savedId = 0
+            if ([int]::TryParse($rawSavedId, [ref]$savedId) -and $savedId -gt 0) {
+                $savedRecord = Get-ProcessRecord -ProcessId $savedId
+                if (Test-IsQlhvRuntimeProcess -ProcessRecord $savedRecord) {
+                    Stop-QlhvProcessById -ProcessId $savedId
+                }
+            }
+            Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
+        }
+    }
 
-        $script:StartedProcessId = [int]$process.Id
-        $script:StartedThisRun = $true
-        Set-Content -LiteralPath $PidFile -Value $script:StartedProcessId -Encoding Ascii
-        Wait-ForHealth -ProcessId $script:StartedProcessId -TimeoutSeconds $HealthTimeoutSeconds
+    if ($null -eq $script:StartedProcessId) {
+        Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
+        Start-QlhvRuntime
+        if ($script:UseLegacyRuntime) {
+            Wait-ForLegacyRollbackHealth -ProcessId $script:StartedProcessId -TimeoutSeconds $HealthTimeoutSeconds
+        }
+        else {
+            $liveTimeout = [Math]::Min(30, $HealthTimeoutSeconds)
+            Wait-ForEndpoint -ProcessId $script:StartedProcessId -Url $LiveUrl -DisplayName 'liveness' -TimeoutSeconds $liveTimeout
+            Wait-ForEndpoint -ProcessId $script:StartedProcessId -Url $ReadyUrl -DisplayName 'readiness' -TimeoutSeconds $HealthTimeoutSeconds
+        }
     }
 
     if (-not $NoBrowser) {
@@ -266,10 +567,11 @@ try {
     Write-Host "QLHV is ready at $ApplicationUrl (PID $script:StartedProcessId)."
 }
 catch {
-    $message = $_.Exception.Message
+    $message = Get-SafeLauncherMessage -Message $_.Exception.Message
     try {
         New-Item -ItemType Directory -Path $LogDirectory -Force -ErrorAction SilentlyContinue | Out-Null
-        Add-Content -LiteralPath (Join-Path $LogDirectory 'launcher-error.log') -Value "$(Get-Date -Format o) $message"
+        $launcherErrorLog = Join-Path $LogDirectory ('launcher-' + (Get-Date -Format 'yyyyMMdd') + '.error.log')
+        Add-Content -LiteralPath $launcherErrorLog -Value "$(Get-Date -Format o) $message"
     }
     catch {
         # Keep the original startup error.
@@ -278,21 +580,17 @@ catch {
     if ($script:StartedThisRun -and $null -ne $script:StartedProcessId) {
         $failedRecord = Get-ProcessRecord -ProcessId ([int]$script:StartedProcessId)
         if (Test-IsQlhvRuntimeProcess -ProcessRecord $failedRecord) {
-            Stop-Process -Id ([int]$script:StartedProcessId) -Force -ErrorAction SilentlyContinue
-            try {
-                Wait-Process -Id ([int]$script:StartedProcessId) -Timeout 15 -ErrorAction Stop
-            }
-            catch {
-                # The process may already be gone; startup logs still retain the original error.
-            }
+            try { Stop-QlhvProcessById -ProcessId ([int]$script:StartedProcessId) } catch { }
         }
         Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
     }
-
     Show-LauncherError -Message $message
-    throw
+    throw $message
 }
 finally {
+    if ($null -ne $script:LauncherLockStream) {
+        $script:LauncherLockStream.Dispose()
+    }
     if ($script:LauncherMutexAcquired) {
         $script:LauncherMutex.ReleaseMutex()
     }

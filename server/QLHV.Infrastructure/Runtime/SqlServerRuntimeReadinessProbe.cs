@@ -1,0 +1,404 @@
+using Dapper;
+using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
+using QLHV.Application.Auth;
+using QLHV.Application.CsdtConnections;
+using QLHV.Application.Runtime;
+using QLHV.Application.Sync.Connections;
+using QLHV.Infrastructure.HocVien;
+using QLHV.Infrastructure.Sync;
+
+namespace QLHV.Infrastructure.Runtime;
+
+public sealed class SqlServerRuntimeReadinessProbe : IRuntimeReadinessProbe
+{
+    private static readonly string[] RequiredTables =
+    [
+        "App_User",
+        "App_Role",
+        "App_UserRole",
+        "App_HocVien",
+        "App_QlhvSyncOperationHistory",
+    ];
+
+    private readonly IConnectionSettingsProvider _connections;
+    private readonly QlhvOperationConnectionResolver _operationConnections;
+    private readonly HocVienPhotoPathResolver _photoPaths;
+    private readonly QlhvRuntimeOptions _options;
+    private readonly IHostEnvironment _environment;
+
+    public SqlServerRuntimeReadinessProbe(
+        IConnectionSettingsProvider connections,
+        QlhvOperationConnectionResolver operationConnections,
+        HocVienPhotoPathResolver photoPaths,
+        IOptions<QlhvRuntimeOptions> options,
+        IHostEnvironment environment)
+    {
+        _connections = connections;
+        _operationConnections = operationConnections;
+        _photoPaths = photoPaths;
+        _options = options.Value;
+        _environment = environment;
+    }
+
+    public async Task<RuntimeReadinessProbeResult> ProbeAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var messages = new List<string>();
+        var databaseConnected = false;
+        string? databaseName = null;
+        var requiredSchemaReady = false;
+        var authenticationReady = false;
+        var backupProfilesReady = false;
+        var backupDirectoryVisibleToSql = false;
+
+        ResolvedConnection target;
+        try
+        {
+            target = await _connections.GetQlhvAppConnectionAsync(cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            target = ResolvedConnection.NotConfigured("QLHV_APP");
+        }
+
+        if (!target.IsUsable || string.IsNullOrWhiteSpace(target.ConnectionString))
+        {
+            messages.Add("Chưa có cấu hình ConnectionStrings:QLHV_APP hợp lệ.");
+        }
+        else
+        {
+            try
+            {
+                var connectionString = WithShortConnectTimeout(target.ConnectionString);
+                await using var connection = new SqlConnection(connectionString);
+                await connection.OpenAsync(cancellationToken);
+                databaseConnected = true;
+                databaseName = await connection.ExecuteScalarAsync<string>(new CommandDefinition(
+                    "SELECT DB_NAME();",
+                    commandTimeout: CommandTimeoutSeconds,
+                    cancellationToken: cancellationToken));
+
+                if (string.Equals(
+                        databaseName,
+                        RuntimeReadinessService.ExpectedDatabaseName,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    var tables = (await connection.QueryAsync<string>(new CommandDefinition(
+                        RequiredTablesSql,
+                        new { RequiredTables },
+                        commandTimeout: CommandTimeoutSeconds,
+                        cancellationToken: cancellationToken))).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    var missingTables = RequiredTables.Where(table => !tables.Contains(table)).ToArray();
+                    requiredSchemaReady = missingTables.Length == 0;
+                    if (!requiredSchemaReady)
+                    {
+                        messages.Add($"Thiếu bảng bắt buộc: {string.Join(", ", missingTables)}.");
+                    }
+
+                    if (requiredSchemaReady)
+                    {
+                        var auth = await connection.QuerySingleAsync<AuthReadinessRow>(new CommandDefinition(
+                            AuthenticationReadinessSql,
+                            new
+                            {
+                                AdminRole = AppRoles.Admin,
+                                ViewerRole = AppRoles.Viewer,
+                            },
+                            commandTimeout: CommandTimeoutSeconds,
+                            cancellationToken: cancellationToken));
+                        authenticationReady = auth.AdminRoleExists &&
+                            auth.ViewerRoleExists &&
+                            auth.ActiveAdminExists;
+                        if (!auth.AdminRoleExists || !auth.ViewerRoleExists)
+                        {
+                            messages.Add("Thiếu role Admin hoặc Viewer.");
+                        }
+
+                        if (!auth.ActiveAdminExists)
+                        {
+                            messages.Add("Chưa có tài khoản Admin đang hoạt động.");
+                        }
+                    }
+
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch
+            {
+                messages.Add(databaseConnected
+                    ? "Không thể kiểm tra schema QLHV_APP."
+                    : "Không thể kết nối SQL Server cho QLHV_APP.");
+            }
+        }
+
+        if (databaseConnected &&
+            string.Equals(databaseName, RuntimeReadinessService.ExpectedDatabaseName, StringComparison.OrdinalIgnoreCase))
+        {
+            var backupValidation = await ValidateBackupProfilesAsync(messages, cancellationToken);
+            backupProfilesReady = backupValidation.ProfilesReady;
+            backupDirectoryVisibleToSql = backupValidation.BackupDirectoryReady;
+        }
+
+        var localBackupDirectoryReady = Directory.Exists(QlhvBackupRefreshExecutor.BackupDirectory);
+        if (!localBackupDirectoryReady)
+        {
+            messages.Add("Không tìm thấy thư mục D:\\SQL_BACKUP trên máy chủ ứng dụng.");
+        }
+
+        var fileStorageReady = IsPhotoStorageReady();
+        if (!fileStorageReady)
+        {
+            messages.Add("Không tìm thấy thư mục IM_GPLX đã cấu hình.");
+        }
+
+        var runtimeStorageReady = !_environment.IsProduction() || IsRuntimeStorageWritable();
+        if (!runtimeStorageReady)
+        {
+            messages.Add("Runtime không ghi được thư mục logs hoặc run.");
+        }
+
+        return new RuntimeReadinessProbeResult
+        {
+            DatabaseConnected = databaseConnected,
+            DatabaseName = databaseName,
+            RequiredSchemaReady = requiredSchemaReady,
+            AuthenticationReady = authenticationReady,
+            BackupProfilesReady = backupProfilesReady,
+            BackupStorageReady = localBackupDirectoryReady && backupDirectoryVisibleToSql,
+            FileStorageReady = fileStorageReady,
+            RuntimeStorageReady = runtimeStorageReady,
+            Messages = messages,
+        };
+    }
+
+    private int CommandTimeoutSeconds => Math.Clamp(_options.ReadinessTimeoutSeconds, 3, 30);
+
+    private string WithShortConnectTimeout(string connectionString)
+    {
+        var builder = new SqlConnectionStringBuilder(connectionString)
+        {
+            ConnectTimeout = CommandTimeoutSeconds,
+        };
+        return builder.ConnectionString;
+    }
+
+    private async Task<BackupValidationResult> ValidateBackupProfilesAsync(
+        ICollection<string> messages,
+        CancellationToken cancellationToken)
+    {
+        var checks = new[]
+        {
+            (CsdtConnectionProfileCodes.CsdtOtoBak, "CSDL_OTO_BAK"),
+            (CsdtConnectionProfileCodes.CsdtMotoBak, "CSDL_MOTO_BAK"),
+        };
+
+        var profilesReady = true;
+        var backupDirectoryReady = true;
+        foreach (var (profileCode, expectedDatabase) in checks)
+        {
+            try
+            {
+                var profile = await _operationConnections.ResolveAsync(
+                    profileCode,
+                    expectedDatabase,
+                    cancellationToken);
+                var connectionString = WithShortConnectTimeout(profile.ConnectionString);
+                await using var connection = new SqlConnection(connectionString);
+                await connection.OpenAsync(cancellationToken);
+                var actualDatabase = await connection.ExecuteScalarAsync<string>(new CommandDefinition(
+                    "SELECT DB_NAME();",
+                    commandTimeout: CommandTimeoutSeconds,
+                    cancellationToken: cancellationToken));
+                if (!string.Equals(actualDatabase, expectedDatabase, StringComparison.Ordinal))
+                {
+                    profilesReady = false;
+                    backupDirectoryReady = false;
+                    messages.Add($"Profile {profileCode} không mở đúng database BAK.");
+                    continue;
+                }
+
+                if (!await IsDirectoryVisibleToSqlServerAsync(
+                        connection,
+                        QlhvBackupRefreshExecutor.BackupDirectory,
+                        cancellationToken))
+                {
+                    backupDirectoryReady = false;
+                    messages.Add(
+                        $"SQL Server của profile {profileCode} không truy cập được thư mục D:\\SQL_BACKUP.");
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch
+            {
+                profilesReady = false;
+                backupDirectoryReady = false;
+                messages.Add($"Profile {profileCode} chưa sẵn sàng.");
+            }
+        }
+
+        return new BackupValidationResult(profilesReady, backupDirectoryReady);
+    }
+
+    private async Task<bool> IsDirectoryVisibleToSqlServerAsync(
+        SqlConnection connection,
+        string directory,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await connection.ExecuteScalarAsync<int>(new CommandDefinition(
+                SqlDirectoryProbeSql,
+                new { Directory = directory },
+                commandTimeout: CommandTimeoutSeconds,
+                cancellationToken: cancellationToken)) == 1;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private bool IsPhotoStorageReady()
+    {
+        try
+        {
+            return Directory.Exists(_photoPaths.PhotoRoot);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private bool IsRuntimeStorageWritable()
+    {
+        try
+        {
+            var root = Path.GetFullPath(_options.Root);
+            return IsDirectoryWritable(Path.Combine(root, "logs")) &&
+                IsDirectoryWritable(Path.Combine(root, "run"));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsDirectoryWritable(string directory)
+    {
+        if (!Directory.Exists(directory))
+        {
+            return false;
+        }
+
+        var probePath = Path.Combine(directory, $".qlhv-ready-{Guid.NewGuid():N}.tmp");
+        try
+        {
+            using var stream = new FileStream(
+                probePath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 1,
+                FileOptions.DeleteOnClose);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(probePath);
+            }
+            catch
+            {
+                // The readiness probe never leaves a failure marker behind intentionally.
+            }
+        }
+    }
+
+    private sealed class AuthReadinessRow
+    {
+        public bool AdminRoleExists { get; init; }
+
+        public bool ViewerRoleExists { get; init; }
+
+        public bool ActiveAdminExists { get; init; }
+    }
+
+    private sealed record BackupValidationResult(
+        bool ProfilesReady,
+        bool BackupDirectoryReady);
+
+    private const string RequiredTablesSql = """
+SELECT tableRow.name
+FROM sys.tables AS tableRow
+INNER JOIN sys.schemas AS schemaRow
+    ON schemaRow.schema_id = tableRow.schema_id
+WHERE schemaRow.name = N'dbo'
+  AND tableRow.name IN @RequiredTables;
+""";
+
+    private const string AuthenticationReadinessSql = """
+SELECT
+    CAST(CASE WHEN EXISTS
+    (
+        SELECT 1
+        FROM dbo.App_Role
+        WHERE RoleCode = @AdminRole
+          AND IsDeleted = 0
+    ) THEN 1 ELSE 0 END AS bit) AS AdminRoleExists,
+    CAST(CASE WHEN EXISTS
+    (
+        SELECT 1
+        FROM dbo.App_Role
+        WHERE RoleCode = @ViewerRole
+          AND IsDeleted = 0
+    ) THEN 1 ELSE 0 END AS bit) AS ViewerRoleExists,
+    CAST(CASE WHEN EXISTS
+    (
+        SELECT 1
+        FROM dbo.App_User AS userRow
+        INNER JOIN dbo.App_UserRole AS userRole
+            ON userRole.UserId = userRow.UserId
+        INNER JOIN dbo.App_Role AS roleRow
+            ON roleRow.RoleId = userRole.RoleId
+        WHERE userRow.IsActive = 1
+          AND userRow.IsDeleted = 0
+          AND roleRow.IsDeleted = 0
+          AND roleRow.RoleCode = @AdminRole
+    ) THEN 1 ELSE 0 END AS bit) AS ActiveAdminExists;
+""";
+
+    private const string SqlDirectoryProbeSql = """
+DECLARE @result TABLE
+(
+    [File Exists] int,
+    [File is a Directory] int,
+    [Parent Directory Exists] int
+);
+INSERT INTO @result
+EXEC master.dbo.xp_fileexist @Directory;
+SELECT TOP (1) [File is a Directory]
+FROM @result;
+""";
+}

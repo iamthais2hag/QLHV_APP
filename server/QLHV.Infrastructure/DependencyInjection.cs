@@ -3,12 +3,14 @@ using Microsoft.Extensions.DependencyInjection;
 using QLHV.Application.Auth;
 using QLHV.Application.CsdtConnections;
 using QLHV.Application.HocVien;
+using QLHV.Application.Runtime;
 using QLHV.Application.Sync;
 using QLHV.Application.Sync.Configuration;
 using QLHV.Application.Sync.Connections;
 using QLHV.Infrastructure.Auth;
 using QLHV.Infrastructure.CsdtConnections;
 using QLHV.Infrastructure.HocVien;
+using QLHV.Infrastructure.Runtime;
 using QLHV.Infrastructure.Sync;
 using AppSyncOptions = QLHV.Application.Sync.SyncOptions;
 
@@ -30,6 +32,7 @@ public static class DependencyInjection
         services.Configure<SyncExecutionOptions>(configuration.GetSection(SyncExecutionOptions.SectionName));
         services.Configure<QlhvOperationsOptions>(configuration.GetSection(QlhvOperationsOptions.SectionName));
         services.Configure<FileStorageOptions>(configuration.GetSection(FileStorageOptions.SectionName));
+        services.Configure<QlhvRuntimeOptions>(configuration.GetSection(QlhvRuntimeOptions.SectionName));
         if (!string.IsNullOrWhiteSpace(contentRootPath))
         {
             services.PostConfigure<FileStorageOptions>(options =>
@@ -42,6 +45,9 @@ public static class DependencyInjection
         services.AddSingleton<IConnectionPasswordProtector, UnavailableConnectionPasswordProtector>();
         services.AddSingleton<ICsdtConnectionTester, SqlServerCsdtConnectionTester>();
         services.AddSingleton<HocVienPhotoPathResolver>();
+        services.AddSingleton<RuntimeReadinessCache>();
+        services.AddScoped<IRuntimeReadinessProbe, SqlServerRuntimeReadinessProbe>();
+        services.AddScoped<IRuntimeReadinessService, RuntimeReadinessService>();
         services.AddScoped<IHocVienPhotoService, HocVienPhotoService>();
         services.AddSingleton<ISyncConnectionProvider, SyncConnectionProvider>();
         services.AddScoped<IV2HocVienSourceRepository, V2HocVienSourceRepository>();

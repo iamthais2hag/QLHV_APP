@@ -4,12 +4,14 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using QLHV.Application.Auth;
+using QLHV.Application.Runtime;
 using QLHV.Application.Sync.Dtos;
 
 namespace QLHV.Tests.Auth;
@@ -139,6 +141,10 @@ public sealed class AuthApiIntegrationTests : IClassFixture<AuthApiFactory>
         });
 
         Assert.Equal(HttpStatusCode.Unauthorized, login.StatusCode);
+        var problem = await login.Content.ReadFromJsonAsync<ProblemDetails>();
+        Assert.NotNull(problem);
+        Assert.Equal("Tên đăng nhập hoặc mật khẩu không đúng.", problem.Detail);
+        Assert.True(problem.Extensions.ContainsKey("correlationId"));
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/auth/me")).StatusCode);
     }
 
@@ -211,7 +217,11 @@ public sealed class AuthApiIntegrationTests : IClassFixture<AuthApiFactory>
             Password = AuthApiFactory.SessionPassword,
         });
 
-        Assert.Equal(HttpStatusCode.Unauthorized, correctWhileLocked.StatusCode);
+        Assert.Equal((HttpStatusCode)423, correctWhileLocked.StatusCode);
+        var lockedProblem = await correctWhileLocked.Content.ReadFromJsonAsync<ProblemDetails>();
+        Assert.NotNull(lockedProblem);
+        Assert.Contains("tạm khóa", lockedProblem.Detail, StringComparison.OrdinalIgnoreCase);
+        Assert.True(lockedProblem.Extensions.ContainsKey("correlationId"));
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/auth/me")).StatusCode);
     }
 
@@ -273,10 +283,34 @@ public sealed class AuthApiFactory : WebApplicationFactory<Program>
         {
             services.RemoveAll<IAppUserRepository>();
             services.AddSingleton<IAppUserRepository>(_users);
+            services.RemoveAll<IRuntimeReadinessService>();
+            services.AddSingleton<IRuntimeReadinessService>(new ReadyRuntimeReadinessService());
             services.RemoveAll<IHostedService>();
             services.PostConfigure<CookieAuthenticationOptions>(
                 CookieAuthenticationDefaults.AuthenticationScheme,
                 options => options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest);
+        });
+    }
+
+    private sealed class ReadyRuntimeReadinessService : IRuntimeReadinessService
+    {
+        public Task<RuntimeStatusDto> GetStatusAsync(
+            CancellationToken cancellationToken = default) => Task.FromResult(new RuntimeStatusDto
+        {
+            IsReady = true,
+            Version = "test",
+            Environment = "Testing",
+            ConfigurationReady = true,
+            DatabaseConnected = true,
+            DatabaseName = "QLHV_APP",
+            AuthenticationReady = true,
+            RequiredSchemaReady = true,
+            BackupProfilesReady = true,
+            BackupStorageReady = true,
+            FileStorageReady = true,
+            RuntimeStorageReady = true,
+            CheckedAtUtc = DateTime.UtcNow,
+            Messages = ["ready"],
         });
     }
 
