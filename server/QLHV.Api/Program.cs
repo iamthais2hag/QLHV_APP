@@ -25,9 +25,11 @@ builder.Services
         options.Cookie.Name = "QLHV.Auth";
         options.Cookie.HttpOnly = true;
         options.Cookie.SameSite = SameSiteMode.Lax;
-        options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
-            ? CookieSecurePolicy.SameAsRequest
-            : CookieSecurePolicy.Always;
+        options.Cookie.SecurePolicy = builder.Configuration.GetValue(
+            "Authentication:Cookie:SecurePolicy",
+            builder.Environment.IsDevelopment()
+                ? CookieSecurePolicy.SameAsRequest
+                : CookieSecurePolicy.Always);
         options.ExpireTimeSpan = TimeSpan.FromHours(8);
         options.SlidingExpiration = true;
         options.EventsType = typeof(QlhvCookieAuthenticationEvents);
@@ -112,6 +114,11 @@ if (enableHttpsRedirection)
     app.UseHttpsRedirection();
 }
 
+app.UseDefaultFiles();
+app.UseStaticFiles();
+// Keep endpoint selection after the static middleware so the catch-all SPA
+// endpoint cannot pre-empt real files under wwwroot.
+app.UseRouting();
 app.UseCors(FrontendCors);
 app.UseAuthentication();
 app.UseAuthorization();
@@ -121,6 +128,37 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok" }))
     .AllowAnonymous();
 
 app.MapControllers();
+
+// Serve client-side routes from the published SPA without ever disguising an
+// unknown API, diagnostics, health, or static-file request as an HTML page.
+app.MapMethods("/{**path}", [HttpMethods.Get, HttpMethods.Head], async context =>
+    {
+        var requestPath = context.Request.Path;
+        var isPageRequest = HttpMethods.IsGet(context.Request.Method)
+            || HttpMethods.IsHead(context.Request.Method);
+        var isReservedPath = requestPath.StartsWithSegments("/api")
+            || requestPath.StartsWithSegments("/swagger")
+            || requestPath.StartsWithSegments("/health");
+        var hasFileExtension = Path.HasExtension(requestPath.Value);
+
+        if (!isPageRequest || isReservedPath || hasFileExtension)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+
+        var indexFile = app.Environment.WebRootFileProvider.GetFileInfo("index.html");
+        if (!indexFile.Exists)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+
+        context.Response.ContentType = "text/html; charset=utf-8";
+        await context.Response.SendFileAsync(indexFile);
+    })
+    .AllowAnonymous()
+    .WithOrder(int.MaxValue);
 
 app.Run();
 

@@ -1,7 +1,6 @@
 import { apiFetch } from '../../api/apiFetch';
+import { API_BASE } from '../../api/apiBase';
 import type { AuthenticatedUser, LoginRequest } from './types';
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api';
 
 export async function getCurrentUser(signal?: AbortSignal): Promise<AuthenticatedUser | null> {
   const response = await apiFetch(`${API_BASE}/auth/me`, {

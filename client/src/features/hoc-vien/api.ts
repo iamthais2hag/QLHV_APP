@@ -11,8 +11,7 @@ import type {
   PagedResult,
 } from './types';
 import { apiFetch } from '../../api/apiFetch';
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api';
+import { API_BASE } from '../../api/apiBase';
 
 export interface HocVienExportResult {
   blob: Blob;
