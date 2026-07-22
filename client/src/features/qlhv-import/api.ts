@@ -13,8 +13,7 @@ import type {
   QlhvRefreshBackupResult,
 } from './types';
 import { apiFetch } from '../../api/apiFetch';
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api';
+import { API_BASE } from '../../api/apiBase';
 
 export async function getQlhvOperationsStatus(
   sourceType: QlhvImportSourceKind,

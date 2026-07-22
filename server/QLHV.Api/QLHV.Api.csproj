@@ -7,7 +7,17 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);1591</NoWarn>
     <UserSecretsId>1cd4be87-31a3-4388-b43b-cbc8a3e2d9f8</UserSecretsId>
+    <ClientRoot>$(MSBuildProjectDirectory)\..\..\client</ClientRoot>
+    <ClientBuildCommand Condition="'$(OS)' == 'Windows_NT'">npm.cmd run build</ClientBuildCommand>
+    <ClientBuildCommand Condition="'$(OS)' != 'Windows_NT'">npm run build</ClientBuildCommand>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Content Update="appsettings.Development.json">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Hangfire.AspNetCore" Version="1.8.17" />
@@ -21,5 +31,23 @@
     <ProjectReference Include="..\QLHV.Infrastructure\QLHV.Infrastructure.csproj" />
     <ProjectReference Include="..\QLHV.Shared\QLHV.Shared.csproj" />
   </ItemGroup>
+
+  <Target Name="PublishClientAssets" AfterTargets="ComputeFilesToPublish">
+    <Exec
+      Condition="'$(SkipClientBuild)' != 'true'"
+      WorkingDirectory="$(ClientRoot)"
+      Command="$(ClientBuildCommand)" />
+    <ItemGroup>
+      <_ClientDistFiles Include="$(ClientRoot)\dist\**\*" />
+      <ResolvedFileToPublish Include="@(_ClientDistFiles)">
+        <RelativePath>wwwroot\%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+    <Error
+      Condition="'@(_ClientDistFiles)' == ''"
+      Text="Client build produced no files under $(ClientRoot)\dist." />
+  </Target>
 
 </Project>
