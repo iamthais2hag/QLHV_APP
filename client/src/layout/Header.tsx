@@ -1,3 +1,6 @@
+import { useState } from 'react';
+import { useAuth } from '../features/auth/AuthContext';
+
 interface HeaderProps {
   title: string;
   subtitle?: string;
@@ -5,6 +8,25 @@ interface HeaderProps {
 }
 
 export default function Header({ title, subtitle, onToggleSidebar }: HeaderProps) {
+  const { user, logout } = useAuth();
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
+
+  async function handleLogout() {
+    if (loggingOut) {
+      return;
+    }
+    setLoggingOut(true);
+    setLogoutError(null);
+    try {
+      await logout();
+    } catch (error) {
+      setLogoutError(error instanceof Error ? error.message : 'Không thể đăng xuất.');
+    } finally {
+      setLoggingOut(false);
+    }
+  }
+
   return (
     <header className="header">
       <button
@@ -21,11 +43,31 @@ export default function Header({ title, subtitle, onToggleSidebar }: HeaderProps
       </div>
       <div className="header__spacer" />
       <div className="header__user">
-        <span>Quản trị viên</span>
-        <span className="header__avatar" aria-hidden="true">
-          QT
+        <span className="header__user-details">
+          <strong>{user?.displayName || user?.username}</strong>
+          <small>{user?.role}</small>
         </span>
+        <span className="header__avatar" aria-hidden="true">
+          {getInitials(user?.displayName || user?.username || '')}
+        </span>
+        <button
+          type="button"
+          className="header__logout"
+          onClick={() => void handleLogout()}
+          disabled={loggingOut}
+        >
+          {loggingOut ? 'Đang thoát...' : 'Đăng xuất'}
+        </button>
+        {logoutError && <span className="header__logout-error" role="alert">{logoutError}</span>}
       </div>
     </header>
   );
+}
+
+function getInitials(value: string): string {
+  const words = value.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) {
+    return '?';
+  }
+  return words.slice(-2).map((word) => word[0]).join('').toLocaleUpperCase('vi-VN');
 }

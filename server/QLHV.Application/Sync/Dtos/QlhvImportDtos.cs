@@ -11,8 +11,6 @@ public class QlhvImportRequest
 
 public sealed class QlhvImportExecuteRequest : QlhvImportRequest
 {
-    public string? ConfirmText { get; set; }
-
     public string? ExpectedSnapshotToken { get; set; }
 }
 

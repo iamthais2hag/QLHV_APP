@@ -17,6 +17,7 @@ import type {
   MotoTargetDonViGTVTOptionsQuery,
   MotoTargetDonViGTVTOptionsResult,
 } from './types';
+import { apiFetch } from '../../api/apiFetch';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api';
 
@@ -31,7 +32,7 @@ export async function getMotoSyncPlan(
   query.set('maKhoaHoc', request.maKhoaHoc);
   query.set('allowDirtyData', request.allowDirtyData ? 'true' : 'false');
 
-  const response = await fetch(`${API_BASE}/dong-bo-v2/moto/sync-plan?${query.toString()}`, {
+  const response = await apiFetch(`${API_BASE}/dong-bo-v2/moto/sync-plan?${query.toString()}`, {
     method: 'GET',
     headers: { Accept: 'application/json' },
     signal,
@@ -57,7 +58,7 @@ export async function getMotoSyncKhoaHocOptions(
   }
   query.set('take', String(request.take ?? 50));
 
-  const response = await fetch(`${API_BASE}/dong-bo-v2/moto/khoa-hoc-options?${query.toString()}`, {
+  const response = await apiFetch(`${API_BASE}/dong-bo-v2/moto/khoa-hoc-options?${query.toString()}`, {
     method: 'GET',
     headers: { Accept: 'application/json' },
     signal,
@@ -81,7 +82,7 @@ export async function getMotoTargetDonViGTVTOptions(
   }
   query.set('take', String(request.take ?? 20));
 
-  const response = await fetch(`${API_BASE}/dong-bo-v2/moto/target-don-vi-gtvt-options?${query.toString()}`, {
+  const response = await apiFetch(`${API_BASE}/dong-bo-v2/moto/target-don-vi-gtvt-options?${query.toString()}`, {
     method: 'GET',
     headers: { Accept: 'application/json' },
     signal,
@@ -106,7 +107,7 @@ export async function getMotoCenterTransferPlan(
   query.set('maCSDTMoi', request.maCSDTMoi);
   query.set('maSoGTVTMoi', request.maSoGTVTMoi);
 
-  const response = await fetch(`${API_BASE}/dong-bo-v2/moto/center-transfer-plan?${query.toString()}`, {
+  const response = await apiFetch(`${API_BASE}/dong-bo-v2/moto/center-transfer-plan?${query.toString()}`, {
     method: 'GET',
     headers: { Accept: 'application/json' },
     signal,
@@ -123,7 +124,7 @@ export async function executeMotoCenterTransferTest(
   request: MotoCenterTransferExecuteRequest,
   signal?: AbortSignal,
 ): Promise<MotoCenterTransferExecuteResult> {
-  const response = await fetch(`${API_BASE}/dong-bo-v2/moto/center-transfer-test`, {
+  const response = await apiFetch(`${API_BASE}/dong-bo-v2/moto/center-transfer-test`, {
     method: 'POST',
     headers: {
       Accept: 'application/json',
@@ -169,7 +170,7 @@ export async function getMotoCenterTransferRunHistory(
     query.set('executed', normalizedRequest.executed ? 'true' : 'false');
   }
 
-  const response = await fetch(`${API_BASE}/dong-bo-v2/moto/center-transfer-runs?${query.toString()}`, {
+  const response = await apiFetch(`${API_BASE}/dong-bo-v2/moto/center-transfer-runs?${query.toString()}`, {
     method: 'GET',
     headers: { Accept: 'application/json' },
     signal,
@@ -186,7 +187,7 @@ export async function getMotoCenterTransferRunHistoryDetail(
   id: number,
   signal?: AbortSignal,
 ): Promise<MotoCenterTransferRunHistoryDetail> {
-  const response = await fetch(`${API_BASE}/dong-bo-v2/moto/center-transfer-runs/${id}`, {
+  const response = await apiFetch(`${API_BASE}/dong-bo-v2/moto/center-transfer-runs/${id}`, {
     method: 'GET',
     headers: { Accept: 'application/json' },
     signal,
@@ -203,7 +204,7 @@ export async function executeMotoSyncTest(
   request: MotoSyncExecuteRequest,
   signal?: AbortSignal,
 ): Promise<MotoSyncExecuteResult> {
-  const response = await fetch(`${API_BASE}/dong-bo-v2/moto/sync-test`, {
+  const response = await apiFetch(`${API_BASE}/dong-bo-v2/moto/sync-test`, {
     method: 'POST',
     headers: {
       Accept: 'application/json',
@@ -236,7 +237,7 @@ export async function getMotoSyncRunHistory(
   const query = new URLSearchParams();
   query.set('take', String(take));
 
-  const response = await fetch(`${API_BASE}/dong-bo-v2/moto/sync-runs?${query.toString()}`, {
+  const response = await apiFetch(`${API_BASE}/dong-bo-v2/moto/sync-runs?${query.toString()}`, {
     method: 'GET',
     headers: { Accept: 'application/json' },
     signal,
@@ -253,7 +254,7 @@ export async function getMotoSyncRunHistoryDetail(
   id: number,
   signal?: AbortSignal,
 ): Promise<MotoSyncRunHistoryDetail> {
-  const response = await fetch(`${API_BASE}/dong-bo-v2/moto/sync-runs/${id}`, {
+  const response = await apiFetch(`${API_BASE}/dong-bo-v2/moto/sync-runs/${id}`, {
     method: 'GET',
     headers: { Accept: 'application/json' },
     signal,

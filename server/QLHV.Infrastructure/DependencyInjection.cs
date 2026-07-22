@@ -1,10 +1,12 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using QLHV.Application.Auth;
 using QLHV.Application.CsdtConnections;
 using QLHV.Application.HocVien;
 using QLHV.Application.Sync;
 using QLHV.Application.Sync.Configuration;
 using QLHV.Application.Sync.Connections;
+using QLHV.Infrastructure.Auth;
 using QLHV.Infrastructure.CsdtConnections;
 using QLHV.Infrastructure.HocVien;
 using QLHV.Infrastructure.Sync;
@@ -20,6 +22,7 @@ public static class DependencyInjection
         IConfiguration configuration,
         string? contentRootPath = null)
     {
+        services.AddScoped<IAppUserRepository, AppUserRepository>();
         services.AddScoped<ICsdtConnectionProfileRepository, CsdtConnectionProfileRepository>();
         services.AddScoped<IHocVienRepository, HocVienRepository>();
 

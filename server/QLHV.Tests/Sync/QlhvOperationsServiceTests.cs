@@ -9,7 +9,7 @@ namespace QLHV.Tests.Sync;
 public sealed class QlhvOperationsServiceTests
 {
     [Fact]
-    public async Task Refresh_rejects_bad_confirmation_before_history_or_queue()
+    public async Task Refresh_rejects_unknown_source_before_history_or_queue()
     {
         var history = new FakeHistoryRepository();
         var queue = new FakeQueue();
@@ -17,8 +17,7 @@ public sealed class QlhvOperationsServiceTests
 
         var result = await service.QueueRefreshBackupAsync(new QlhvRefreshBackupRequest
         {
-            SourceType = "OTO",
-            ConfirmText = "wrong",
+            SourceType = "CUSTOM",
         });
 
         Assert.False(result.Accepted);
@@ -178,7 +177,6 @@ public sealed class QlhvOperationsServiceTests
     private static QlhvRefreshBackupRequest ValidRefreshRequest() => new()
     {
         SourceType = "OTO",
-        ConfirmText = QlhvOperationsService.RefreshConfirmationText,
     };
 
     private static QlhvOperationHistoryDto CompletedHistory(string operationType, string status) => new()

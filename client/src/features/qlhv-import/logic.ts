@@ -8,9 +8,6 @@ import type {
   QlhvRefreshBackupRequest,
 } from './types';
 
-export const QLHV_IMPORT_CONFIRM_TEXT = 'IMPORT QLHV CSĐT';
-export const QLHV_REFRESH_CONFIRM_TEXT = 'REFRESH CSDL BAK';
-
 export const QLHV_IMPORT_SOURCE_KINDS: readonly QlhvImportSourceKind[] = ['OTO', 'MOTO'];
 
 export const QLHV_IMPORT_SOURCES = {
@@ -112,30 +109,23 @@ export function buildExecuteRequest(
   plan: QlhvImportSnapshot<QlhvImportPlan> | null,
   currentRequest: QlhvImportRequest,
   status: QlhvOperationsStatus | null | undefined,
-  confirmText: string,
   busy: boolean,
 ): QlhvImportExecuteRequest | null {
   if (!plan
-    || !canOpenExecute(plan, currentRequest, status, busy)
-    || confirmText !== QLHV_IMPORT_CONFIRM_TEXT) {
+    || !canOpenExecute(plan, currentRequest, status, busy)) {
     return null;
   }
 
   return {
     ...plan.request,
-    confirmText,
     expectedSnapshotToken: plan.data.backupSnapshotToken,
   };
 }
 
 export function buildRefreshRequest(
   sourceKind: QlhvImportSourceKind,
-  confirmText: string,
-): QlhvRefreshBackupRequest | null {
-  if (confirmText !== QLHV_REFRESH_CONFIRM_TEXT) {
-    return null;
-  }
-  return { sourceType: sourceKind, confirmText };
+): QlhvRefreshBackupRequest {
+  return { sourceType: sourceKind };
 }
 
 export function getExecuteDisabledReason(

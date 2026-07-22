@@ -5,13 +5,14 @@ import type {
   TestCsdtConnectionProfileRequest,
   TestCsdtConnectionProfileResult,
 } from './types';
+import { apiFetch } from '../../api/apiFetch';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api';
 
 export async function getCsdtConnectionProfiles(
   signal?: AbortSignal,
 ): Promise<CsdtConnectionProfileListItem[]> {
-  const response = await fetch(`${API_BASE}/csdt-connection-profiles`, {
+  const response = await apiFetch(`${API_BASE}/csdt-connection-profiles`, {
     method: 'GET',
     headers: { Accept: 'application/json' },
     signal,
@@ -28,7 +29,7 @@ export async function getCsdtConnectionProfile(
   profileCode: string,
   signal?: AbortSignal,
 ): Promise<CsdtConnectionProfileDetail> {
-  const response = await fetch(`${API_BASE}/csdt-connection-profiles/${encodeURIComponent(profileCode)}`, {
+  const response = await apiFetch(`${API_BASE}/csdt-connection-profiles/${encodeURIComponent(profileCode)}`, {
     method: 'GET',
     headers: { Accept: 'application/json' },
     signal,
@@ -46,7 +47,7 @@ export async function saveCsdtConnectionProfile(
   request: SaveCsdtConnectionProfileRequest,
   signal?: AbortSignal,
 ): Promise<CsdtConnectionProfileDetail> {
-  const response = await fetch(`${API_BASE}/csdt-connection-profiles/${encodeURIComponent(profileCode)}`, {
+  const response = await apiFetch(`${API_BASE}/csdt-connection-profiles/${encodeURIComponent(profileCode)}`, {
     method: 'PUT',
     headers: {
       Accept: 'application/json',
@@ -68,7 +69,7 @@ export async function testCsdtConnectionProfile(
   request?: TestCsdtConnectionProfileRequest,
   signal?: AbortSignal,
 ): Promise<TestCsdtConnectionProfileResult> {
-  const response = await fetch(`${API_BASE}/csdt-connection-profiles/${encodeURIComponent(profileCode)}/test`, {
+  const response = await apiFetch(`${API_BASE}/csdt-connection-profiles/${encodeURIComponent(profileCode)}/test`, {
     method: 'POST',
     headers: {
       Accept: 'application/json',

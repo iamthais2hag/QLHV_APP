@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useAuth } from '../auth/AuthContext';
 import {
   executeQlhvImport,
   getQlhvImportDiagnostics,
@@ -10,16 +11,13 @@ import {
 import {
   buildExecuteRequest,
   buildRefreshRequest,
-  canOpenExecute,
   createImportRequest,
   getExecuteDisabledReason,
   getRefreshDisabledReason,
   isOperationBusy,
   isPlanSnapshotCurrent,
-  QLHV_IMPORT_CONFIRM_TEXT,
   QLHV_IMPORT_SOURCE_KINDS,
   QLHV_IMPORT_SOURCES,
-  QLHV_REFRESH_CONFIRM_TEXT,
   statusMatchesSource,
 } from './logic';
 import type {
@@ -38,6 +36,7 @@ const DATE_FORMAT = new Intl.DateTimeFormat('vi-VN', {
   timeStyle: 'medium',
 });
 const POLL_INTERVAL_MS = 2_500;
+const NO_WRITE_PERMISSION_MESSAGE = 'Bạn không có quyền thực hiện';
 
 type QlhvImportLastResult = QlhvImportSnapshot<QlhvImportExecuteResult> & {
   outcomeKind: 'executed' | 'blocked';
@@ -64,12 +63,6 @@ interface SourceViewState {
   pendingOperationId: string | null;
 }
 
-interface ConfirmationModalState {
-  sourceKind: QlhvImportSourceKind;
-  confirmText: string;
-  operationsKey: string;
-}
-
 function createEmptySourceState(): SourceViewState {
   return {
     status: null,
@@ -94,13 +87,13 @@ function createEmptySourceState(): SourceViewState {
 }
 
 export default function QlhvImportPage() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'Admin';
   const [activeSource, setActiveSource] = useState<QlhvImportSourceKind>('OTO');
   const [sources, setSources] = useState<Record<QlhvImportSourceKind, SourceViewState>>({
     OTO: createEmptySourceState(),
     MOTO: createEmptySourceState(),
   });
-  const [refreshModal, setRefreshModal] = useState<ConfirmationModalState | null>(null);
-  const [syncModal, setSyncModal] = useState<ConfirmationModalState | null>(null);
 
   function patchSource(sourceKind: QlhvImportSourceKind, patch: Partial<SourceViewState>) {
     setSources((current) => ({
@@ -302,56 +295,27 @@ export default function QlhvImportPage() {
     }
   }
 
-  function openRefreshConfirmation(sourceKind: QlhvImportSourceKind) {
-    const source = sources[sourceKind];
+  async function handleRefresh(sourceKind: QlhvImportSourceKind) {
+    const state = sources[sourceKind];
+    setActiveSource(sourceKind);
+    if (!isAdmin) {
+      patchSource(sourceKind, { operationError: NO_WRITE_PERMISSION_MESSAGE });
+      return;
+    }
+
+    const body = buildRefreshRequest(sourceKind);
     if (getRefreshDisabledReason(
-      source.status,
-      sourceKind,
-      source.refreshing || source.executing || !!source.pendingOperationId,
-    )) {
-      return;
-    }
-    setActiveSource(sourceKind);
-    setSyncModal(null);
-    setRefreshModal({ sourceKind, confirmText: '', operationsKey: '' });
-    patchSource(sourceKind, { operationError: null, operationNotice: null });
-  }
-
-  function openSyncConfirmation(sourceKind: QlhvImportSourceKind) {
-    const state = sources[sourceKind];
-    const request = createImportRequest(sourceKind);
-    if (!canOpenExecute(
-      state.plan,
-      request,
       state.status,
-      state.planLoading || state.executing || !!state.pendingOperationId,
+      sourceKind,
+      state.refreshing || state.executing || !!state.pendingOperationId,
     )) {
-      return;
-    }
-    setActiveSource(sourceKind);
-    setRefreshModal(null);
-    setSyncModal({ sourceKind, confirmText: '', operationsKey: '' });
-    patchSource(sourceKind, { operationError: null, operationNotice: null });
-  }
-
-  async function handleRefresh() {
-    if (!refreshModal) {
-      return;
-    }
-    const { sourceKind, confirmText, operationsKey } = refreshModal;
-    const state = sources[sourceKind];
-    const body = buildRefreshRequest(sourceKind, confirmText);
-    if (!body
-      || !operationsKey
-      || getRefreshDisabledReason(state.status, sourceKind, state.refreshing || !!state.pendingOperationId)) {
-      patchSource(sourceKind, { operationError: 'Chuỗi xác nhận, operations key hoặc trạng thái nguồn không hợp lệ.' });
+      patchSource(sourceKind, { operationError: 'Trạng thái nguồn không hợp lệ để làm mới BAK.' });
       return;
     }
 
     patchSource(sourceKind, { refreshing: true, operationError: null, operationNotice: null });
     try {
-      const result = await refreshQlhvBackup(body, operationsKey);
-      setRefreshModal(null);
+      const result = await refreshQlhvBackup(body);
       patchSource(sourceKind, {
         refreshing: false,
         pendingOperationId: result.operationId,
@@ -368,29 +332,29 @@ export default function QlhvImportPage() {
     }
   }
 
-  async function handleExecute() {
-    if (!syncModal) {
+  async function handleExecute(sourceKind: QlhvImportSourceKind) {
+    const state = sources[sourceKind];
+    setActiveSource(sourceKind);
+    if (!isAdmin) {
+      patchSource(sourceKind, { operationError: NO_WRITE_PERMISSION_MESSAGE });
       return;
     }
-    const { sourceKind, confirmText, operationsKey } = syncModal;
-    const state = sources[sourceKind];
+
     const request = createImportRequest(sourceKind);
     const body = buildExecuteRequest(
       state.plan,
       request,
       state.status,
-      confirmText,
-      state.planLoading || state.executing || !!state.pendingOperationId,
+      state.planLoading || state.executing || state.refreshing || !!state.pendingOperationId,
     );
-    if (!body || !operationsKey || !state.plan) {
-      patchSource(sourceKind, { operationError: 'Kế hoạch, snapshot token, chuỗi xác nhận hoặc operations key không hợp lệ.' });
+    if (!body || !state.plan) {
+      patchSource(sourceKind, { operationError: 'Kế hoạch hoặc snapshot token không hợp lệ.' });
       return;
     }
 
     patchSource(sourceKind, { executing: true, operationError: null, operationNotice: null });
     try {
-      const outcome = await executeQlhvImport(body, operationsKey);
-      setSyncModal(null);
+      const outcome = await executeQlhvImport(body);
       patchSource(sourceKind, {
         executing: false,
         lastResult: { request, data: outcome.result, outcomeKind: outcome.kind },
@@ -428,12 +392,14 @@ export default function QlhvImportPage() {
     || active.executing
     || active.refreshing
     || !!active.pendingOperationId;
-  const activeExecuteReason = getExecuteDisabledReason(
-    active.plan,
-    activeRequest,
-    active.status,
-    activeBusy,
-  );
+  const activeExecuteReason = !isAdmin
+    ? NO_WRITE_PERMISSION_MESSAGE
+    : getExecuteDisabledReason(
+        active.plan,
+        activeRequest,
+        active.status,
+        activeBusy,
+      );
 
   return (
     <div className="qlhv-import-page">
@@ -446,6 +412,12 @@ export default function QlhvImportPage() {
         <span className="qlhv-import-badge">Live → BAK → QLHV_APP</span>
       </section>
 
+      {!isAdmin && (
+        <div className="qlhv-import-permission-note" role="status">
+          {NO_WRITE_PERMISSION_MESSAGE}. Bạn vẫn có thể xem trạng thái, chẩn đoán, kế hoạch và lịch sử.
+        </div>
+      )}
+
       <section className="qlhv-import-source-cards" aria-label="Nguồn dữ liệu CSĐT">
         {QLHV_IMPORT_SOURCE_KINDS.map((sourceKind) => {
           const state = sources[sourceKind];
@@ -456,23 +428,27 @@ export default function QlhvImportPage() {
               sourceKind={sourceKind}
               state={state}
               selected={activeSource === sourceKind}
-              executeReason={getExecuteDisabledReason(
-                state.plan,
-                request,
-                state.status,
-                state.planLoading || state.executing || state.refreshing || !!state.pendingOperationId,
-              )}
-              refreshReason={getRefreshDisabledReason(
-                state.status,
-                sourceKind,
-                state.refreshing || state.executing || !!state.pendingOperationId,
-              )}
+              executeReason={!isAdmin
+                ? NO_WRITE_PERMISSION_MESSAGE
+                : getExecuteDisabledReason(
+                    state.plan,
+                    request,
+                    state.status,
+                    state.planLoading || state.executing || state.refreshing || !!state.pendingOperationId,
+                  )}
+              refreshReason={!isAdmin
+                ? NO_WRITE_PERMISSION_MESSAGE
+                : getRefreshDisabledReason(
+                    state.status,
+                    sourceKind,
+                    state.refreshing || state.executing || !!state.pendingOperationId,
+                  )}
               onSelect={() => setActiveSource(sourceKind)}
               onReload={() => void reloadStatus(sourceKind, true)}
-              onRefresh={() => openRefreshConfirmation(sourceKind)}
+              onRefresh={() => void handleRefresh(sourceKind)}
               onDiagnostics={() => void loadDiagnostics(sourceKind)}
               onPlan={() => void loadPlan(sourceKind)}
-              onSync={() => openSyncConfirmation(sourceKind)}
+              onSync={() => void handleExecute(sourceKind)}
             />
           );
         })}
@@ -528,10 +504,11 @@ export default function QlhvImportPage() {
             <button
               type="button"
               className="btn btn--primary"
-              onClick={() => openSyncConfirmation(activeSource)}
+              onClick={() => void handleExecute(activeSource)}
               disabled={!!activeExecuteReason}
+              aria-busy={active.executing}
             >
-              Đồng bộ vào QLHV_APP
+              {active.executing ? 'Đang đồng bộ...' : 'Đồng bộ vào QLHV_APP'}
             </button>
           </div>
         </section>
@@ -554,34 +531,6 @@ export default function QlhvImportPage() {
         </section>
       )}
 
-      {refreshModal && (
-        <RefreshModal
-          state={refreshModal}
-          sourceStatus={sources[refreshModal.sourceKind].status}
-          submitting={sources[refreshModal.sourceKind].refreshing}
-          error={sources[refreshModal.sourceKind].operationError}
-          onChange={setRefreshModal}
-          onClose={() => {
-            if (!sources[refreshModal.sourceKind].refreshing) setRefreshModal(null);
-          }}
-          onSubmit={() => void handleRefresh()}
-        />
-      )}
-
-      {syncModal && sources[syncModal.sourceKind].plan && (
-        <SyncModal
-          state={syncModal}
-          plan={sources[syncModal.sourceKind].plan!.data}
-          status={sources[syncModal.sourceKind].status}
-          submitting={sources[syncModal.sourceKind].executing}
-          error={sources[syncModal.sourceKind].operationError}
-          onChange={setSyncModal}
-          onClose={() => {
-            if (!sources[syncModal.sourceKind].executing) setSyncModal(null);
-          }}
-          onSubmit={() => void handleExecute()}
-        />
-      )}
     </div>
   );
 }
@@ -648,8 +597,8 @@ function SourceCard({
         <button type="button" className="btn btn--ghost" onClick={onReload} disabled={state.statusLoading}>
           {state.statusLoading ? 'Đang tải...' : 'Tải trạng thái'}
         </button>
-        <button type="button" className="btn btn--ghost" onClick={onRefresh} disabled={!!refreshReason} title={refreshReason ?? undefined}>
-          Làm mới dữ liệu BAK
+        <button type="button" className="btn btn--ghost" onClick={onRefresh} disabled={!!refreshReason} title={refreshReason ?? undefined} aria-busy={state.refreshing}>
+          {state.refreshing ? 'Đang làm mới BAK...' : 'Làm mới dữ liệu BAK'}
         </button>
         <button type="button" className="btn btn--ghost" onClick={onDiagnostics} disabled={busy}>
           Kiểm tra dữ liệu
@@ -657,243 +606,11 @@ function SourceCard({
         <button type="button" className="btn btn--ghost" onClick={onPlan} disabled={busy}>
           Lập kế hoạch
         </button>
-        <button type="button" className="btn btn--primary" onClick={onSync} disabled={!!executeReason} title={executeReason ?? undefined}>
-          Đồng bộ vào QLHV_APP
+        <button type="button" className="btn btn--primary" onClick={onSync} disabled={!!executeReason} title={executeReason ?? undefined} aria-busy={state.executing}>
+          {state.executing ? 'Đang đồng bộ...' : 'Đồng bộ vào QLHV_APP'}
         </button>
       </div>
     </article>
-  );
-}
-
-function RefreshModal({
-  state,
-  sourceStatus,
-  submitting,
-  error,
-  onChange,
-  onClose,
-  onSubmit,
-}: {
-  state: ConfirmationModalState;
-  sourceStatus: QlhvOperationsStatus | null;
-  submitting: boolean;
-  error: string | null;
-  onChange: (value: ConfirmationModalState) => void;
-  onClose: () => void;
-  onSubmit: () => void;
-}) {
-  const source = QLHV_IMPORT_SOURCES[state.sourceKind];
-  const valid = !!state.operationsKey
-    && state.confirmText === QLHV_REFRESH_CONFIRM_TEXT
-    && !submitting
-    && !getRefreshDisabledReason(sourceStatus, state.sourceKind, submitting);
-  return (
-    <ModalShell title="Làm mới database BAK" id="qlhv-refresh-title" onSubmit={onSubmit}>
-      <h3 id="qlhv-refresh-title" className="qlhv-import-modal__title">
-        {source.liveDatabaseName} → {source.backupDatabaseName}
-      </h3>
-      <div className="qlhv-import-full-sync-warning" role="alert">
-        Database BAK hiện tại sẽ được backup dự phòng trước khi restore snapshot live mới.
-        Kế hoạch full sync cũ sẽ bị vô hiệu.
-      </div>
-      <div className="qlhv-import-confirm-summary">
-        <SummaryRow label="Loại nguồn cố định" value={state.sourceKind} />
-        <SummaryRow label="Database live" value={source.liveDatabaseName} />
-        <SummaryRow label="Database BAK" value={source.backupDatabaseName} />
-        <SummaryRow label="Mã CSĐT" value={source.maCSDT} />
-      </div>
-      {error && <ErrorBanner message={error} />}
-      <OperationsKeyField
-        value={state.operationsKey}
-        disabled={submitting}
-        onChange={(operationsKey) => onChange({ ...state, operationsKey })}
-      />
-      <ConfirmationField
-        expected={QLHV_REFRESH_CONFIRM_TEXT}
-        value={state.confirmText}
-        disabled={submitting}
-        onChange={(confirmText) => onChange({ ...state, confirmText })}
-      />
-      <ModalActions
-        submitting={submitting}
-        submitLabel="Xác nhận làm mới BAK"
-        valid={valid}
-        onClose={onClose}
-      />
-    </ModalShell>
-  );
-}
-
-function SyncModal({
-  state,
-  plan,
-  status,
-  submitting,
-  error,
-  onChange,
-  onClose,
-  onSubmit,
-}: {
-  state: ConfirmationModalState;
-  plan: QlhvImportPlan;
-  status: QlhvOperationsStatus | null;
-  submitting: boolean;
-  error: string | null;
-  onChange: (value: ConfirmationModalState) => void;
-  onClose: () => void;
-  onSubmit: () => void;
-}) {
-  const source = QLHV_IMPORT_SOURCES[state.sourceKind];
-  const request = createImportRequest(state.sourceKind);
-  const validRequest = buildExecuteRequest(
-    { request, data: plan },
-    request,
-    status,
-    state.confirmText,
-    submitting,
-  );
-  const valid = !!state.operationsKey && !!validRequest;
-  return (
-    <ModalShell title="Xác nhận full sync" id="qlhv-sync-title" onSubmit={onSubmit}>
-      <h3 id="qlhv-sync-title" className="qlhv-import-modal__title">
-        {source.backupDatabaseName} → QLHV_APP / {source.sourceProfileCode}
-      </h3>
-      <div className="qlhv-import-confirm-summary">
-        <SummaryRow label="Snapshot token" value={shortToken(plan.backupSnapshotToken)} />
-        <SummaryRow label="Kế hoạch tạo lúc" value={formatDate(plan.generatedAtUtc)} />
-        <SummaryRow label="Dự kiến thêm" value={formatNumber(plan.plannedInsertHocVienRows)} />
-        <SummaryRow label="Dự kiến cập nhật" value={formatNumber(plan.plannedUpdateHocVienRows)} />
-        <SummaryRow label="Dự kiến khôi phục" value={formatNumber(plan.plannedReactivateHocVienRows)} />
-        <SummaryRow label="Dự kiến xóa mềm" value={formatNumber(plan.plannedSoftDeleteHocVienRows)} />
-        <SummaryRow label="Dự kiến bỏ qua" value={formatNumber(plan.plannedSkipHocVienRows)} />
-      </div>
-      <div className="qlhv-import-full-sync-warning" role="alert">
-        Backend sẽ đọc lại snapshot token và khóa thao tác theo nguồn trước khi ghi.
-        Chuỗi xác nhận cũ được giữ để tương thích API hiện tại.
-      </div>
-      {error && <ErrorBanner message={error} />}
-      <OperationsKeyField
-        value={state.operationsKey}
-        disabled={submitting}
-        onChange={(operationsKey) => onChange({ ...state, operationsKey })}
-      />
-      <ConfirmationField
-        expected={QLHV_IMPORT_CONFIRM_TEXT}
-        value={state.confirmText}
-        disabled={submitting}
-        onChange={(confirmText) => onChange({ ...state, confirmText })}
-      />
-      <ModalActions
-        submitting={submitting}
-        submitLabel="Xác nhận và full sync"
-        valid={valid}
-        onClose={onClose}
-      />
-    </ModalShell>
-  );
-}
-
-function ModalShell({
-  title,
-  id,
-  onSubmit,
-  children,
-}: {
-  title: string;
-  id: string;
-  onSubmit: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="qlhv-import-modal" role="presentation">
-      <form
-        className="qlhv-import-modal__dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={id}
-        onSubmit={(event) => {
-          event.preventDefault();
-          onSubmit();
-        }}
-      >
-        <SectionHeading title={title} />
-        {children}
-      </form>
-    </div>
-  );
-}
-
-function OperationsKeyField({
-  value,
-  disabled,
-  onChange,
-}: {
-  value: string;
-  disabled: boolean;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="field">
-      <span className="field__label">Operations key</span>
-      <input
-        type="password"
-        className="field__input"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        autoComplete="off"
-        spellCheck={false}
-        disabled={disabled}
-      />
-      <small className="field__hint">Key chỉ được giữ trong bộ nhớ của modal này, không lưu trên trình duyệt.</small>
-    </label>
-  );
-}
-
-function ConfirmationField({
-  expected,
-  value,
-  disabled,
-  onChange,
-}: {
-  expected: string;
-  value: string;
-  disabled: boolean;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="field">
-      <span className="field__label">Nhập chính xác <code>{expected}</code></span>
-      <input
-        className="field__input"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        autoComplete="off"
-        spellCheck={false}
-        autoFocus
-        disabled={disabled}
-      />
-    </label>
-  );
-}
-
-function ModalActions({
-  submitting,
-  submitLabel,
-  valid,
-  onClose,
-}: {
-  submitting: boolean;
-  submitLabel: string;
-  valid: boolean;
-  onClose: () => void;
-}) {
-  return (
-    <div className="qlhv-import-modal__actions">
-      <button type="button" className="btn btn--ghost" onClick={onClose} disabled={submitting}>Hủy</button>
-      <button type="submit" className="btn btn--primary" disabled={!valid}>
-        {submitting ? 'Đang gửi yêu cầu...' : submitLabel}
-      </button>
-    </div>
   );
 }
 

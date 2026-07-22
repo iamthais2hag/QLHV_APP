@@ -1,4 +1,6 @@
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
+using QLHV.Application.Auth;
 using QLHV.Application.CsdtConnections;
 using QLHV.Application.HocVien;
 using QLHV.Application.HocVien.Printing;
@@ -11,6 +13,9 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
+        services.AddScoped<IPasswordHasher<AppUserCredential>, PasswordHasher<AppUserCredential>>();
+        services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<IFirstAdminSeeder, FirstAdminSeeder>();
         services.AddScoped<IHocVienService, HocVienService>();
         services.AddSingleton(HocVienCardTemplate.Default);
         services.AddSingleton<IHocVienCardPdfGenerator, HocVienCardPdfGenerator>();
@@ -19,7 +24,6 @@ public static class DependencyInjection
         services.AddScoped<IHocVienSyncService, HocVienSyncService>();
         services.AddScoped<IQlhvImportService, QlhvImportService>();
         services.AddScoped<IQlhvOperationsService, QlhvOperationsService>();
-        services.AddSingleton<IQlhvOperationsKeyValidator, QlhvOperationsKeyValidator>();
         services.AddScoped<IMotoSyncService, MotoSyncService>();
         return services;
     }

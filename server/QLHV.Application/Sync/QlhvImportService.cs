@@ -9,7 +9,6 @@ namespace QLHV.Application.Sync;
 
 public sealed class QlhvImportService : IQlhvImportService
 {
-    public const string ConfirmationText = "IMPORT QLHV CSĐT";
     public const string AppKhoaHocNotSupportedWarning =
         "App_KhoaHoc import chua duoc ho tro trong task nay.";
 
@@ -142,14 +141,6 @@ public sealed class QlhvImportService : IQlhvImportService
     {
         request ??= new QlhvImportExecuteRequest();
         var normalized = Normalize(request);
-
-        if (!string.Equals(request.ConfirmText, ConfirmationText, StringComparison.Ordinal))
-        {
-            var blockedPlan = AddBlocker(
-                CreateBasePlan(normalized, Validate(normalized)),
-                $"ConfirmText phai khop chinh xac: {ConfirmationText}.");
-            return Blocked(blockedPlan, "Import bi chan vi chuoi xac nhan khong khop.");
-        }
 
         if (!QlhvOperationSourceCatalog.TryGet(
                 TryResolveSourceType(normalized.SourceProfileCode),

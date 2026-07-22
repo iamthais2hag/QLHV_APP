@@ -8,8 +8,6 @@ public sealed class QlhvOperationSourceQuery
 public sealed class QlhvRefreshBackupRequest
 {
     public string SourceType { get; set; } = string.Empty;
-
-    public string? ConfirmText { get; set; }
 }
 
 public sealed class QlhvOperationRowCountsDto

@@ -1,28 +1,26 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using QLHV.Application.Auth;
 using QLHV.Application.Sync;
 using QLHV.Application.Sync.Dtos;
 
 namespace QLHV.Api.Controllers;
 
 [ApiController]
+[Authorize(Policy = AuthPolicies.Read)]
 [Route("api/dong-bo-v2/qlhv")]
 [Produces("application/json")]
 public sealed class QlhvImportController : ControllerBase
 {
-    public const string OperationsKeyHeaderName = "X-QLHV-Operations-Key";
-
     private readonly IQlhvImportService _importService;
     private readonly IQlhvOperationsService _operationsService;
-    private readonly IQlhvOperationsKeyValidator _operationsKeyValidator;
 
     public QlhvImportController(
         IQlhvImportService importService,
-        IQlhvOperationsService operationsService,
-        IQlhvOperationsKeyValidator operationsKeyValidator)
+        IQlhvOperationsService operationsService)
     {
         _importService = importService;
         _operationsService = operationsService;
-        _operationsKeyValidator = operationsKeyValidator;
     }
 
     /// <summary>
@@ -55,18 +53,13 @@ public sealed class QlhvImportController : ControllerBase
     /// Guarded import from one configured CSDT profile into QLHV_APP.dbo.App_HocVien.
     /// </summary>
     [HttpPost("import-execute")]
+    [Authorize(Policy = AuthPolicies.Admin)]
     [ProducesResponseType(typeof(QlhvImportExecuteResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(QlhvImportExecuteResultDto), StatusCodes.Status409Conflict)]
     public async Task<ActionResult<QlhvImportExecuteResultDto>> ImportExecute(
         [FromBody] QlhvImportExecuteRequest request,
         CancellationToken cancellationToken)
     {
-        var keyGuard = ValidateOperationsKey();
-        if (keyGuard is not null)
-        {
-            return keyGuard;
-        }
-
         var result = await _importService.ExecuteAsync(request, cancellationToken);
         return result.Executed ? Ok(result) : Conflict(result);
     }
@@ -91,6 +84,7 @@ public sealed class QlhvImportController : ControllerBase
 
     /// <summary>Queues a guarded live-to-BAK database refresh.</summary>
     [HttpPost("operations/refresh-backup")]
+    [Authorize(Policy = AuthPolicies.Admin)]
     [ProducesResponseType(typeof(QlhvRefreshBackupResultDto), StatusCodes.Status202Accepted)]
     [ProducesResponseType(typeof(QlhvRefreshBackupResultDto), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(QlhvRefreshBackupResultDto), StatusCodes.Status409Conflict)]
@@ -100,12 +94,6 @@ public sealed class QlhvImportController : ControllerBase
         [FromBody] QlhvRefreshBackupRequest request,
         CancellationToken cancellationToken)
     {
-        var keyGuard = ValidateOperationsKey();
-        if (keyGuard is not null)
-        {
-            return keyGuard;
-        }
-
         var result = await _operationsService.QueueRefreshBackupAsync(request, cancellationToken);
         if (result.Accepted)
         {
@@ -147,29 +135,4 @@ public sealed class QlhvImportController : ControllerBase
         }
     }
 
-    private ActionResult? ValidateOperationsKey()
-    {
-        if (!_operationsKeyValidator.IsConfigured)
-        {
-            return StatusCode(
-                StatusCodes.Status503ServiceUnavailable,
-                new ProblemDetails
-                {
-                    Title = "Operations key chua duoc cau hinh.",
-                    Detail = "Dat bien moi truong QlhvOperations__AdminKey tren API server.",
-                });
-        }
-
-        var provided = Request.Headers[OperationsKeyHeaderName].FirstOrDefault();
-        if (!_operationsKeyValidator.IsValid(provided))
-        {
-            return Unauthorized(new ProblemDetails
-            {
-                Title = "Operations key khong hop le.",
-                Detail = "Endpoint ghi yeu cau operations key hop le.",
-            });
-        }
-
-        return null;
-    }
 }

@@ -1,3 +1,5 @@
+import type { AppUserRole } from '../features/auth/types';
+
 export interface MenuItem {
   /** Đường dẫn route */
   path: string;
@@ -7,6 +9,8 @@ export interface MenuItem {
   description: string;
   /** Biểu tượng hiển thị cạnh nhãn */
   icon: string;
+  /** Vai trò tối thiểu để hiển thị và mở route quản trị. */
+  requiredRole?: 'Admin';
 }
 
 export const MENU_ITEMS: MenuItem[] = [
@@ -105,6 +109,7 @@ export const MENU_ITEMS: MenuItem[] = [
     label: 'Cấu hình kết nối CSDT',
     description: 'Quản lý 7 profile kết nối CSDT/DATA/QLHV_APP an toàn.',
     icon: '🔌',
+    requiredRole: 'Admin',
   },
   {
     path: '/tai-lieu-scan',
@@ -125,3 +130,10 @@ export const MENU_ITEMS: MenuItem[] = [
     icon: '⚙',
   },
 ];
+
+export function canAccessMenuItem(item: MenuItem, role: AppUserRole): boolean {
+  if (role === 'Admin') {
+    return true;
+  }
+  return item.path === '/qlhv-import';
+}

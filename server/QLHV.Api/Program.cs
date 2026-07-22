@@ -4,14 +4,44 @@
 // placeholders only and must never hold production credentials.
 
 using System.Reflection;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.OpenApi.Models;
+using QLHV.Api.Auth;
 using QLHV.Application;
+using QLHV.Application.Auth;
 using QLHV.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // MVC controllers
 builder.Services.AddControllers();
+builder.Services.AddScoped<QlhvCookieAuthenticationEvents>();
+
+builder.Services
+    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(options =>
+    {
+        options.Cookie.Name = "QLHV.Auth";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Lax;
+        options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
+            ? CookieSecurePolicy.SameAsRequest
+            : CookieSecurePolicy.Always;
+        options.ExpireTimeSpan = TimeSpan.FromHours(8);
+        options.SlidingExpiration = true;
+        options.EventsType = typeof(QlhvCookieAuthenticationEvents);
+    });
+builder.Services.AddAuthorization(options =>
+{
+    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build();
+    options.AddPolicy(AuthPolicies.Read, policy =>
+        policy.RequireRole(AppRoles.Admin, AppRoles.Viewer));
+    options.AddPolicy(AuthPolicies.Admin, policy =>
+        policy.RequireRole(AppRoles.Admin));
+});
 
 // In-memory cache for lookups
 builder.Services.AddMemoryCache();
@@ -36,6 +66,7 @@ builder.Services.AddCors(options =>
         policy.WithOrigins(frontendOrigins)
             .AllowAnyHeader()
             .AllowAnyMethod()
+            .AllowCredentials()
             .WithExposedHeaders("Content-Disposition"));
 });
 
@@ -60,6 +91,12 @@ builder.Services.AddSwaggerGen(options =>
 
 var app = builder.Build();
 
+if (FirstAdminSeedCommand.IsRequested(args))
+{
+    Environment.ExitCode = await FirstAdminSeedCommand.RunAsync(app.Services, Console.Out);
+    return;
+}
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
@@ -76,11 +113,17 @@ if (enableHttpsRedirection)
 }
 
 app.UseCors(FrontendCors);
+app.UseAuthentication();
 app.UseAuthorization();
 
 // Minimal health endpoint to keep the host observable.
-app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+app.MapGet("/health", () => Results.Ok(new { status = "ok" }))
+    .AllowAnonymous();
 
 app.MapControllers();
 
 app.Run();
+
+public partial class Program
+{
+}

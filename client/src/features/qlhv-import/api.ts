@@ -12,6 +12,7 @@ import type {
   QlhvRefreshBackupRequest,
   QlhvRefreshBackupResult,
 } from './types';
+import { apiFetch } from '../../api/apiFetch';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api';
 
@@ -59,7 +60,6 @@ export async function getQlhvOperationsHistory(
 
 export async function refreshQlhvBackup(
   request: QlhvRefreshBackupRequest,
-  operationsKey: string,
   signal?: AbortSignal,
 ): Promise<QlhvRefreshBackupResult> {
   const response = await fetchSafely(
@@ -69,7 +69,6 @@ export async function refreshQlhvBackup(
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
-        'X-QLHV-Operations-Key': operationsKey,
       },
       body: JSON.stringify(request),
       signal,
@@ -80,9 +79,11 @@ export async function refreshQlhvBackup(
   if (!response.ok) {
     throw new Error(await getSafeErrorMessage(
       response,
-      response.status === 409
-        ? 'Nguồn đang có thao tác khác hoặc yêu cầu refresh bị chặn.'
-        : 'Không thể bắt đầu làm mới database BAK.',
+      getWriteFallback(
+        response.status,
+        'Nguồn đang có thao tác khác hoặc yêu cầu refresh bị chặn.',
+        'Không thể bắt đầu làm mới database BAK.',
+      ),
     ));
   }
   if (!isRefreshBackupResult(payload)) {
@@ -133,7 +134,6 @@ export async function getQlhvImportPlan(
 
 export async function executeQlhvImport(
   request: QlhvImportExecuteRequest,
-  operationsKey: string,
   signal?: AbortSignal,
 ): Promise<QlhvImportExecuteOutcome> {
   const response = await fetchSafely(
@@ -143,7 +143,6 @@ export async function executeQlhvImport(
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
-        'X-QLHV-Operations-Key': operationsKey,
       },
       body: JSON.stringify(request),
       signal,
@@ -162,9 +161,11 @@ export async function executeQlhvImport(
   if (!response.ok) {
     throw new Error(await getSafeErrorMessage(
       response,
-      response.status === 409
-        ? 'Yêu cầu đồng bộ đã bị backend chặn.'
-        : 'Không thể thực hiện đồng bộ dữ liệu CSĐT.',
+      getWriteFallback(
+        response.status,
+        'Yêu cầu đồng bộ đã bị backend chặn.',
+        'Không thể thực hiện đồng bộ dữ liệu CSĐT.',
+      ),
     ));
   }
 
@@ -178,9 +179,19 @@ function buildQuery(request: QlhvImportRequest): string {
   }).toString();
 }
 
+function getWriteFallback(status: number, conflictFallback: string, fallback: string): string {
+  if (status === 401) {
+    return 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.';
+  }
+  if (status === 403) {
+    return 'Bạn không có quyền thực hiện.';
+  }
+  return status === 409 ? conflictFallback : fallback;
+}
+
 async function fetchSafely(input: RequestInfo | URL, init: RequestInit): Promise<Response> {
   try {
-    return await fetch(input, init);
+    return await apiFetch(input, init);
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
       throw error;

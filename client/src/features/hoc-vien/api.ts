@@ -10,6 +10,7 @@ import type {
   HocVienSearchParams,
   PagedResult,
 } from './types';
+import { apiFetch } from '../../api/apiFetch';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api';
 
@@ -30,7 +31,7 @@ export async function searchHocVien(
   query.set('page', String(params.page));
   query.set('pageSize', String(params.pageSize));
 
-  const response = await fetch(`${API_BASE}/hoc-vien?${query.toString()}`, {
+  const response = await apiFetch(`${API_BASE}/hoc-vien?${query.toString()}`, {
     method: 'GET',
     headers: { Accept: 'application/json' },
     signal,
@@ -53,7 +54,7 @@ export async function exportHocVienExcel(
 ): Promise<HocVienExportResult> {
   const query = buildFilterQuery(params);
   const queryString = query.toString();
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_BASE}/hoc-vien/export-excel${queryString ? `?${queryString}` : ''}`,
     {
       method: 'GET',
@@ -86,7 +87,7 @@ export async function printHocVienCardsA4(
   request: HocVienPrintCardsRequest,
   signal?: AbortSignal,
 ): Promise<HocVienExportResult> {
-  const response = await fetch(`${API_BASE}/hoc-vien/the-hoc-vien/print-a4`, {
+  const response = await apiFetch(`${API_BASE}/hoc-vien/the-hoc-vien/print-a4`, {
     method: 'POST',
     headers: {
       Accept: 'application/pdf',
@@ -110,7 +111,7 @@ export async function previewHocVienCardsA4(
   request: HocVienPrintCardsRequest,
   signal?: AbortSignal,
 ): Promise<HocVienCardPrintPreview> {
-  const response = await fetch(`${API_BASE}/hoc-vien/the-hoc-vien/print-preview`, {
+  const response = await apiFetch(`${API_BASE}/hoc-vien/the-hoc-vien/print-preview`, {
     method: 'POST',
     headers: {
       Accept: 'application/json',
@@ -141,7 +142,7 @@ export async function auditHocVienPhotos(
   if (params.onlyMissing) query.set('onlyMissing', 'true');
   if (params.onlyInvalid) query.set('onlyInvalid', 'true');
 
-  const response = await fetch(`${API_BASE}/hoc-vien/photos/audit?${query.toString()}`, {
+  const response = await apiFetch(`${API_BASE}/hoc-vien/photos/audit?${query.toString()}`, {
     method: 'GET',
     headers: { Accept: 'application/json' },
     signal,
@@ -165,7 +166,7 @@ export async function getHocVienKhoaLookups(
   if (maHangDT) query.set('maHangDT', maHangDT);
   query.set('limit', String(limit));
 
-  const response = await fetch(`${API_BASE}/hoc-vien/lookups/khoa?${query.toString()}`, {
+  const response = await apiFetch(`${API_BASE}/hoc-vien/lookups/khoa?${query.toString()}`, {
     method: 'GET',
     headers: { Accept: 'application/json' },
     signal,
@@ -187,7 +188,7 @@ export async function getHocVienHangHocLookups(
   if (keyword) query.set('keyword', keyword);
   query.set('limit', String(limit));
 
-  const response = await fetch(`${API_BASE}/hoc-vien/lookups/hang-hoc?${query.toString()}`, {
+  const response = await apiFetch(`${API_BASE}/hoc-vien/lookups/hang-hoc?${query.toString()}`, {
     method: 'GET',
     headers: { Accept: 'application/json' },
     signal,

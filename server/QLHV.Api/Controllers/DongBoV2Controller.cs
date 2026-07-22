@@ -1,4 +1,6 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using QLHV.Application.Auth;
 using QLHV.Application.Sync;
 using QLHV.Application.Sync.Dtos;
 
@@ -9,6 +11,7 @@ namespace QLHV.Api.Controllers;
 /// Phase A exposes dry-run only. It does not write SQL Server data or return secrets.
 /// </summary>
 [ApiController]
+[Authorize(Policy = AuthPolicies.Admin)]
 [Route("api/dong-bo-v2")]
 [Produces("application/json")]
 public sealed class DongBoV2Controller : ControllerBase
