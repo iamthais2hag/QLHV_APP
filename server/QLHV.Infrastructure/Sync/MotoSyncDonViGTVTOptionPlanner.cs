@@ -5,7 +5,7 @@ internal static class MotoSyncDonViGTVTOptionPlanner
     public const int DefaultTake = 20;
     public const int MaxTake = 100;
 
-    private static readonly string[] MaSoGTVTCandidates = ["MaSoGTVT"];
+    private static readonly string[] MaSoGTVTCandidates = ["MaSoGTVT", "MaDVQL"];
 
     public static int NormalizeTake(int take)
     {
@@ -24,6 +24,15 @@ internal static class MotoSyncDonViGTVTOptionPlanner
             names.Contains("TenDV") ? "TenDV" : null,
             MaSoGTVTCandidates.FirstOrDefault(names.Contains));
     }
+
+    public static string? GetMaSoGTVTWarning(MotoSyncDonViGTVTDisplayColumns displayColumns)
+        => displayColumns.MaSoGTVTColumn switch
+        {
+            null => "Target dbo.DM_DonViGTVT khong co cot MaSoGTVT; truong MaSoGTVT se de trong.",
+            var column when string.Equals(column, "MaDVQL", StringComparison.OrdinalIgnoreCase)
+                => "Target dbo.DM_DonViGTVT khong co cot MaSoGTVT; su dung MaDVQL lam MaSoGTVT goi y.",
+            _ => null,
+        };
 
     public static string BuildOptionsSql(MotoSyncDonViGTVTQueryShape shape, bool hasSearch)
     {

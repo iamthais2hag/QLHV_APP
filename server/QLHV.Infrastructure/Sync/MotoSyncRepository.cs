@@ -420,9 +420,10 @@ public sealed class MotoSyncRepository : IMotoSyncRepository
             warnings.Add("Target dbo.DM_DonViGTVT khong co cot TenDV; chi hien thi MaDV.");
         }
 
-        if (displayColumns.MaSoGTVTColumn is null)
+        var maSoGTVTWarning = MotoSyncDonViGTVTOptionPlanner.GetMaSoGTVTWarning(displayColumns);
+        if (maSoGTVTWarning is not null)
         {
-            warnings.Add("Target dbo.DM_DonViGTVT khong co cot MaSoGTVT; truong MaSoGTVT se de trong.");
+            warnings.Add(maSoGTVTWarning);
         }
 
         var rows = await ReadDonViGTVTOptionRowsAsync(
