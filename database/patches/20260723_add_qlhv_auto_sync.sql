@@ -139,14 +139,7 @@ BEGIN TRY
             MotoResultJson nvarchar(max) NULL,
             ErrorMessage nvarchar(2000) NULL,
 
-            ActiveSlot AS
-            (
-                CASE
-                    WHEN Status IN (N'QUEUED', N'RUNNING')
-                    THEN CONVERT(tinyint, 1)
-                    ELSE NULL
-                END
-            ) PERSISTED,
+            ActiveSlot tinyint NULL,
 
             CONSTRAINT UQ_App_QlhvAutoSyncRun_RunId
                 UNIQUE NONCLUSTERED (RunId),
@@ -174,6 +167,8 @@ BEGIN TRY
                         N'FAILED'
                     )
                 ),
+            CONSTRAINT CK_App_QlhvAutoSyncRun_ActiveSlot
+                CHECK (ActiveSlot IS NULL OR ActiveSlot = 1),
             CONSTRAINT CK_App_QlhvAutoSyncRun_CurrentSource
                 CHECK (CurrentSourceType IS NULL OR CurrentSourceType IN (N'OTO', N'MOTO')),
             CONSTRAINT CK_App_QlhvAutoSyncRun_CurrentStage
@@ -290,6 +285,273 @@ GO
 BEGIN TRY
     BEGIN TRANSACTION;
 
+    IF
+    (
+        SELECT COUNT_BIG(*)
+        FROM dbo.App_QlhvAutoSyncRun WITH (TABLOCKX, HOLDLOCK)
+        WHERE Status IN (N'QUEUED', N'RUNNING')
+    ) > 1
+    BEGIN
+        THROW 527338, 'Multiple active Auto Sync runs must be reconciled before patching.', 1;
+    END;
+
+    IF COLUMNPROPERTY(
+            OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U'),
+            N'ActiveSlot',
+            'IsComputed') = 1
+    BEGIN
+        DECLARE @activeSlotColumnId int =
+            COLUMNPROPERTY(
+                OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U'),
+                N'ActiveSlot',
+                'ColumnId');
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM sys.index_columns AS activeDependency
+            INNER JOIN sys.indexes AS dependencyIndex
+                ON dependencyIndex.object_id = activeDependency.object_id
+               AND dependencyIndex.index_id = activeDependency.index_id
+            WHERE activeDependency.object_id =
+                    OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U')
+              AND activeDependency.column_id = @activeSlotColumnId
+              AND dependencyIndex.name <> N'UX_App_QlhvAutoSyncRun_ActiveSlot'
+        )
+        BEGIN
+            THROW 527332, 'ActiveSlot has a non-patch index dependency.', 1;
+        END;
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM sys.check_constraints
+            WHERE parent_object_id = OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U')
+              AND definition LIKE N'%ActiveSlot%'
+              AND name <> N'CK_App_QlhvAutoSyncRun_ActiveSlot'
+        )
+        BEGIN
+            THROW 527333, 'ActiveSlot has a non-patch check constraint dependency.', 1;
+        END;
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM sys.default_constraints
+            WHERE parent_object_id = OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U')
+              AND parent_column_id = @activeSlotColumnId
+        )
+        BEGIN
+            THROW 527334, 'ActiveSlot has an unexpected default dependency.', 1;
+        END;
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM sys.foreign_key_columns
+            WHERE
+                (
+                    parent_object_id = OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U')
+                    AND parent_column_id = @activeSlotColumnId
+                )
+                OR
+                (
+                    referenced_object_id = OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U')
+                    AND referenced_column_id = @activeSlotColumnId
+                )
+        )
+        BEGIN
+            THROW 527335, 'ActiveSlot has an unexpected foreign key dependency.', 1;
+        END;
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM sys.stats_columns AS activeStatisticColumn
+            INNER JOIN sys.stats AS activeStatistic
+                ON activeStatistic.object_id = activeStatisticColumn.object_id
+               AND activeStatistic.stats_id = activeStatisticColumn.stats_id
+            WHERE activeStatisticColumn.object_id =
+                    OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U')
+              AND activeStatisticColumn.column_id = @activeSlotColumnId
+              AND activeStatistic.user_created = 1
+        )
+        BEGIN
+            THROW 527340, 'ActiveSlot has an unexpected user-created statistic dependency.', 1;
+        END;
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM sys.fulltext_index_columns
+            WHERE object_id = OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U')
+              AND column_id = @activeSlotColumnId
+        )
+        BEGIN
+            THROW 527341, 'ActiveSlot has an unexpected full-text dependency.', 1;
+        END;
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM sys.columns
+            WHERE object_id = OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U')
+              AND column_id = @activeSlotColumnId
+              AND
+              (
+                  default_object_id <> 0
+                  OR rule_object_id <> 0
+              )
+        )
+        BEGIN
+            THROW 527342, 'ActiveSlot has an unexpected bound default or rule.', 1;
+        END;
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM sys.sql_expression_dependencies AS activeExpression
+            LEFT JOIN sys.objects AS referencingObject
+                ON referencingObject.object_id = activeExpression.referencing_id
+            WHERE activeExpression.referenced_id =
+                    OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U')
+              AND activeExpression.referenced_minor_id = @activeSlotColumnId
+              AND activeExpression.is_schema_bound_reference = 1
+              AND
+              (
+                  referencingObject.name IS NULL
+                  OR referencingObject.name <> N'CK_App_QlhvAutoSyncRun_ActiveSlot'
+              )
+        )
+        BEGIN
+            THROW 527336, 'ActiveSlot has an unexpected schema-bound dependency.', 1;
+        END;
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM sys.indexes
+            WHERE object_id = OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U')
+              AND name = N'UX_App_QlhvAutoSyncRun_ActiveSlot'
+              AND
+              (
+                  is_primary_key = 1
+                  OR is_unique_constraint = 1
+              )
+        )
+        BEGIN
+            THROW 527343, 'Named ActiveSlot index is an incompatible key constraint.', 1;
+        END;
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM sys.indexes
+            WHERE object_id = OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U')
+              AND name = N'UX_App_QlhvAutoSyncRun_ActiveSlot'
+        )
+        BEGIN
+            DROP INDEX UX_App_QlhvAutoSyncRun_ActiveSlot
+                ON dbo.App_QlhvAutoSyncRun;
+        END;
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM sys.check_constraints
+            WHERE parent_object_id = OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U')
+              AND name = N'CK_App_QlhvAutoSyncRun_ActiveSlot'
+        )
+        BEGIN
+            ALTER TABLE dbo.App_QlhvAutoSyncRun
+                DROP CONSTRAINT CK_App_QlhvAutoSyncRun_ActiveSlot;
+        END;
+
+        ALTER TABLE dbo.App_QlhvAutoSyncRun
+            DROP COLUMN ActiveSlot;
+    END;
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0
+    BEGIN
+        ROLLBACK TRANSACTION;
+    END;
+
+    THROW;
+END CATCH;
+GO
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    IF COL_LENGTH(N'dbo.App_QlhvAutoSyncRun', N'ActiveSlot') IS NULL
+    BEGIN
+        ALTER TABLE dbo.App_QlhvAutoSyncRun
+            ADD ActiveSlot tinyint NULL;
+    END;
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0
+    BEGIN
+        ROLLBACK TRANSACTION;
+    END;
+
+    THROW;
+END CATCH;
+GO
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.columns AS activeSlotColumn
+    INNER JOIN sys.types AS activeSlotType
+        ON activeSlotType.user_type_id = activeSlotColumn.user_type_id
+    WHERE activeSlotColumn.object_id =
+            OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U')
+      AND activeSlotColumn.name = N'ActiveSlot'
+      AND activeSlotType.name = N'tinyint'
+      AND activeSlotColumn.max_length = 1
+      AND activeSlotColumn.is_nullable = 1
+      AND activeSlotColumn.is_computed = 0
+)
+BEGIN
+    THROW 527337, 'dbo.App_QlhvAutoSyncRun.ActiveSlot must be a nullable tinyint column.', 1;
+END;
+GO
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    IF
+    (
+        SELECT COUNT_BIG(*)
+        FROM dbo.App_QlhvAutoSyncRun WITH (TABLOCKX, HOLDLOCK)
+        WHERE Status IN (N'QUEUED', N'RUNNING')
+    ) > 1
+    BEGIN
+        THROW 527338, 'Multiple active Auto Sync runs must be reconciled before patching.', 1;
+    END;
+
+    UPDATE dbo.App_QlhvAutoSyncRun
+    SET ActiveSlot = CASE
+        WHEN Status IN (N'QUEUED', N'RUNNING') THEN CONVERT(tinyint, 1)
+        ELSE NULL
+    END;
+
+    IF
+    (
+        SELECT COUNT_BIG(*)
+        FROM dbo.App_QlhvAutoSyncRun
+        WHERE ActiveSlot = 1
+    ) > 1
+    BEGIN
+        THROW 527339, 'ActiveSlot backfill produced multiple active Auto Sync runs.', 1;
+    END;
+
     UPDATE dbo.App_QlhvAutoSyncRun
     SET CurrentStage = CASE
         WHEN Status = N'SUCCEEDED' THEN N'COMPLETED'
@@ -339,6 +601,25 @@ BEGIN TRY
     BEGIN
         THROW 527331, 'Failed to make dbo.App_QlhvAutoSyncRun.CurrentStage NOT NULL.', 1;
     END;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM sys.check_constraints
+        WHERE parent_object_id = OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U')
+          AND name = N'CK_App_QlhvAutoSyncRun_ActiveSlot'
+    )
+    BEGIN
+        ALTER TABLE dbo.App_QlhvAutoSyncRun
+            DROP CONSTRAINT CK_App_QlhvAutoSyncRun_ActiveSlot;
+    END;
+
+    ALTER TABLE dbo.App_QlhvAutoSyncRun WITH CHECK
+        ADD CONSTRAINT CK_App_QlhvAutoSyncRun_ActiveSlot
+        CHECK (ActiveSlot IS NULL OR ActiveSlot = 1);
+
+    ALTER TABLE dbo.App_QlhvAutoSyncRun
+        WITH CHECK CHECK CONSTRAINT CK_App_QlhvAutoSyncRun_ActiveSlot;
 
     IF EXISTS
     (
@@ -472,19 +753,38 @@ BEGIN TRY
         THROW 527322, 'Existing dbo.App_QlhvAutoSyncRun has an incompatible schema.', 1;
     END;
 
-    IF COLUMNPROPERTY(
-            OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U'),
-            N'ActiveSlot',
-            'IsComputed') <> 1
-       OR
-       (
-           SELECT cc.definition
-           FROM sys.computed_columns AS cc
-           WHERE cc.object_id = OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U')
-             AND cc.name = N'ActiveSlot'
-       ) NOT LIKE N'%QUEUED%RUNNING%'
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.columns AS activeSlotColumn
+        INNER JOIN sys.types AS activeSlotType
+            ON activeSlotType.user_type_id = activeSlotColumn.user_type_id
+        WHERE activeSlotColumn.object_id =
+                OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U')
+          AND activeSlotColumn.name = N'ActiveSlot'
+          AND activeSlotType.name = N'tinyint'
+          AND activeSlotColumn.max_length = 1
+          AND activeSlotColumn.is_nullable = 1
+          AND activeSlotColumn.is_computed = 0
+    )
     BEGIN
         THROW 527323, 'dbo.App_QlhvAutoSyncRun.ActiveSlot is incompatible.', 1;
+    END;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM sys.indexes
+        WHERE object_id = OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U')
+          AND name = N'UX_App_QlhvAutoSyncRun_ActiveSlot'
+          AND
+          (
+              is_primary_key = 1
+              OR is_unique_constraint = 1
+          )
+    )
+    BEGIN
+        THROW 527343, 'Named ActiveSlot index is an incompatible key constraint.', 1;
     END;
 
     IF EXISTS
@@ -497,7 +797,19 @@ BEGIN TRY
           (
               activeIndex.is_unique <> 1
               OR activeIndex.is_disabled = 1
-              OR activeIndex.filter_definition NOT LIKE N'%ActiveSlot%IS NOT NULL%'
+              OR activeIndex.is_hypothetical = 1
+              OR activeIndex.type <> 2
+              OR activeIndex.is_primary_key = 1
+              OR activeIndex.is_unique_constraint = 1
+              OR activeIndex.has_filter <> 1
+              OR activeIndex.filter_definition IS NULL
+              OR REPLACE(
+                    REPLACE(
+                        REPLACE(activeIndex.filter_definition, N'[', N''),
+                        N']',
+                        N''),
+                    N' ',
+                    N'') <> N'(ActiveSlot=(1))'
               OR NOT EXISTS
               (
                   SELECT 1
@@ -518,6 +830,14 @@ BEGIN TRY
                     AND extraKey.index_id = activeIndex.index_id
                     AND extraKey.key_ordinal > 1
               )
+              OR EXISTS
+              (
+                  SELECT 1
+                  FROM sys.index_columns AS includedColumn
+                  WHERE includedColumn.object_id = activeIndex.object_id
+                    AND includedColumn.index_id = activeIndex.index_id
+                    AND includedColumn.is_included_column = 1
+              )
           )
     )
     BEGIN
@@ -535,8 +855,7 @@ BEGIN TRY
     BEGIN
         CREATE UNIQUE NONCLUSTERED INDEX UX_App_QlhvAutoSyncRun_ActiveSlot
             ON dbo.App_QlhvAutoSyncRun (ActiveSlot)
-            INCLUDE (RunId, Status, CurrentSourceType, CurrentStage, UpdatedAtUtc)
-            WHERE ActiveSlot IS NOT NULL;
+            WHERE ActiveSlot = 1;
     END;
 
     IF NOT EXISTS
