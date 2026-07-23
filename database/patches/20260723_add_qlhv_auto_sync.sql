@@ -38,6 +38,44 @@ BEGIN TRY
                 DEFAULT N'MANUAL_ADMIN' WITH VALUES;
     END;
 
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0
+    BEGIN
+        ROLLBACK TRANSACTION;
+    END;
+
+    THROW;
+END CATCH;
+GO
+
+IF COL_LENGTH(N'dbo.App_QlhvSyncOperationHistory', N'Actor') IS NULL
+BEGIN
+    THROW 527327, 'Failed to add dbo.App_QlhvSyncOperationHistory.Actor.', 1;
+END;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.columns AS actorColumn
+    INNER JOIN sys.types AS actorType
+        ON actorType.user_type_id = actorColumn.user_type_id
+    WHERE actorColumn.object_id =
+            OBJECT_ID(N'dbo.App_QlhvSyncOperationHistory', N'U')
+      AND actorColumn.name = N'Actor'
+      AND actorType.name = N'nvarchar'
+      AND actorColumn.max_length = 200
+      AND actorColumn.is_nullable = 0
+)
+BEGIN
+    THROW 527329, 'dbo.App_QlhvSyncOperationHistory.Actor has an incompatible schema.', 1;
+END;
+GO
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
     IF EXISTS
     (
         SELECT 1
@@ -189,25 +227,117 @@ BEGIN TRY
         THROW 527321, 'Failed to create dbo.App_QlhvAutoSyncRun.', 1;
     END;
 
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0
+    BEGIN
+        ROLLBACK TRANSACTION;
+    END;
+
+    THROW;
+END CATCH;
+GO
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    IF OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U') IS NULL
+    BEGIN
+        THROW 527321, 'Failed to create dbo.App_QlhvAutoSyncRun.', 1;
+    END;
+
     IF COL_LENGTH(N'dbo.App_QlhvAutoSyncRun', N'CurrentStage') IS NULL
     BEGIN
         ALTER TABLE dbo.App_QlhvAutoSyncRun
             ADD CurrentStage nvarchar(32) NULL;
+    END;
 
-        UPDATE dbo.App_QlhvAutoSyncRun
-        SET CurrentStage = CASE
-            WHEN Status = N'SUCCEEDED' THEN N'COMPLETED'
-            WHEN Status IN (N'PARTIAL_FAILED', N'FAILED') THEN N'FAILED'
-            ELSE N'CONNECTING'
-        END
-        WHERE CurrentStage IS NULL;
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0
+    BEGIN
+        ROLLBACK TRANSACTION;
+    END;
 
+    THROW;
+END CATCH;
+GO
+
+IF COL_LENGTH(N'dbo.App_QlhvAutoSyncRun', N'CurrentStage') IS NULL
+BEGIN
+    THROW 527328, 'Failed to add dbo.App_QlhvAutoSyncRun.CurrentStage.', 1;
+END;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.columns AS currentStageColumn
+    INNER JOIN sys.types AS currentStageType
+        ON currentStageType.user_type_id = currentStageColumn.user_type_id
+    WHERE currentStageColumn.object_id =
+            OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U')
+      AND currentStageColumn.name = N'CurrentStage'
+      AND currentStageType.name = N'nvarchar'
+      AND currentStageColumn.max_length = 64
+)
+BEGIN
+    THROW 527330, 'dbo.App_QlhvAutoSyncRun.CurrentStage has an incompatible schema.', 1;
+END;
+GO
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    UPDATE dbo.App_QlhvAutoSyncRun
+    SET CurrentStage = CASE
+        WHEN Status = N'SUCCEEDED' THEN N'COMPLETED'
+        WHEN Status IN (N'PARTIAL_FAILED', N'FAILED') THEN N'FAILED'
+        ELSE N'CONNECTING'
+    END
+    WHERE CurrentStage IS NULL;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM sys.columns
+        WHERE object_id = OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U')
+          AND name = N'CurrentStage'
+          AND is_nullable = 1
+    )
+    BEGIN
         ALTER TABLE dbo.App_QlhvAutoSyncRun
             ALTER COLUMN CurrentStage nvarchar(32) NOT NULL;
+    END;
 
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM sys.default_constraints AS currentStageDefault
+        INNER JOIN sys.columns AS currentStageColumn
+            ON currentStageColumn.object_id = currentStageDefault.parent_object_id
+           AND currentStageColumn.column_id = currentStageDefault.parent_column_id
+        WHERE currentStageDefault.parent_object_id =
+                OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U')
+          AND currentStageColumn.name = N'CurrentStage'
+    )
+    BEGIN
         ALTER TABLE dbo.App_QlhvAutoSyncRun
             ADD CONSTRAINT DF_App_QlhvAutoSyncRun_CurrentStage
                 DEFAULT N'CONNECTING' FOR CurrentStage;
+    END;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM sys.columns
+        WHERE object_id = OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U')
+          AND name = N'CurrentStage'
+          AND is_nullable = 1
+    )
+    BEGIN
+        THROW 527331, 'Failed to make dbo.App_QlhvAutoSyncRun.CurrentStage NOT NULL.', 1;
     END;
 
     IF EXISTS
