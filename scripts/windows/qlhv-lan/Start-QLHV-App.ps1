@@ -3,8 +3,11 @@ param(
     [switch]$NoBrowser,
     [switch]$SuppressErrorDialog,
     [switch]$AllowLegacyRollback,
+    [switch]$DisableAutoSync,
     [ValidateRange(10, 300)]
-    [int]$HealthTimeoutSeconds = 90
+    [int]$HealthTimeoutSeconds = 90,
+    [ValidateRange(60, 14400)]
+    [int]$SyncTimeoutSeconds = 7200
 )
 
 Set-StrictMode -Version Latest
@@ -23,6 +26,9 @@ $LiveUrl = 'http://localhost:8088/health/live'
 $ReadyUrl = 'http://localhost:8088/health/ready'
 $LegacyHealthUrl = 'http://localhost:8088/health'
 $RuntimeStatusUrl = 'http://localhost:8088/api/system/runtime-status'
+$SessionStartSyncUrl = 'http://localhost:8088/api/dong-bo-v2/qlhv/operations/session-start-sync'
+$SessionStartStatusUrl = 'http://localhost:8088/api/dong-bo-v2/qlhv/operations/session-start-sync/status'
+$NeedSyncRequestTimeoutSeconds = 120
 $ApplicationUrl = 'http://localhost:8088'
 $script:StartedProcessId = $null
 $script:StartedThisRun = $false
@@ -31,7 +37,94 @@ $script:StdErrLog = $null
 $script:LauncherMutex = [System.Threading.Mutex]::new($false, 'Local\QLHV-App-LAN-8088-Launcher')
 $script:LauncherMutexAcquired = $false
 $script:LauncherLockStream = $null
+$script:ProgressForm = $null
+$script:ProgressLabel = $null
+$script:ProgressBar = $null
 $script:UseLegacyRuntime = $AllowLegacyRollback -or (Test-Path -LiteralPath $LegacyRuntimeMarker -PathType Leaf)
+
+function Initialize-LauncherProgress {
+    if ($NoBrowser -or $SuppressErrorDialog) {
+        return
+    }
+
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        Add-Type -AssemblyName System.Drawing
+
+        $form = [System.Windows.Forms.Form]::new()
+        $form.Text = 'QLHV Thanh Cong'
+        $form.ClientSize = [System.Drawing.Size]::new(460, 118)
+        $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+        $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+        $form.MaximizeBox = $false
+        $form.MinimizeBox = $false
+        $form.ControlBox = $false
+        $form.TopMost = $true
+
+        $label = [System.Windows.Forms.Label]::new()
+        $label.Location = [System.Drawing.Point]::new(22, 18)
+        $label.Size = [System.Drawing.Size]::new(416, 42)
+        $label.Font = [System.Drawing.Font]::new('Segoe UI', 11)
+        $label.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
+        $label.Text = 'Dang ket noi may chu...'
+
+        $progress = [System.Windows.Forms.ProgressBar]::new()
+        $progress.Location = [System.Drawing.Point]::new(22, 72)
+        $progress.Size = [System.Drawing.Size]::new(416, 18)
+        $progress.Style = [System.Windows.Forms.ProgressBarStyle]::Marquee
+        $progress.MarqueeAnimationSpeed = 28
+
+        [void]$form.Controls.Add($label)
+        [void]$form.Controls.Add($progress)
+        $script:ProgressForm = $form
+        $script:ProgressLabel = $label
+        $script:ProgressBar = $progress
+        $form.Show()
+        [System.Windows.Forms.Application]::DoEvents()
+    }
+    catch {
+        # The launcher can still run safely when an interactive desktop is unavailable.
+        $script:ProgressForm = $null
+        $script:ProgressLabel = $null
+        $script:ProgressBar = $null
+    }
+}
+
+function Set-LauncherProgress {
+    param(
+        [Parameter(Mandatory = $true)][string]$Message,
+        [switch]$Completed
+    )
+
+    Write-Host $Message
+    if ($null -eq $script:ProgressForm -or $script:ProgressForm.IsDisposed) {
+        return
+    }
+
+    $script:ProgressLabel.Text = $Message
+    if ($Completed) {
+        $script:ProgressBar.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
+        $script:ProgressBar.Value = 100
+    }
+    [System.Windows.Forms.Application]::DoEvents()
+}
+
+function Close-LauncherProgress {
+    try {
+        if ($null -ne $script:ProgressForm -and -not $script:ProgressForm.IsDisposed) {
+            $script:ProgressForm.Close()
+            $script:ProgressForm.Dispose()
+        }
+    }
+    catch {
+        # A progress-window cleanup failure must not stop or restart the server.
+    }
+    finally {
+        $script:ProgressForm = $null
+        $script:ProgressLabel = $null
+        $script:ProgressBar = $null
+    }
+}
 
 function Get-NormalizedPath {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -60,6 +153,17 @@ function Enter-CrossSessionLauncherLock {
     } while ([DateTime]::UtcNow -lt $deadline)
 
     throw 'Another QLHV launcher is active in a different Windows session. Try again in a moment.'
+}
+
+function Exit-LauncherCoordinationLocks {
+    if ($null -ne $script:LauncherLockStream) {
+        $script:LauncherLockStream.Dispose()
+        $script:LauncherLockStream = $null
+    }
+    if ($script:LauncherMutexAcquired) {
+        $script:LauncherMutex.ReleaseMutex()
+        $script:LauncherMutexAcquired = $false
+    }
 }
 
 function Get-ProcessRecord {
@@ -133,7 +237,8 @@ function Get-LegacyConfigurationEnvironment {
     $result = @{}
     $allowedSections = @(
         'ConnectionStrings', 'ConnectionProfileEncryption', 'ConnectionProfileProtection',
-        'DataProtection', 'FileStorage', 'Sync', 'SyncExecution', 'Authentication'
+        'DataProtection', 'FileStorage', 'Sync', 'SyncExecution', 'QlhvAutoSync',
+        'PhotoProcessing', 'Authentication'
     )
 
     function Add-ConfigurationNode {
@@ -236,6 +341,249 @@ function Invoke-HealthProbe {
             Message = Get-SafeProbeMessage -Json $errorDetailsJson
         }
     }
+}
+
+function Invoke-SessionStartSync {
+    param(
+        [Parameter(Mandatory = $true)][int]$ProcessId,
+        [Parameter(Mandatory = $true)][int]$TimeoutSeconds
+    )
+
+    $body = @{
+        serverStartedByLauncher = [bool]$script:StartedThisRun
+    } | ConvertTo-Json -Compress
+    $headers = @{
+        'X-QLHV-Local-Launcher' = 'session-start-v1'
+    }
+
+    $postFailure = $null
+    try {
+        # The POST is intentionally attempted once. A timeout is ambiguous: the
+        # server may already have accepted it, so recovery uses GET and never reposts.
+        $response = Invoke-RestMethod `
+            -UseBasicParsing `
+            -Uri $SessionStartSyncUrl `
+            -Method Post `
+            -Headers $headers `
+            -ContentType 'application/json' `
+            -Body $body `
+            -TimeoutSec $NeedSyncRequestTimeoutSeconds
+
+        $runIdProperty = $response.PSObject.Properties['runId']
+        $acceptedProperty = $response.PSObject.Properties['accepted']
+        if ($null -ne $runIdProperty -and
+            -not [string]::IsNullOrWhiteSpace([string]$runIdProperty.Value) -and
+            $null -ne $acceptedProperty -and
+            [bool]$acceptedProperty.Value) {
+            return [string]$runIdProperty.Value
+        }
+        $postFailure = 'The local QLHV session-start response was ambiguous.'
+    }
+    catch {
+        $postFailure = Get-SafeLauncherMessage -Message ([string]$_.Exception.Message)
+    }
+
+    # Reconcile an ambiguous POST against authoritative status. The loop is
+    # bounded, uses GET only, and either joins the discovered run, waits for a
+    # manual operation that won the race, or observes that no sync is needed.
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $attempt = 0
+    $waitingForManualOperation = $false
+    do {
+        $record = Get-ProcessRecord -ProcessId $ProcessId
+        if (-not (Test-IsQlhvRuntimeProcess -ProcessRecord $record)) {
+            throw 'QLHV runtime da dung trong khi xac minh phien Auto Sync.'
+        }
+
+        $attempt++
+        try {
+            $status = Get-SessionStartStatus -AttemptCount 3
+            $operationActiveProperty = $status.PSObject.Properties['operationActive']
+            $activeRunIdProperty = $status.PSObject.Properties['activeRunId']
+            $runIdProperty = $status.PSObject.Properties['runId']
+            $needSyncProperty = $status.PSObject.Properties['needSync']
+            if ($null -eq $operationActiveProperty -or $null -eq $needSyncProperty) {
+                throw 'Phan hoi trang thai Auto Sync thieu field bat buoc.'
+            }
+
+            $activeRunId = if ($null -ne $activeRunIdProperty) {
+                [string]$activeRunIdProperty.Value
+            }
+            else {
+                $null
+            }
+            if ([string]::IsNullOrWhiteSpace($activeRunId) -and
+                $null -ne $operationActiveProperty -and
+                [bool]$operationActiveProperty.Value -and
+                $null -ne $runIdProperty) {
+                $activeRunId = [string]$runIdProperty.Value
+            }
+            if (-not [string]::IsNullOrWhiteSpace($activeRunId)) {
+                return $activeRunId
+            }
+            if ([bool]$operationActiveProperty.Value) {
+                $waitingForManualOperation = $true
+                Set-LauncherProgress -Message 'Dang cho thao tac cap nhat hien tai ket thuc...'
+                Start-Sleep -Seconds 2
+                continue
+            }
+            if (-not [bool]$needSyncProperty.Value) {
+                return $null
+            }
+
+            if ($waitingForManualOperation) {
+                $postFailure =
+                    'Thao tac truoc da ket thuc nhung du lieu van can cap nhat; hay bam lai icon.'
+                break
+            }
+        }
+        catch {
+            $safeReconcileFailure = Get-SafeLauncherMessage -Message ([string]$_.Exception.Message)
+            if ($waitingForManualOperation) {
+                $postFailure = $safeReconcileFailure
+            }
+            elseif ($attempt -ge 10) {
+                throw "Khong the xac minh phien Auto Sync sau POST: $postFailure; $safeReconcileFailure"
+            }
+        }
+        Start-Sleep -Seconds 2
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    if ([DateTime]::UtcNow -ge $deadline) {
+        throw "Khong the xac minh phien Auto Sync sau POST trong $TimeoutSeconds giay: $postFailure"
+    }
+    throw "Khong the xac minh phien Auto Sync sau POST: $postFailure"
+}
+
+function Get-SessionStartStatus {
+    param(
+        [Parameter(Mandatory = $false)][string]$RunId,
+        [ValidateRange(1, 10)][int]$AttemptCount = 4
+    )
+
+    $startedByLauncher = ([bool]$script:StartedThisRun).ToString().ToLowerInvariant()
+    $url = "${SessionStartStatusUrl}?serverStartedByLauncher=$startedByLauncher"
+    if (-not [string]::IsNullOrWhiteSpace($RunId)) {
+        $url += '&runId=' + [Uri]::EscapeDataString($RunId)
+    }
+    # The initial NeedSync snapshot reads and hashes both Live and BAK
+    # partitions. Give that legitimate read-only work more time than the
+    # lightweight exact-run poll while retaining a bounded request timeout.
+    $requestTimeoutSeconds = if ([string]::IsNullOrWhiteSpace($RunId)) {
+        $NeedSyncRequestTimeoutSeconds
+    }
+    else {
+        20
+    }
+
+    $lastFailure = $null
+    for ($attempt = 1; $attempt -le $AttemptCount; $attempt++) {
+        try {
+            return Invoke-RestMethod `
+                -UseBasicParsing `
+                -Uri $url `
+                -Method Get `
+                -Headers @{ 'X-QLHV-Local-Launcher' = 'session-start-v1' } `
+                -TimeoutSec $requestTimeoutSeconds
+        }
+        catch {
+            $lastFailure = Get-SafeLauncherMessage -Message ([string]$_.Exception.Message)
+            if ($attempt -lt $AttemptCount) {
+                Start-Sleep -Seconds ([Math]::Min(4, $attempt))
+            }
+        }
+    }
+    throw "Khong doc duoc trang thai Auto Sync sau $AttemptCount lan thu: $lastFailure"
+}
+
+function Write-SessionSyncStage {
+    param([Parameter(Mandatory = $false)][string]$Stage)
+
+    $message = switch ($Stage) {
+        'REFRESH_OTO' { 'Dang lam moi du lieu O to...' }
+        'SYNC_OTO' { 'Dang dong bo du lieu O to...' }
+        'REFRESH_MOTO' { 'Dang lam moi du lieu Mo to...' }
+        'SYNC_MOTO' { 'Dang dong bo du lieu Mo to...' }
+        'LOADING_DATA' { 'Dang tai du lieu moi...' }
+        'COMPLETED' { 'Hoan tat.' }
+        'FAILED' { 'Dong bo du lieu khong thanh cong.' }
+        default { 'Dang ket noi may chu va cap nhat du lieu...' }
+    }
+    Set-LauncherProgress -Message $message -Completed:($Stage -eq 'COMPLETED')
+}
+
+function Wait-ForSessionSync {
+    param(
+        [Parameter(Mandatory = $true)][int]$ProcessId,
+        [Parameter(Mandatory = $true)][string]$RunId,
+        [Parameter(Mandatory = $true)][int]$TimeoutSeconds
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $lastStage = $null
+    $lastStatusFailure = $null
+    do {
+        $record = Get-ProcessRecord -ProcessId $ProcessId
+        if (-not (Test-IsQlhvRuntimeProcess -ProcessRecord $record)) {
+            throw 'QLHV runtime da dung trong khi dang cap nhat du lieu.'
+        }
+
+        try {
+            $status = Get-SessionStartStatus -RunId $RunId
+            $lastStatusFailure = $null
+        }
+        catch {
+            $lastStatusFailure = Get-SafeLauncherMessage -Message ([string]$_.Exception.Message)
+            Set-LauncherProgress -Message 'Tam thoi chua doc duoc trang thai; dang thu lai...'
+            Start-Sleep -Seconds 2
+            continue
+        }
+
+        $foundProperty = $status.PSObject.Properties['found']
+        $terminalProperty = $status.PSObject.Properties['isTerminal']
+        $succeededProperty = $status.PSObject.Properties['succeeded']
+        if ($null -eq $foundProperty -or
+            $null -eq $terminalProperty -or
+            $null -eq $succeededProperty) {
+            throw 'Phan hoi trang thai Auto Sync khong hop le.'
+        }
+        if (-not [bool]$foundProperty.Value) {
+            throw "Khong tim thay phien Auto Sync $RunId."
+        }
+
+        $stageProperty = $status.PSObject.Properties['currentStage']
+        $stage = if ($null -eq $stageProperty) { $null } else { [string]$stageProperty.Value }
+        if (-not [string]::Equals($stage, $lastStage, [StringComparison]::Ordinal)) {
+            Write-SessionSyncStage -Stage $stage
+            $lastStage = $stage
+        }
+
+        if ([bool]$terminalProperty.Value) {
+            if ([bool]$succeededProperty.Value) {
+                if (-not [string]::Equals($stage, 'COMPLETED', [StringComparison]::Ordinal)) {
+                    Write-SessionSyncStage -Stage 'COMPLETED'
+                }
+                return $status
+            }
+
+            $errorProperty = $status.PSObject.Properties['errorMessage']
+            $safeError = if ($null -eq $errorProperty -or
+                [string]::IsNullOrWhiteSpace([string]$errorProperty.Value)) {
+                'Auto Sync ket thuc nhung khong thanh cong.'
+            }
+            else {
+                Get-SafeLauncherMessage -Message ([string]$errorProperty.Value)
+            }
+            throw $safeError
+        }
+
+        Start-Sleep -Seconds 2
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    if (-not [string]::IsNullOrWhiteSpace($lastStatusFailure)) {
+        throw "Auto Sync chua hoan tat sau $TimeoutSeconds giay; loi doc trang thai gan nhat: $lastStatusFailure"
+    }
+    throw "Auto Sync chua hoan tat sau $TimeoutSeconds giay."
 }
 
 function Wait-ForEndpoint {
@@ -358,6 +706,7 @@ function Start-QlhvRuntime {
         'Authentication__Cookie__SecurePolicy',
         'QlhvRuntime__ProductionLocalConfigPath',
         'QlhvRuntime__Root',
+        'QlhvAutoSync__Enabled',
         'Logging__Console__LogLevel__Default'
     ) + @($legacyEnvironment.Keys) | Select-Object -Unique)
     $previousValues = @{}
@@ -375,6 +724,9 @@ function Start-QlhvRuntime {
         $env:Authentication__Cookie__SecurePolicy = 'SameAsRequest'
         $env:QlhvRuntime__ProductionLocalConfigPath = $ProductionConfig
         $env:QlhvRuntime__Root = $RuntimeRoot
+        if ($DisableAutoSync) {
+            $env:QlhvAutoSync__Enabled = 'false'
+        }
         # The Production rolling file logger is the durable sink. Disable raw console
         # application logs so redirected bootstrap files stay bounded and cannot expose values.
         $env:Logging__Console__LogLevel__Default = 'None'
@@ -455,7 +807,10 @@ function Show-LauncherError {
     }
 }
 
+# Main launcher lifecycle: settle one server, coordinate one data session, then open the browser.
 try {
+    Initialize-LauncherProgress
+    Set-LauncherProgress -Message 'Dang ket noi may chu...'
     try {
         $mutexWait = [TimeSpan]::FromSeconds($HealthTimeoutSeconds + 30)
         $script:LauncherMutexAcquired = $script:LauncherMutex.WaitOne($mutexWait)
@@ -504,45 +859,47 @@ try {
             throw 'Unexpected QLHV listener state on TCP port 8088. QLHV was not started.'
         }
 
-        # Reconcile exact runtime executables even when their PID file is missing/stale.
-        # This prevents a listener plus an orphaned QLHV process from coexisting.
+        # A daily Desktop launch must never stop or replace an existing server.
+        # If another exact QLHV process exists without owning the listener, report
+        # the ambiguous state and let an operator inspect it separately.
         $orphanedRuntimeIds = @(Get-QlhvRuntimeProcessIds | Where-Object { $qlhvOwners -notcontains [int]$_ })
-        foreach ($orphanedRuntimeId in $orphanedRuntimeIds) {
-            Stop-QlhvProcessById -ProcessId ([int]$orphanedRuntimeId)
+        if ($orphanedRuntimeIds.Count -gt 0) {
+            throw "Another QLHV runtime process already exists (PID: $($orphanedRuntimeIds -join ', ')). No process was stopped or started."
         }
 
         $existingId = $qlhvOwners[0]
-        $liveProbe = Invoke-HealthProbe -Url $LiveUrl -TimeoutSeconds 4
-        $readyProbe = Invoke-HealthProbe -Url $ReadyUrl -TimeoutSeconds 45
-        $legacyReady = $false
-        if ($script:UseLegacyRuntime -and $liveProbe.StatusCode -eq 404) {
-            $legacyProbe = Invoke-HealthProbe -Url $LegacyHealthUrl -TimeoutSeconds 10
-            $legacyReady = $legacyProbe.Success
-        }
-        if (($liveProbe.Success -and $readyProbe.Success) -or $legacyReady) {
-            $script:StartedProcessId = $existingId
-            Set-Content -LiteralPath $PidFile -Value $existingId -Encoding Ascii
+        $script:StartedProcessId = $existingId
+        Set-Content -LiteralPath $PidFile -Value $existingId -Encoding Ascii
+        if ($script:UseLegacyRuntime) {
+            Wait-ForLegacyRollbackHealth -ProcessId $existingId -TimeoutSeconds $HealthTimeoutSeconds
         }
         else {
-            # A hung or stale QLHV instance is restarted by exact, verified PID only.
-            Stop-QlhvProcessById -ProcessId $existingId
+            $liveTimeout = [Math]::Min(30, $HealthTimeoutSeconds)
+            Wait-ForEndpoint -ProcessId $existingId -Url $LiveUrl -DisplayName 'liveness' -TimeoutSeconds $liveTimeout
+            Wait-ForEndpoint -ProcessId $existingId -Url $ReadyUrl -DisplayName 'readiness' -TimeoutSeconds $HealthTimeoutSeconds
         }
     }
     else {
-        # A QLHV process can be hung before binding its port and its PID file may be
-        # absent. Enumerate only the exact published executable/dll and stop by PID.
-        foreach ($orphanedRuntimeId in @(Get-QlhvRuntimeProcessIds)) {
-            Stop-QlhvProcessById -ProcessId ([int]$orphanedRuntimeId)
+        $runtimeIds = @(Get-QlhvRuntimeProcessIds)
+        if ($runtimeIds.Count -gt 1) {
+            throw "Multiple QLHV runtime processes already exist (PID: $($runtimeIds -join ', ')). No process was stopped or started."
         }
-        if (Test-Path -LiteralPath $PidFile -PathType Leaf) {
-            $rawSavedId = (Get-Content -LiteralPath $PidFile -Raw).Trim()
-            $savedId = 0
-            if ([int]::TryParse($rawSavedId, [ref]$savedId) -and $savedId -gt 0) {
-                $savedRecord = Get-ProcessRecord -ProcessId $savedId
-                if (Test-IsQlhvRuntimeProcess -ProcessRecord $savedRecord) {
-                    Stop-QlhvProcessById -ProcessId $savedId
-                }
+        if ($runtimeIds.Count -eq 1) {
+            # The existing process may still be binding the port. Join it and wait;
+            # never start a second process and never use restart as a readiness fix.
+            $script:StartedProcessId = [int]$runtimeIds[0]
+            Set-Content -LiteralPath $PidFile -Value $script:StartedProcessId -Encoding Ascii
+            if ($script:UseLegacyRuntime) {
+                Wait-ForLegacyRollbackHealth -ProcessId $script:StartedProcessId -TimeoutSeconds $HealthTimeoutSeconds
             }
+            else {
+                $liveTimeout = [Math]::Min(30, $HealthTimeoutSeconds)
+                Wait-ForEndpoint -ProcessId $script:StartedProcessId -Url $LiveUrl -DisplayName 'liveness' -TimeoutSeconds $liveTimeout
+                Wait-ForEndpoint -ProcessId $script:StartedProcessId -Url $ReadyUrl -DisplayName 'readiness' -TimeoutSeconds $HealthTimeoutSeconds
+            }
+        }
+        elseif (Test-Path -LiteralPath $PidFile -PathType Leaf) {
+            # A stale PID file is metadata only; removing it does not stop a process.
             Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
         }
     }
@@ -560,13 +917,138 @@ try {
         }
     }
 
-    if (-not $NoBrowser) {
-        Start-Process $ApplicationUrl
+    # Server identity/startup is now settled. Release launcher-only locks before
+    # waiting for Auto Sync so another icon invocation can join the same run.
+    Exit-LauncherCoordinationLocks
+
+    $browserUrl = $ApplicationUrl
+    $sessionStartError = $false
+    $sessionStartFailureMessage = $null
+    $sessionRunId = $null
+    if (-not $DisableAutoSync -and -not $script:UseLegacyRuntime) {
+        try {
+            Write-SessionSyncStage -Stage 'CONNECTING'
+            $sessionStatus = $null
+            $operationActive = $false
+            $activeRunId = $null
+            $initialStatusFailure = $null
+            $initialStatusDeadline = [DateTime]::UtcNow.AddSeconds($SyncTimeoutSeconds)
+            do {
+                $record = Get-ProcessRecord -ProcessId $script:StartedProcessId
+                if (-not (Test-IsQlhvRuntimeProcess -ProcessRecord $record)) {
+                    throw 'QLHV runtime da dung trong khi dang cho phien cap nhat hien tai.'
+                }
+
+                try {
+                    $sessionStatus = Get-SessionStartStatus
+                    $initialStatusFailure = $null
+                }
+                catch {
+                    $sessionStatus = $null
+                    $initialStatusFailure = Get-SafeLauncherMessage -Message ([string]$_.Exception.Message)
+                    Set-LauncherProgress -Message 'Tam thoi chua doc duoc trang thai; dang thu lai...'
+                    Start-Sleep -Seconds 2
+                    continue
+                }
+
+                $operationActiveProperty = $sessionStatus.PSObject.Properties['operationActive']
+                $serverReadyProperty = $sessionStatus.PSObject.Properties['serverReady']
+                $needSyncProperty = $sessionStatus.PSObject.Properties['needSync']
+                $canStartProperty = $sessionStatus.PSObject.Properties['canStart']
+                if ($null -eq $operationActiveProperty -or
+                    $null -eq $serverReadyProperty -or
+                    $null -eq $needSyncProperty -or
+                    $null -eq $canStartProperty) {
+                    throw 'Phan hoi kiem tra NeedSync thieu field bat buoc.'
+                }
+
+                $activeRunIdProperty = $sessionStatus.PSObject.Properties['activeRunId']
+                $legacyRunIdProperty = $sessionStatus.PSObject.Properties['runId']
+                $operationActive = [bool]$operationActiveProperty.Value
+                $activeRunId = if ($null -ne $activeRunIdProperty) {
+                    [string]$activeRunIdProperty.Value
+                }
+                else {
+                    $null
+                }
+                if ([string]::IsNullOrWhiteSpace($activeRunId) -and
+                    $operationActive -and
+                    $null -ne $legacyRunIdProperty) {
+                    $activeRunId = [string]$legacyRunIdProperty.Value
+                }
+                if ($operationActive -and [string]::IsNullOrWhiteSpace($activeRunId)) {
+                    Set-LauncherProgress -Message 'Dang cho phien cap nhat hien tai san sang...'
+                    Start-Sleep -Seconds 2
+                    continue
+                }
+                break
+            } while ([DateTime]::UtcNow -lt $initialStatusDeadline)
+
+            if ($null -eq $sessionStatus) {
+                throw "Khong doc duoc trang thai Auto Sync trong thoi gian cho: $initialStatusFailure"
+            }
+            if ($operationActive -and [string]::IsNullOrWhiteSpace($activeRunId)) {
+                throw "Operation hien tai chua ket thuc sau $SyncTimeoutSeconds giay."
+            }
+
+            if ($operationActive) {
+                $sessionRunId = $activeRunId
+            }
+            elseif ([bool]$needSyncProperty.Value) {
+                if (-not [bool]$canStartProperty.Value) {
+                    $messageProperty = $sessionStatus.PSObject.Properties['message']
+                    $blockedMessage = if ($null -eq $messageProperty -or
+                        [string]::IsNullOrWhiteSpace([string]$messageProperty.Value)) {
+                        'Cau hinh hien tai dang chan Auto Sync.'
+                    }
+                    else {
+                        [string]$messageProperty.Value
+                    }
+                    throw $blockedMessage
+                }
+
+                $sessionRunId = Invoke-SessionStartSync `
+                    -ProcessId $script:StartedProcessId `
+                    -TimeoutSeconds $SyncTimeoutSeconds
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($sessionRunId)) {
+                [void](Wait-ForSessionSync `
+                    -ProcessId $script:StartedProcessId `
+                    -RunId $sessionRunId `
+                    -TimeoutSeconds $SyncTimeoutSeconds)
+                $browserUrl = "$ApplicationUrl/qlhv-import?sessionStartState=succeeded&sessionStartRunId=$([Uri]::EscapeDataString($sessionRunId))"
+            }
+            else {
+                Set-LauncherProgress -Message 'Du lieu da la ban moi nhat.' -Completed
+                $browserUrl = "$ApplicationUrl/qlhv-import?sessionStartState=succeeded"
+            }
+        }
+        catch {
+            # The application remains available with its last committed data. The
+            # import page will expose runtime/Auto Sync blockers after login.
+            $sessionStartError = $true
+            $sessionStartFailureMessage = Get-SafeLauncherMessage -Message $_.Exception.Message
+            Set-LauncherProgress -Message 'Cap nhat du lieu co loi; dang mo ung dung...'
+            $browserUrl = "$ApplicationUrl/qlhv-import?sessionStartState=failed"
+            if (-not [string]::IsNullOrWhiteSpace($sessionRunId)) {
+                $browserUrl += '&sessionStartRunId=' + [Uri]::EscapeDataString($sessionRunId)
+            }
+        }
     }
 
+    if (-not $NoBrowser) {
+        Start-Process $browserUrl
+    }
+    Close-LauncherProgress
+
     Write-Host "QLHV is ready at $ApplicationUrl (PID $script:StartedProcessId)."
+    if ($sessionStartError) {
+        Write-Warning "QLHV da mo nhung phien cap nhat du lieu khong thanh cong: $sessionStartFailureMessage"
+    }
 }
 catch {
+    Close-LauncherProgress
     $message = Get-SafeLauncherMessage -Message $_.Exception.Message
     try {
         New-Item -ItemType Directory -Path $LogDirectory -Force -ErrorAction SilentlyContinue | Out-Null
@@ -577,22 +1059,19 @@ catch {
         # Keep the original startup error.
     }
 
-    if ($script:StartedThisRun -and $null -ne $script:StartedProcessId) {
-        $failedRecord = Get-ProcessRecord -ProcessId ([int]$script:StartedProcessId)
-        if (Test-IsQlhvRuntimeProcess -ProcessRecord $failedRecord) {
-            try { Stop-QlhvProcessById -ProcessId ([int]$script:StartedProcessId) } catch { }
+    # Daily launch failures never stop an existing or newly started server.
+    # Deployment/rollback scripts retain their separate, explicit PID lifecycle.
+    if (-not $NoBrowser -and $null -ne $script:StartedProcessId) {
+        $liveAfterFailure = Invoke-HealthProbe -Url $LiveUrl -TimeoutSeconds 4
+        if ($liveAfterFailure.Success) {
+            Start-Process "$ApplicationUrl/qlhv-import?sessionStartState=failed"
         }
-        Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
     }
     Show-LauncherError -Message $message
     throw $message
 }
 finally {
-    if ($null -ne $script:LauncherLockStream) {
-        $script:LauncherLockStream.Dispose()
-    }
-    if ($script:LauncherMutexAcquired) {
-        $script:LauncherMutex.ReleaseMutex()
-    }
+    Close-LauncherProgress
+    Exit-LauncherCoordinationLocks
     $script:LauncherMutex.Dispose()
 }

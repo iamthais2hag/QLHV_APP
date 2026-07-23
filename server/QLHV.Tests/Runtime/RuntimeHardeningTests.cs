@@ -192,6 +192,20 @@ public sealed class RuntimeHardeningTests
     }
 
     [Fact]
+    public void Runtime_readiness_requires_auto_sync_partition_state_schema()
+    {
+        var source = File.ReadAllText(FindWorkspaceFile(
+            "server",
+            "QLHV.Infrastructure",
+            "Runtime",
+            "SqlServerRuntimeReadinessProbe.cs"));
+
+        Assert.Contains("\"App_QlhvSyncPartitionState\"", source, StringComparison.Ordinal);
+        Assert.Contains("\"App_QlhvAutoSyncRun\"", source, StringComparison.Ordinal);
+        Assert.Contains("\"App_DataVersion\"", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Environment_and_command_line_keep_precedence_over_production_local_json()
     {
         const string environmentName = "RuntimeHardeningPrecedence__Value";

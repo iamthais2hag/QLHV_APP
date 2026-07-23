@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { useDataVersionRefresh } from '../data-version/useDataVersionRefresh';
 import {
   executeQlhvImport,
   getQlhvImportDiagnostics,
@@ -25,11 +27,15 @@ import type {
   QlhvImportEntityCounts,
   QlhvImportExecuteResult,
   QlhvImportPlan,
+  QlhvImportPhotoCounts,
   QlhvImportSnapshot,
   QlhvImportSourceKind,
   QlhvOperationHistoryItem,
+  QlhvOperationType,
   QlhvOperationsStatus,
 } from './types';
+import AutoSyncPanel from './AutoSyncPanel';
+import PhotoProcessingPanel from './PhotoProcessingPanel';
 
 const NUMBER_FORMAT = new Intl.NumberFormat('vi-VN');
 const DATE_FORMAT = new Intl.DateTimeFormat('vi-VN', {
@@ -89,12 +95,16 @@ function createEmptySourceState(): SourceViewState {
 
 export default function QlhvImportPage() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const isAdmin = user?.role === 'Admin';
+  const sessionStartRunId = searchParams.get('sessionStartRunId');
+  const sessionStartRequestFailed = searchParams.get('sessionStartState') === 'failed';
   const [activeSource, setActiveSource] = useState<QlhvImportSourceKind>('OTO');
   const [sources, setSources] = useState<Record<QlhvImportSourceKind, SourceViewState>>({
     OTO: createEmptySourceState(),
     MOTO: createEmptySourceState(),
   });
+  const [contentReloadToken, setContentReloadToken] = useState(0);
 
   function patchSource(sourceKind: QlhvImportSourceKind, patch: Partial<SourceViewState>) {
     setSources((current) => ({
@@ -250,6 +260,8 @@ export default function QlhvImportPage() {
         historyError: toSafeClientMessage(historyResult.reason, 'Không thể tải lại lịch sử.'),
       });
     }
+    return statusResult.status === 'fulfilled'
+      && (!includeHistory || historyResult.status === 'fulfilled');
   }
 
   async function loadDiagnostics(sourceKind: QlhvImportSourceKind) {
@@ -263,12 +275,14 @@ export default function QlhvImportPage() {
         diagnosticsLoading: false,
         diagnosticsError: null,
       });
+      return true;
     } catch (error) {
       patchSource(sourceKind, {
         diagnostics: null,
         diagnosticsLoading: false,
         diagnosticsError: toSafeClientMessage(error, 'Không thể chạy chẩn đoán.'),
       });
+      return false;
     }
   }
 
@@ -292,12 +306,14 @@ export default function QlhvImportPage() {
         planLoading: false,
         planError: null,
       });
+      return true;
     } catch (error) {
       patchSource(sourceKind, {
         plan: null,
         planLoading: false,
         planError: toSafeClientMessage(error, 'Không thể lập kế hoạch.'),
       });
+      return false;
     }
   }
 
@@ -382,6 +398,7 @@ export default function QlhvImportPage() {
           loadDiagnostics(sourceKind),
           loadPlan(sourceKind),
         ]);
+        await dataVersion.reload();
       }
     } catch (error) {
       patchSource(sourceKind, {
@@ -390,6 +407,34 @@ export default function QlhvImportPage() {
       });
     }
   }
+
+  async function reloadVisibleData() {
+    setContentReloadToken((current) => current + 1);
+    const statusResults = await Promise.all(
+      QLHV_IMPORT_SOURCE_KINDS.map((sourceKind) => reloadStatus(sourceKind, true)),
+    );
+    const current = sources[activeSource];
+    const contentResults = await Promise.all([
+      current.diagnostics ? loadDiagnostics(activeSource) : Promise.resolve(),
+      current.plan ? loadPlan(activeSource) : Promise.resolve(),
+    ]);
+    return statusResults.every(Boolean)
+      && contentResults.every((result) => result !== false);
+  }
+
+  const dataVersion = useDataVersionRefresh({
+    resources: [
+      'hocVienVersion',
+      'khoaHocVersion',
+      'giaoVienVersion',
+      'photoVersion',
+    ],
+    onVersionChanged: async () => {
+      if (!await reloadVisibleData()) {
+        throw new Error('Không thể tải lại đầy đủ dữ liệu đồng bộ theo phiên bản mới.');
+      }
+    },
+  });
 
   const active = sources[activeSource];
   const activeRequest = useMemo(() => createImportRequest(activeSource), [activeSource]);
@@ -406,6 +451,15 @@ export default function QlhvImportPage() {
         active.status,
         activeBusy,
       );
+  const autoSyncOperationBlocker = getAutoSyncOperationBlocker(sources);
+  const combinedHistory = useMemo(
+    () => [...sources.OTO.history, ...sources.MOTO.history]
+      .filter((row, index, all) =>
+        all.findIndex((candidate) => candidate.operationId === row.operationId) === index)
+      .sort((left, right) =>
+        (right.startedAtUtc ?? '').localeCompare(left.startedAtUtc ?? '')),
+    [sources.MOTO.history, sources.OTO.history],
+  );
 
   return (
     <div className="qlhv-import-page">
@@ -415,14 +469,38 @@ export default function QlhvImportPage() {
           <h2>Đồng bộ dữ liệu CSĐT</h2>
           <p>Làm mới database BAK, kiểm tra snapshot, lập kế hoạch và full sync theo từng phân vùng độc lập.</p>
         </div>
-        <span className="qlhv-import-badge">Live → BAK → QLHV_APP</span>
+        <div className="qlhv-import-hero__actions">
+          <span className="qlhv-import-badge">Live → BAK → QLHV_APP</span>
+          <button
+            type="button"
+            className="btn btn--ghost"
+            onClick={() => void dataVersion.reload()}
+            disabled={dataVersion.checking}
+          >
+            {dataVersion.checking ? 'Đang tải lại...' : 'Tải lại dữ liệu'}
+          </button>
+        </div>
       </section>
+
+      {dataVersion.error && <ErrorBanner message={dataVersion.error} />}
 
       {!isAdmin && (
         <div className="qlhv-import-permission-note" role="status">
           {NO_WRITE_PERMISSION_MESSAGE}. Bạn vẫn có thể xem trạng thái, chẩn đoán, kế hoạch và lịch sử.
         </div>
       )}
+
+      <AutoSyncPanel
+        isAdmin={isAdmin}
+        operationBlocker={autoSyncOperationBlocker}
+        operationHistory={combinedHistory}
+        reloadToken={contentReloadToken}
+        onAccepted={async () => {
+          await reloadVisibleData();
+        }}
+        sessionStartRunId={sessionStartRunId}
+        sessionStartRequestFailed={sessionStartRequestFailed}
+      />
 
       <section className="qlhv-import-source-cards" aria-label="Nguồn dữ liệu CSĐT">
         {QLHV_IMPORT_SOURCE_KINDS.map((sourceKind) => {
@@ -537,8 +615,38 @@ export default function QlhvImportPage() {
         </section>
       )}
 
+      <PhotoProcessingPanel
+        isAdmin={isAdmin}
+        photoVersion={dataVersion.version?.photoVersion}
+        reloadToken={contentReloadToken}
+      />
+
     </div>
   );
+}
+
+function getAutoSyncOperationBlocker(
+  sources: Record<QlhvImportSourceKind, SourceViewState>,
+): string | null {
+  for (const sourceKind of QLHV_IMPORT_SOURCE_KINDS) {
+    const current = sources[sourceKind];
+    if (!current.status) {
+      return `Chưa đọc được trạng thái ${sourceKind}.`;
+    }
+    if (isOperationBusy(current.status) || current.pendingOperationId) {
+      return `${sourceKind} đang có thao tác vận hành.`;
+    }
+    if (current.status.dryRun) {
+      return `${sourceKind}: chế độ DryRun đang bật.`;
+    }
+    if (!current.status.targetWritesEnabled) {
+      return `${sourceKind}: quyền ghi dữ liệu đang tắt.`;
+    }
+    if (!current.status.writeAuthorized) {
+      return `${sourceKind}: tài khoản hiện tại chưa được backend cấp quyền ghi.`;
+    }
+  }
+  return null;
 }
 
 function SourceCard({
@@ -645,6 +753,7 @@ function DiagnosticsView({ diagnostics }: { diagnostics: QlhvImportDiagnostics }
         giaoVien={diagnostics.giaoVien}
         mode="diagnostics"
       />
+      <ImportPhotoCounts counts={diagnostics.photo} />
       <IssueList title="Điểm chặn chẩn đoán" items={diagnostics.blockers} variant="blocker" />
       <IssueList title="Cảnh báo chẩn đoán" items={diagnostics.warnings} variant="warning" />
     </>
@@ -672,6 +781,7 @@ function PlanView({ plan, snapshotCurrent }: { plan: QlhvImportPlan; snapshotCur
         khoaHoc={plan.khoaHoc}
         giaoVien={plan.giaoVien}
       />
+      <ImportPhotoCounts counts={plan.photo} />
       <IssueList title="Điểm chặn kế hoạch" items={plan.blockers} variant="blocker" />
       <IssueList title="Cảnh báo kế hoạch" items={plan.warnings} variant="warning" />
     </>
@@ -760,8 +870,30 @@ function ResultView({ snapshot }: { snapshot: QlhvImportLastResult }) {
         giaoVien={result.giaoVien ?? null}
         mode="result"
       />
+      <ImportPhotoCounts counts={result.photo ?? result.plan.photo} />
       {!successful && <IssueList title="Điểm chặn từ backend" items={result.plan.blockers} variant="blocker" />}
     </div>
+  );
+}
+
+function ImportPhotoCounts({ counts }: { counts?: QlhvImportPhotoCounts }) {
+  return (
+    <section className="qlhv-import-entity-group" aria-label="Ảnh thẻ">
+      <h3>Ảnh thẻ</h3>
+      {!counts ? (
+        <div className="qlhv-import-entity-group__unavailable">
+          Backend chưa trả kế hoạch xử lý ảnh.
+        </div>
+      ) : (
+        <MetricGrid items={[
+          ['Tìm thấy', counts.found, 'ok'],
+          ['Thiếu', counts.missing, counts.missing > 0 ? 'warning' : 'ok'],
+          ['Đang chờ', counts.pending],
+          ['Cần xử lý lại', counts.toReprocess, counts.toReprocess > 0 ? 'warning' : 'default'],
+          ['Cần kiểm tra', counts.reviewRequired, counts.reviewRequired > 0 ? 'warning' : 'ok'],
+        ]} />
+      )}
+    </section>
   );
 }
 
@@ -773,6 +905,7 @@ function HistoryTable({ rows }: { rows: QlhvOperationHistoryItem[] }) {
           <tr>
             <th>Thời gian</th>
             <th>Thao tác</th>
+            <th>Actor</th>
             <th>Trạng thái</th>
             <th>Nguồn</th>
             <th>Thêm</th>
@@ -787,7 +920,13 @@ function HistoryTable({ rows }: { rows: QlhvOperationHistoryItem[] }) {
           {rows.map((row) => (
             <tr key={row.operationId}>
               <td>{formatDate(row.startedAtUtc)}</td>
-              <td>{row.operationType === 'REFRESH_BACKUP' ? 'Refresh BAK' : 'Full sync'}</td>
+              <td>{formatOperationType(row.operationType)}</td>
+              <td>
+                {row.actor
+                  ?? (row.detailJson?.includes('SYSTEM_AUTO_SYNC')
+                    ? 'SYSTEM_AUTO_SYNC'
+                    : '—')}
+              </td>
               <td><span className={`qlhv-history-status is-${historyTone(row.status)}`}>{row.status}</span></td>
               <td>{formatNumber(row.sourceRows)}</td>
               <td>{formatNumber(row.insertedRows)}</td>
@@ -929,6 +1068,16 @@ function historyTone(status: string): 'ok' | 'busy' | 'failed' {
   if (normalized.includes('fail') || normalized.includes('error') || normalized.includes('lỗi')) return 'failed';
   if (normalized.includes('queue') || normalized.includes('running') || normalized.includes('đang')) return 'busy';
   return 'ok';
+}
+
+function formatOperationType(type: QlhvOperationType): string {
+  const labels: Record<QlhvOperationType, string> = {
+    REFRESH_BACKUP: 'Refresh BAK',
+    FULL_SYNC: 'Full sync',
+    AUTO_SYNC: 'Auto Sync',
+    PHOTO_PROCESSING: 'Xử lý ảnh',
+  };
+  return labels[type];
 }
 
 function toSafeClientMessage(error: unknown, fallback: string): string {

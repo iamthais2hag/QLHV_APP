@@ -438,12 +438,41 @@ WHERE SourceProfileCode = @SourceProfileCode
                 commandTimeout: _options.TimeoutSeconds,
                 cancellationToken: cancellationToken))).ToList();
 
+            if (!string.IsNullOrWhiteSpace(payload.BackupSnapshotToken))
+            {
+                await connection.ExecuteAsync(new CommandDefinition(
+                    QlhvDataVersionSql.UpsertPartitionStateAfterSuccessfulFullSync,
+                    new
+                    {
+                        SourceType =
+                            QlhvOperationSourceCatalog.ResolveSourceTypeFromProfile(sourceProfileCode),
+                        SourceProfileCode = sourceProfileCode,
+                        AppliedBackupSnapshotToken = payload.BackupSnapshotToken.Trim(),
+                        HocVienRows = payload.HocVienRows.Count,
+                        KhoaHocRows = payload.KhoaHocRows.Count,
+                        GiaoVienRows = payload.GiaoVienRows.Count,
+                        KhoaHocGiaoVienRows = payload.RelationRows.Count,
+                    },
+                    transaction: transaction,
+                    commandTimeout: _options.TimeoutSeconds,
+                    cancellationToken: cancellationToken));
+            }
+
+            await connection.ExecuteAsync(new CommandDefinition(
+                QlhvDataVersionSql.IncrementAfterSuccessfulFullSync,
+                transaction: transaction,
+                commandTimeout: _options.TimeoutSeconds,
+                cancellationToken: cancellationToken));
+
             await connection.ExecuteAsync(new CommandDefinition(
                 QlhvCourseTeacherFullSnapshotSyncSql.DropStagingTables,
                 transaction: transaction,
                 commandTimeout: _options.TimeoutSeconds,
                 cancellationToken: cancellationToken));
-            await transaction.CommitAsync(cancellationToken);
+            // Once every merge and the version update have succeeded, finish the atomic
+            // commit even if the caller disconnects. This avoids a cancellation gap where
+            // data/version outcome becomes ambiguous to the service layer.
+            await transaction.CommitAsync(CancellationToken.None);
 
             return new QlhvImportFullSyncWriteResult(
                 BuildWriteCounts(payload.KhoaHocRows.Count, khoaHocMergeActions, khoaHocSoftDeleteActions),
@@ -461,7 +490,7 @@ WHERE SourceProfileCode = @SourceProfileCode
         {
             if (transaction.Connection is not null)
             {
-                await transaction.RollbackAsync(cancellationToken);
+                await transaction.RollbackAsync(CancellationToken.None);
             }
 
             throw;

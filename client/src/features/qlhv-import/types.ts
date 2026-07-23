@@ -4,7 +4,11 @@ export type QlhvImportSourceProfileCode = 'CSDT_OTO' | 'CSDT_MOTO';
 
 export type QlhvOperationState = 'idle' | 'refreshing' | 'syncing' | 'succeeded' | 'failed';
 
-export type QlhvOperationType = 'REFRESH_BACKUP' | 'FULL_SYNC';
+export type QlhvOperationType =
+  | 'REFRESH_BACKUP'
+  | 'FULL_SYNC'
+  | 'AUTO_SYNC'
+  | 'PHOTO_PROCESSING';
 
 export interface QlhvImportRequest {
   sourceProfileCode: QlhvImportSourceProfileCode;
@@ -24,6 +28,14 @@ export interface QlhvImportEntityCounts {
   softDelete: number;
   skip: number;
   duplicateSourceKeys: number;
+}
+
+export interface QlhvImportPhotoCounts {
+  found: number;
+  missing: number;
+  pending: number;
+  toReprocess: number;
+  reviewRequired: number;
 }
 
 export interface QlhvImportDiagnostics {
@@ -51,6 +63,7 @@ export interface QlhvImportDiagnostics {
   hocVien: QlhvImportEntityCounts;
   khoaHoc: QlhvImportEntityCounts;
   giaoVien: QlhvImportEntityCounts;
+  photo?: QlhvImportPhotoCounts;
   duplicateSourceKeys: number;
   relationConflicts: number;
   executable: boolean;
@@ -88,6 +101,7 @@ export interface QlhvImportPlan {
   hocVien: QlhvImportEntityCounts;
   khoaHoc: QlhvImportEntityCounts;
   giaoVien: QlhvImportEntityCounts;
+  photo?: QlhvImportPhotoCounts;
   duplicateSourceKeys: number;
   relationConflicts: number;
   executable: boolean;
@@ -108,6 +122,7 @@ export interface QlhvImportExecuteResult {
   hocVien?: QlhvImportEntityCounts;
   khoaHoc?: QlhvImportEntityCounts;
   giaoVien?: QlhvImportEntityCounts;
+  photo?: QlhvImportPhotoCounts;
 }
 
 export interface QlhvImportSnapshot<T> {
@@ -177,4 +192,113 @@ export interface QlhvOperationHistoryItem {
   snapshotToken: string | null;
   errorMessage: string | null;
   detailJson: string | null;
+  actor?: string | null;
+}
+
+export type QlhvAutoSyncState =
+  | 'disabled'
+  | 'not-found'
+  | 'idle'
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'partial-failed'
+  | 'failed';
+
+export interface QlhvAutoSyncSourceResult {
+  sourceType: QlhvImportSourceKind;
+  status: string;
+  refreshOperationId: string | null;
+  syncOperationId: string | null;
+  message: string | null;
+  startedAtUtc: string | null;
+  completedAtUtc: string | null;
+}
+
+export interface QlhvAutoSyncStatus {
+  found: boolean;
+  enabled: boolean;
+  runOnServerStartup: boolean;
+  refreshBackupBeforeSync: boolean;
+  state: QlhvAutoSyncState;
+  runId: string | null;
+  activeRunId: string | null;
+  triggerType: string | null;
+  actor: string | null;
+  currentSourceType: QlhvImportSourceKind | null;
+  currentStage: string | null;
+  startedAtUtc: string | null;
+  completedAtUtc: string | null;
+  lastSuccessfulSyncUtc: string | null;
+  oto: QlhvAutoSyncSourceResult | null;
+  moto: QlhvAutoSyncSourceResult | null;
+  lastError: string | null;
+}
+
+export interface QlhvAutoSyncRunResult {
+  accepted: boolean;
+  joinedExisting: boolean;
+  isConflict: boolean;
+  isUnavailable: boolean;
+  runId: string | null;
+  status: string;
+  message: string;
+}
+
+export type QlhvPhotoProcessingStatus =
+  | 'PENDING'
+  | 'PROCESSING'
+  | 'SUCCEEDED'
+  | 'REVIEW_REQUIRED'
+  | 'FAILED'
+  | 'APPROVED';
+
+export interface QlhvPhotoProcessingCounts {
+  total: number;
+  pending: number;
+  processing: number;
+  succeeded: number;
+  reviewRequired: number;
+  failed: number;
+  approved: number;
+}
+
+export interface QlhvPhotoProcessingItem {
+  id: number;
+  sourceProfileCode: QlhvImportSourceProfileCode;
+  sourceMaDK: string;
+  studentName: string | null;
+  maKhoaHoc: string | null;
+  sourceImagePath: string | null;
+  outputImagePath: string | null;
+  sourcePathStatus: string;
+  sourcePathKind: string;
+  sourcePreviewUrl: string | null;
+  outputPreviewUrl: string | null;
+  processingStatus: QlhvPhotoProcessingStatus;
+  processingConfidence: number | null;
+  processedAtUtc: string | null;
+  errorMessage: string | null;
+  reviewRequired: boolean;
+  approvedAtUtc: string | null;
+  approvedBy: string | null;
+}
+
+export interface QlhvPhotoProcessingPage {
+  items: QlhvPhotoProcessingItem[];
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+  engineReady: boolean;
+  readinessMessage: string | null;
+  counts: QlhvPhotoProcessingCounts;
+}
+
+export interface QlhvPhotoProcessingQuery {
+  sourceProfileCode?: QlhvImportSourceProfileCode;
+  status?: QlhvPhotoProcessingStatus;
+  reviewRequired?: boolean;
+  page: number;
+  pageSize: number;
 }

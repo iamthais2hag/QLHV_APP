@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace QLHV.Application.Sync.Dtos;
 
 public sealed class QlhvOperationSourceQuery
@@ -8,6 +10,9 @@ public sealed class QlhvOperationSourceQuery
 public sealed class QlhvRefreshBackupRequest
 {
     public string SourceType { get; set; } = string.Empty;
+
+    [JsonIgnore]
+    public string Actor { get; set; } = QlhvOperationActors.ManualAdmin;
 }
 
 public sealed class QlhvOperationRowCountsDto
@@ -93,6 +98,8 @@ public sealed class QlhvOperationHistoryDto
 
     public string Status { get; init; } = string.Empty;
 
+    public string Actor { get; init; } = QlhvOperationActors.ManualAdmin;
+
     public DateTime StartedAtUtc { get; init; }
 
     public DateTime? CompletedAtUtc { get; init; }
@@ -122,7 +129,8 @@ public sealed record QlhvOperationHistoryCreate(
     string OperationType,
     string Status,
     DateTime CreatedAtUtc,
-    DateTime? StartedAtUtc);
+    DateTime? StartedAtUtc,
+    string Actor = QlhvOperationActors.ManualAdmin);
 
 public sealed record QlhvOperationHistoryCompletion(
     Guid OperationId,

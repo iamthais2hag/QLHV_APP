@@ -8,8 +8,12 @@ $ErrorActionPreference = 'Stop'
 
 $RuntimeRoot = 'D:\QLHV_APP_RUNTIME'
 $AppDirectory = Join-Path $RuntimeRoot 'app'
+$LauncherDirectory = Join-Path $RuntimeRoot 'launcher'
 $ConfigDirectory = Join-Path $RuntimeRoot 'config'
 $ProductionConfig = Join-Path $ConfigDirectory 'appsettings.Production.Local.json'
+$ModelDirectory = Join-Path $RuntimeRoot 'models'
+$PhotoSourceDirectory = 'D:\IM_GPLX'
+$PhotoOutputDirectory = 'D:\QLHV_APP\IM_GPLX'
 $LogDirectory = Join-Path $RuntimeRoot 'logs'
 $RunDirectory = Join-Path $RuntimeRoot 'run'
 $LegacyRuntimeMarker = Join-Path $RunDirectory 'legacy-runtime.marker'
@@ -19,13 +23,22 @@ $ClientDirectory = Join-Path $RepoRoot 'client'
 $ClientDist = Join-Path $ClientDirectory 'dist'
 $ApiProject = Join-Path $RepoRoot 'server\QLHV.Api\QLHV.Api.csproj'
 $StopScript = Join-Path $PSScriptRoot 'Stop-QLHV-App.ps1'
-$StartScript = Join-Path $PSScriptRoot 'Start-QLHV-App.ps1'
+$SourceStartScript = Join-Path $PSScriptRoot 'Start-QLHV-App.ps1'
+$SourceLauncher = Join-Path $PSScriptRoot 'Start-QLHV-App.cmd'
+$StartScript = Join-Path $LauncherDirectory 'Start-QLHV-App.ps1'
+$Launcher = Join-Path $LauncherDirectory 'Start-QLHV-App.cmd'
+$ShortcutName = 'QLHV Th' + [char]0x00E0 + 'nh C' + [char]0x00F4 + 'ng.lnk'
+$ShortcutPath = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) $ShortcutName
 $StageRoot = Join-Path $RuntimeRoot ("update-stage-" + [Guid]::NewGuid().ToString('N'))
 $StageApp = Join-Path $StageRoot 'app'
+$StageLauncher = Join-Path $StageRoot 'launcher'
+$RollbackLauncher = Join-Path $RunDirectory 'rollback-launcher'
+$ShortcutBackup = Join-Path $RunDirectory ("shortcut-backup-" + [Guid]::NewGuid().ToString('N') + '.lnk')
 $script:UpdateStage = 'initialization'
 $script:UpdateFailureLogged = $false
 $script:ExistingRuntimeWasStopped = $false
 $script:RollbackPathEntered = $false
+$script:ProductionConfigBackupPath = $null
 
 function Assert-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -151,7 +164,10 @@ function Assert-ProductionConfiguration {
 }
 
 function Set-QlhvProductionWriteFlags {
-    param([Parameter(Mandatory = $true)][string]$Path)
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [switch]$SkipDurableBackup
+    )
 
     try {
         $configuration = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -187,6 +203,195 @@ function Set-QlhvProductionWriteFlags {
         $syncExecution = $syncExecutionProperty.Value
     }
 
+    $autoSyncProperty = $configuration.PSObject.Properties['QlhvAutoSync']
+    if ($null -eq $autoSyncProperty) {
+        Add-Member -InputObject $configuration -MemberType NoteProperty -Name 'QlhvAutoSync' -Value ([pscustomobject]@{})
+        $autoSync = $configuration.PSObject.Properties['QlhvAutoSync'].Value
+        $autoSyncChanged = $true
+    }
+    elseif ($autoSyncProperty.Value -isnot [pscustomobject]) {
+        throw "Production configuration section QlhvAutoSync must be a JSON object."
+    }
+    else {
+        $autoSync = $autoSyncProperty.Value
+        $autoSyncChanged = $false
+    }
+
+    $autoSyncDefaults = [ordered]@{
+        Enabled = $true
+        RunOnServerStartup = $true
+        RefreshBackupBeforeSync = $true
+        SourceOrder = @('OTO', 'MOTO')
+        StartupDedupeWindowSeconds = 300
+        SessionStartDedupeWindowSeconds = 30
+    }
+    foreach ($entry in $autoSyncDefaults.GetEnumerator()) {
+        if ($null -eq $autoSync.PSObject.Properties[$entry.Key]) {
+            Add-Member -InputObject $autoSync -MemberType NoteProperty -Name $entry.Key -Value $entry.Value
+            $autoSyncChanged = $true
+        }
+    }
+    foreach ($propertyName in @('Enabled', 'RunOnServerStartup', 'RefreshBackupBeforeSync')) {
+        $property = $autoSync.PSObject.Properties[$propertyName]
+        if ($null -eq $property -or $property.Value -isnot [bool]) {
+            Add-Member -InputObject $autoSync -MemberType NoteProperty -Name $propertyName -Value $true -Force
+            $autoSyncChanged = $true
+        }
+    }
+    $sourceOrderProperty = $autoSync.PSObject.Properties['SourceOrder']
+    $sourceOrder = if ($null -eq $sourceOrderProperty -or
+        $sourceOrderProperty.Value -is [string]) {
+        @()
+    }
+    else {
+        @($sourceOrderProperty.Value)
+    }
+    if ($sourceOrder.Count -ne 2 -or
+        -not [string]::Equals([string]$sourceOrder[0], 'OTO', [StringComparison]::OrdinalIgnoreCase) -or
+        -not [string]::Equals([string]$sourceOrder[1], 'MOTO', [StringComparison]::OrdinalIgnoreCase)) {
+        Add-Member -InputObject $autoSync -MemberType NoteProperty -Name 'SourceOrder' -Value @('OTO', 'MOTO') -Force
+        $autoSyncChanged = $true
+    }
+
+    $photoProperty = $configuration.PSObject.Properties['PhotoProcessing']
+    if ($null -eq $photoProperty) {
+        Add-Member -InputObject $configuration -MemberType NoteProperty -Name 'PhotoProcessing' -Value ([pscustomobject]@{})
+        $photo = $configuration.PSObject.Properties['PhotoProcessing'].Value
+        $photoChanged = $true
+    }
+    elseif ($photoProperty.Value -isnot [pscustomobject]) {
+        throw "Production configuration section PhotoProcessing must be a JSON object."
+    }
+    else {
+        $photo = $photoProperty.Value
+        $photoChanged = $false
+    }
+
+    $photoDefaults = [ordered]@{
+        Enabled = $false
+        SourceRoot = 'D:\IM_GPLX'
+        OutputRoot = 'D:\QLHV_APP\IM_GPLX'
+        ModelPath = 'D:\QLHV_APP_RUNTIME\models\person-segmentation.onnx'
+        ModelSha256 = ''
+        ModelLicense = ''
+        ModelLicenseManifestPath = 'D:\QLHV_APP_RUNTIME\models\person-segmentation.license.json'
+        ModelLicenseManifestSha256 = ''
+        BackgroundColor = '#0067B1'
+        AutoProcessAfterSync = $false
+        MinimumAutoApprovalConfidence = 0.85
+    }
+    foreach ($entry in $photoDefaults.GetEnumerator()) {
+        if ($null -eq $photo.PSObject.Properties[$entry.Key]) {
+            Add-Member -InputObject $photo -MemberType NoteProperty -Name $entry.Key -Value $entry.Value
+            $photoChanged = $true
+        }
+    }
+    $enabledProperty = $photo.PSObject.Properties['Enabled']
+    if ($null -ne $enabledProperty -and
+        $enabledProperty.Value -is [bool] -and
+        [bool]$enabledProperty.Value) {
+        $acceptedLicenses = @('MIT', 'Apache-2.0', 'BSD-2-Clause', 'BSD-3-Clause')
+        $modelPathProperty = $photo.PSObject.Properties['ModelPath']
+        $modelHashProperty = $photo.PSObject.Properties['ModelSha256']
+        $licenseProperty = $photo.PSObject.Properties['ModelLicense']
+        $manifestPathProperty = $photo.PSObject.Properties['ModelLicenseManifestPath']
+        $manifestHashProperty = $photo.PSObject.Properties['ModelLicenseManifestSha256']
+        $photoReady = $null -ne $modelPathProperty -and
+            -not [string]::IsNullOrWhiteSpace([string]$modelPathProperty.Value) -and
+            [IO.Path]::IsPathRooted(([string]$modelPathProperty.Value).Trim()) -and
+            [string]::Equals(
+                [IO.Path]::GetExtension(([string]$modelPathProperty.Value).Trim()),
+                '.onnx',
+                [StringComparison]::OrdinalIgnoreCase) -and
+            (Test-Path -LiteralPath ([string]$modelPathProperty.Value) -PathType Leaf) -and
+            $null -ne $modelHashProperty -and
+            ([string]$modelHashProperty.Value).Trim() -match '^[A-Fa-f0-9]{64}$' -and
+            $null -ne $licenseProperty -and
+            $acceptedLicenses -contains ([string]$licenseProperty.Value).Trim() -and
+            $null -ne $manifestPathProperty -and
+            -not [string]::IsNullOrWhiteSpace([string]$manifestPathProperty.Value) -and
+            [IO.Path]::IsPathRooted(([string]$manifestPathProperty.Value).Trim()) -and
+            [string]::Equals(
+                [IO.Path]::GetExtension(([string]$manifestPathProperty.Value).Trim()),
+                '.json',
+                [StringComparison]::OrdinalIgnoreCase) -and
+            (Test-Path -LiteralPath ([string]$manifestPathProperty.Value) -PathType Leaf) -and
+            $null -ne $manifestHashProperty -and
+            ([string]$manifestHashProperty.Value).Trim() -match '^[A-Fa-f0-9]{64}$'
+        if ($photoReady) {
+            $actualModelHash = (Get-FileHash -LiteralPath ([string]$modelPathProperty.Value) -Algorithm SHA256).Hash
+            $actualManifestHash = (Get-FileHash -LiteralPath ([string]$manifestPathProperty.Value) -Algorithm SHA256).Hash
+            try {
+                $manifestInfo = Get-Item -LiteralPath ([string]$manifestPathProperty.Value)
+                $manifest = Get-Content -LiteralPath ([string]$manifestPathProperty.Value) -Raw -Encoding UTF8 |
+                    ConvertFrom-Json
+                $manifestSchemaProperty = $manifest.PSObject.Properties['schemaVersion']
+                $manifestLicenseProperty = $manifest.PSObject.Properties['licenseId']
+                $manifestModelHashProperty = $manifest.PSObject.Properties['modelSha256']
+                $manifestSourceProperty = $manifest.PSObject.Properties['modelSource']
+                $manifestReviewerProperty = $manifest.PSObject.Properties['reviewedBy']
+                $manifestReviewedAtProperty = $manifest.PSObject.Properties['reviewedAtUtc']
+                $reviewedAtUtc = [DateTimeOffset]::MinValue
+                $reviewedAtValid = $null -ne $manifestReviewedAtProperty -and
+                    [DateTimeOffset]::TryParse(
+                        [string]$manifestReviewedAtProperty.Value,
+                        [ref]$reviewedAtUtc) -and
+                    $reviewedAtUtc -le [DateTimeOffset]::UtcNow.AddMinutes(5)
+                $photoReady = [string]::Equals(
+                        $actualModelHash,
+                        ([string]$modelHashProperty.Value).Trim(),
+                        [StringComparison]::OrdinalIgnoreCase) -and
+                    [string]::Equals(
+                        $actualManifestHash,
+                        ([string]$manifestHashProperty.Value).Trim(),
+                        [StringComparison]::OrdinalIgnoreCase) -and
+                    $manifestInfo.Length -gt 0 -and
+                    $manifestInfo.Length -le 1MB -and
+                    $null -ne $manifestSchemaProperty -and
+                    [int]$manifestSchemaProperty.Value -eq 1 -and
+                    $null -ne $manifestLicenseProperty -and
+                    [string]::Equals(
+                        ([string]$manifestLicenseProperty.Value).Trim(),
+                        ([string]$licenseProperty.Value).Trim(),
+                        [StringComparison]::OrdinalIgnoreCase) -and
+                    $null -ne $manifestModelHashProperty -and
+                    [string]::Equals(
+                        ([string]$manifestModelHashProperty.Value).Trim(),
+                        ([string]$modelHashProperty.Value).Trim(),
+                        [StringComparison]::OrdinalIgnoreCase) -and
+                    $null -ne $manifestSourceProperty -and
+                    -not [string]::IsNullOrWhiteSpace([string]$manifestSourceProperty.Value) -and
+                    $null -ne $manifestReviewerProperty -and
+                    -not [string]::IsNullOrWhiteSpace([string]$manifestReviewerProperty.Value) -and
+                    $reviewedAtValid
+            }
+            catch {
+                $photoReady = $false
+            }
+        }
+        if (-not $photoReady) {
+            Add-Member -InputObject $photo -MemberType NoteProperty -Name 'Enabled' -Value $false -Force
+            Add-Member -InputObject $photo -MemberType NoteProperty -Name 'AutoProcessAfterSync' -Value $false -Force
+            $photoChanged = $true
+        }
+    }
+    $finalEnabledProperty = $photo.PSObject.Properties['Enabled']
+    $enabledNeedsNormalization = $null -eq $finalEnabledProperty -or
+        $finalEnabledProperty.Value -isnot [bool]
+    if ($enabledNeedsNormalization -or -not [bool]$finalEnabledProperty.Value) {
+        if ($enabledNeedsNormalization) {
+            Add-Member -InputObject $photo -MemberType NoteProperty -Name 'Enabled' -Value $false -Force
+            $photoChanged = $true
+        }
+        $autoProcessProperty = $photo.PSObject.Properties['AutoProcessAfterSync']
+        if ($null -eq $autoProcessProperty -or
+            $autoProcessProperty.Value -isnot [bool] -or
+            [bool]$autoProcessProperty.Value) {
+            Add-Member -InputObject $photo -MemberType NoteProperty -Name 'AutoProcessAfterSync' -Value $false -Force
+            $photoChanged = $true
+        }
+    }
+
     $dryRunProperty = $sync.PSObject.Properties['DryRun']
     $enableWritesProperty = $syncExecution.PSObject.Properties['EnableTargetWrites']
     $dryRunChanged = $null -eq $dryRunProperty -or
@@ -195,7 +400,7 @@ function Set-QlhvProductionWriteFlags {
     $enableWritesChanged = $null -eq $enableWritesProperty -or
         $enableWritesProperty.Value -isnot [bool] -or
         -not [bool]$enableWritesProperty.Value
-    $changed = $dryRunChanged -or $enableWritesChanged
+    $changed = $dryRunChanged -or $enableWritesChanged -or $autoSyncChanged -or $photoChanged
     if (-not $changed) {
         return $false
     }
@@ -207,7 +412,22 @@ function Set-QlhvProductionWriteFlags {
 
     $directory = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($Path))
     $temporaryPath = Join-Path $directory ('.appsettings.flags.' + [Guid]::NewGuid().ToString('N') + '.tmp')
-    $backupPath = Join-Path $directory ('.appsettings.flags.' + [Guid]::NewGuid().ToString('N') + '.bak')
+    $backupDirectory = if ($SkipDurableBackup) {
+        $directory
+    }
+    else {
+        Join-Path $directory 'backups'
+    }
+    New-Item -ItemType Directory -Path $backupDirectory -Force | Out-Null
+    $backupName = if ($SkipDurableBackup) {
+        '.appsettings.flags.' + [Guid]::NewGuid().ToString('N') + '.bak'
+    }
+    else {
+        'appsettings.Production.Local.' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff') +
+            '-' + [Guid]::NewGuid().ToString('N') + '.json.bak'
+    }
+    $backupPath = Join-Path $backupDirectory $backupName
+    $replacementCompleted = $false
     try {
         $json = $configuration | ConvertTo-Json -Depth 100
         [IO.File]::WriteAllText($temporaryPath, $json, [Text.UTF8Encoding]::new($false))
@@ -217,20 +437,166 @@ function Set-QlhvProductionWriteFlags {
         }
         # File.Replace atomically swaps the content while retaining the destination ACL.
         [IO.File]::Replace($temporaryPath, $Path, $backupPath, $true)
+        $replacementCompleted = $true
         $replaced = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
         if ([bool]$replaced.Sync.DryRun -or -not [bool]$replaced.SyncExecution.EnableTargetWrites) {
             throw "Production operational write flags could not be published."
         }
     }
+    catch {
+        if ($replacementCompleted -and (Test-Path -LiteralPath $backupPath -PathType Leaf)) {
+            $restoreTemporaryPath = Join-Path $directory (
+                '.appsettings.restore.' + [Guid]::NewGuid().ToString('N') + '.tmp')
+            try {
+                Copy-Item -LiteralPath $backupPath -Destination $restoreTemporaryPath
+                [IO.File]::Replace($restoreTemporaryPath, $Path, $null, $true)
+            }
+            finally {
+                Remove-Item -LiteralPath $restoreTemporaryPath -Force -ErrorAction SilentlyContinue
+            }
+        }
+        throw
+    }
     finally {
         Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue
+        if ($SkipDurableBackup) {
+            Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue
+        }
     }
     $verified = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
     if ([bool]$verified.Sync.DryRun -or -not [bool]$verified.SyncExecution.EnableTargetWrites) {
         throw "Production operational write flags did not remain published."
     }
+    if (-not $SkipDurableBackup) {
+        $script:ProductionConfigBackupPath = $backupPath
+    }
     return $true
+}
+
+function Restore-QlhvProductionConfigurationBackup {
+    if ([string]::IsNullOrWhiteSpace([string]$script:ProductionConfigBackupPath) -or
+        -not (Test-Path -LiteralPath $script:ProductionConfigBackupPath -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $ProductionConfig -PathType Leaf)) {
+        return
+    }
+
+    $directory = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($ProductionConfig))
+    $temporaryPath = Join-Path $directory (
+        '.appsettings.deployment-restore.' + [Guid]::NewGuid().ToString('N') + '.tmp')
+    $failedBackup = Join-Path (Split-Path -Parent $script:ProductionConfigBackupPath) (
+        'appsettings.Production.Local.failed-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff') +
+            '-' + [Guid]::NewGuid().ToString('N') + '.json.bak')
+    try {
+        Copy-Item -LiteralPath $script:ProductionConfigBackupPath -Destination $temporaryPath
+        [IO.File]::Replace($temporaryPath, $ProductionConfig, $failedBackup, $true)
+        $script:ProductionConfigBackupPath = $null
+    }
+    finally {
+        Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Get-QlhvPhotoModelStatus {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $configuration = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+    $photoProperty = $configuration.PSObject.Properties['PhotoProcessing']
+    if ($null -eq $photoProperty -or $photoProperty.Value -isnot [pscustomobject]) {
+        return 'NotConfigured'
+    }
+    $photo = $photoProperty.Value
+    $enabled = $photo.PSObject.Properties['Enabled']
+    if ($null -eq $enabled -or $enabled.Value -isnot [bool] -or -not [bool]$enabled.Value) {
+        return 'Disabled'
+    }
+    $modelLicense = $photo.PSObject.Properties['ModelLicense']
+    if ($null -eq $modelLicense -or [string]::IsNullOrWhiteSpace([string]$modelLicense.Value)) {
+        return 'NotReady:LicenseMissing'
+    }
+    $acceptedLicenses = @('MIT', 'Apache-2.0', 'BSD-2-Clause', 'BSD-3-Clause')
+    if ($acceptedLicenses -notcontains ([string]$modelLicense.Value).Trim()) {
+        return 'NotReady:LicenseNotAccepted'
+    }
+    $modelPath = $photo.PSObject.Properties['ModelPath']
+    if ($null -eq $modelPath -or [string]::IsNullOrWhiteSpace([string]$modelPath.Value) -or
+        -not [IO.Path]::IsPathRooted(([string]$modelPath.Value).Trim()) -or
+        -not [string]::Equals(
+            [IO.Path]::GetExtension(([string]$modelPath.Value).Trim()),
+            '.onnx',
+            [StringComparison]::OrdinalIgnoreCase) -or
+        -not (Test-Path -LiteralPath ([string]$modelPath.Value) -PathType Leaf)) {
+        return 'NotReady:ModelMissing'
+    }
+    $configuredHash = $photo.PSObject.Properties['ModelSha256']
+    if ($null -eq $configuredHash -or [string]::IsNullOrWhiteSpace([string]$configuredHash.Value)) {
+        return 'NotReady:ChecksumMissing'
+    }
+    $actualHash = (Get-FileHash -LiteralPath ([string]$modelPath.Value) -Algorithm SHA256).Hash
+    if (-not [string]::Equals(
+            $actualHash,
+            ([string]$configuredHash.Value).Trim(),
+            [StringComparison]::OrdinalIgnoreCase)) {
+        return 'NotReady:ChecksumMismatch'
+    }
+    $manifestPath = $photo.PSObject.Properties['ModelLicenseManifestPath']
+    if ($null -eq $manifestPath -or [string]::IsNullOrWhiteSpace([string]$manifestPath.Value) -or
+        -not [IO.Path]::IsPathRooted(([string]$manifestPath.Value).Trim()) -or
+        -not [string]::Equals(
+            [IO.Path]::GetExtension(([string]$manifestPath.Value).Trim()),
+            '.json',
+            [StringComparison]::OrdinalIgnoreCase) -or
+        -not (Test-Path -LiteralPath ([string]$manifestPath.Value) -PathType Leaf)) {
+        return 'NotReady:LicenseManifestMissing'
+    }
+    $manifestHash = $photo.PSObject.Properties['ModelLicenseManifestSha256']
+    if ($null -eq $manifestHash -or
+        ([string]$manifestHash.Value).Trim() -notmatch '^[A-Fa-f0-9]{64}$') {
+        return 'NotReady:LicenseManifestChecksumMissing'
+    }
+    $actualManifestHash = (Get-FileHash -LiteralPath ([string]$manifestPath.Value) -Algorithm SHA256).Hash
+    if (-not [string]::Equals(
+            $actualManifestHash,
+            ([string]$manifestHash.Value).Trim(),
+            [StringComparison]::OrdinalIgnoreCase)) {
+        return 'NotReady:LicenseManifestChecksumMismatch'
+    }
+    try {
+        $manifestInfo = Get-Item -LiteralPath ([string]$manifestPath.Value)
+        $manifest = Get-Content -LiteralPath ([string]$manifestPath.Value) -Raw -Encoding UTF8 |
+            ConvertFrom-Json
+        $schemaVersion = $manifest.PSObject.Properties['schemaVersion']
+        $manifestLicense = $manifest.PSObject.Properties['licenseId']
+        $manifestModelHash = $manifest.PSObject.Properties['modelSha256']
+        $modelSource = $manifest.PSObject.Properties['modelSource']
+        $reviewedBy = $manifest.PSObject.Properties['reviewedBy']
+        $reviewedAt = $manifest.PSObject.Properties['reviewedAtUtc']
+        $reviewedAtUtc = [DateTimeOffset]::MinValue
+        if ($manifestInfo.Length -le 0 -or $manifestInfo.Length -gt 1MB -or
+            $null -eq $schemaVersion -or [int]$schemaVersion.Value -ne 1 -or
+            $null -eq $manifestLicense -or
+            -not [string]::Equals(
+                ([string]$manifestLicense.Value).Trim(),
+                ([string]$modelLicense.Value).Trim(),
+                [StringComparison]::OrdinalIgnoreCase) -or
+            $null -eq $manifestModelHash -or
+            -not [string]::Equals(
+                ([string]$manifestModelHash.Value).Trim(),
+                ([string]$configuredHash.Value).Trim(),
+                [StringComparison]::OrdinalIgnoreCase) -or
+            $null -eq $modelSource -or
+            [string]::IsNullOrWhiteSpace([string]$modelSource.Value) -or
+            $null -eq $reviewedBy -or
+            [string]::IsNullOrWhiteSpace([string]$reviewedBy.Value) -or
+            $null -eq $reviewedAt -or
+            -not [DateTimeOffset]::TryParse([string]$reviewedAt.Value, [ref]$reviewedAtUtc) -or
+            $reviewedAtUtc -gt [DateTimeOffset]::UtcNow.AddMinutes(5)) {
+            return 'NotReady:LicenseManifestInvalid'
+        }
+    }
+    catch {
+        return 'NotReady:LicenseManifestInvalid'
+    }
+    return 'Ready'
 }
 
 function Assert-ProductionWriteFlags {
@@ -266,16 +632,125 @@ function Assert-ConfigurationUnchanged {
     }
 }
 
+function Set-RestrictedConfigurationDirectoryAcl {
+    param(
+        [Parameter(Mandatory = $true)][string]$DirectoryPath,
+        [Parameter(Mandatory = $true)][string]$AccountName
+    )
+
+    try {
+        $runtimeIdentity = ([Security.Principal.NTAccount]$AccountName).Translate(
+            [Security.Principal.SecurityIdentifier])
+    }
+    catch {
+        throw "Runtime account '$AccountName' could not be resolved. Configuration ACL was not changed."
+    }
+
+    $systemIdentity = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+    $administratorsIdentity = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+    $inheritance = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+    $propagation = [Security.AccessControl.PropagationFlags]::None
+    $allow = [Security.AccessControl.AccessControlType]::Allow
+
+    $directoryAcl = [Security.AccessControl.DirectorySecurity]::new()
+    $directoryAcl.SetAccessRuleProtection($true, $false)
+    $directoryAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+        $systemIdentity, [Security.AccessControl.FileSystemRights]::FullControl, $inheritance, $propagation, $allow))
+    $directoryAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+        $administratorsIdentity, [Security.AccessControl.FileSystemRights]::FullControl, $inheritance, $propagation, $allow))
+    $directoryAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+        $runtimeIdentity, [Security.AccessControl.FileSystemRights]::ReadAndExecute, $inheritance, $propagation, $allow))
+    Set-Acl -LiteralPath $DirectoryPath -AclObject $directoryAcl
+}
+
+function Set-RestrictedConfigurationFileAcl {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [Parameter(Mandatory = $true)][string]$AccountName
+    )
+
+    $runtimeIdentity = ([Security.Principal.NTAccount]$AccountName).Translate(
+        [Security.Principal.SecurityIdentifier])
+    $systemIdentity = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+    $administratorsIdentity = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+    $allow = [Security.AccessControl.AccessControlType]::Allow
+
+    $fileAcl = [Security.AccessControl.FileSecurity]::new()
+    $fileAcl.SetAccessRuleProtection($true, $false)
+    $fileAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+        $systemIdentity, [Security.AccessControl.FileSystemRights]::FullControl, $allow))
+    $fileAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+        $administratorsIdentity, [Security.AccessControl.FileSystemRights]::FullControl, $allow))
+    $fileAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+        $runtimeIdentity, [Security.AccessControl.FileSystemRights]::Read, $allow))
+    Set-Acl -LiteralPath $FilePath -AclObject $fileAcl
+}
+
+function Protect-ProductionConfigurationTree {
+    Set-RestrictedConfigurationDirectoryAcl `
+        -DirectoryPath $ConfigDirectory `
+        -AccountName $RuntimeAccount
+
+    $backupDirectory = Join-Path $ConfigDirectory 'backups'
+    if (Test-Path -LiteralPath $backupDirectory -PathType Container) {
+        Set-RestrictedConfigurationDirectoryAcl `
+            -DirectoryPath $backupDirectory `
+            -AccountName $RuntimeAccount
+        Get-ChildItem -LiteralPath $backupDirectory -File -ErrorAction Stop |
+            ForEach-Object {
+                Set-RestrictedConfigurationFileAcl `
+                    -FilePath $_.FullName `
+                    -AccountName $RuntimeAccount
+            }
+    }
+
+    if (Test-Path -LiteralPath $ProductionConfig -PathType Leaf) {
+        Set-RestrictedConfigurationFileAcl `
+            -FilePath $ProductionConfig `
+            -AccountName $RuntimeAccount
+    }
+}
+
 function Grant-RuntimeAppReadAccess {
     $grant = "${RuntimeAccount}:(OI)(CI)RX"
     & icacls.exe $AppDirectory '/grant:r' $grant '/T' '/C' '/Q' | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw "Could not grant read/execute access on $AppDirectory to the runtime account."
     }
+
+    if (Test-Path -LiteralPath $LauncherDirectory -PathType Container) {
+        & icacls.exe $LauncherDirectory '/grant:r' $grant '/T' '/C' '/Q' | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not grant read/execute access on $LauncherDirectory to the runtime account."
+        }
+    }
+
+    $photoSourceGrant = "${RuntimeAccount}:(OI)(CI)RX"
+    & icacls.exe $PhotoSourceDirectory '/grant:r' $photoSourceGrant '/T' '/C' '/Q' | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not grant read access on the photo source directory to the runtime account."
+    }
+
+    $photoOutputGrant = "${RuntimeAccount}:(OI)(CI)M"
+    & icacls.exe $PhotoOutputDirectory '/grant:r' $photoOutputGrant '/T' '/C' '/Q' | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not grant modify access on the derived photo directory to the runtime account."
+    }
 }
 
 function Build-PublishPackage {
-    New-Item -ItemType Directory -Path $StageApp -Force | Out-Null
+    New-Item -ItemType Directory -Path $StageApp, $StageLauncher -Force | Out-Null
+
+    foreach ($sourcePath in @($SourceStartScript, $SourceLauncher)) {
+        if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+            throw "Launcher source file was not found: $sourcePath"
+        }
+        Copy-Item -LiteralPath $sourcePath -Destination $StageLauncher
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $StageLauncher 'Start-QLHV-App.ps1') -PathType Leaf) -or
+        -not (Test-Path -LiteralPath (Join-Path $StageLauncher 'Start-QLHV-App.cmd') -PathType Leaf)) {
+        throw 'The staged runtime launcher is incomplete.'
+    }
 
     $previousApiBase = Get-Item -LiteralPath 'Env:VITE_API_BASE_URL' -ErrorAction SilentlyContinue
     try {
@@ -351,9 +826,15 @@ function Build-PublishPackage {
 function Invoke-StartRuntime {
     param([switch]$AllowLegacyRollback)
 
+    $effectiveStartScript = if (Test-Path -LiteralPath $StartScript -PathType Leaf) {
+        $StartScript
+    }
+    else {
+        $SourceStartScript
+    }
     $arguments = @(
         '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-        '-File', $StartScript, '-NoBrowser', '-SuppressErrorDialog'
+        '-File', $effectiveStartScript, '-NoBrowser', '-SuppressErrorDialog', '-DisableAutoSync'
     )
     if ($AllowLegacyRollback) {
         $arguments += '-AllowLegacyRollback'
@@ -362,6 +843,24 @@ function Invoke-StartRuntime {
     if ($LASTEXITCODE -ne 0) {
         throw "QLHV runtime failed its health check (launcher exit code $LASTEXITCODE)."
     }
+}
+
+function Install-DesktopShortcut {
+    if (-not (Test-Path -LiteralPath $Launcher -PathType Leaf)) {
+        throw "Launcher was not found: $Launcher"
+    }
+
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($ShortcutPath)
+    $shortcut.TargetPath = $Launcher
+    $shortcut.WorkingDirectory = $LauncherDirectory
+    $shortcut.Description = 'Start or join QLHV, initialize a fresh data session, and open the browser.'
+    $shortcut.WindowStyle = 7
+    $iconPath = Join-Path $AppDirectory 'QLHV.Api.exe'
+    if (Test-Path -LiteralPath $iconPath -PathType Leaf) {
+        $shortcut.IconLocation = "$iconPath,0"
+    }
+    $shortcut.Save()
 }
 
 function Invoke-ReadOnlySmokeTest {
@@ -397,15 +896,26 @@ function Invoke-ReadOnlySmokeTest {
 
 Assert-Administrator
 Assert-SafePaths
-New-Item -ItemType Directory -Path $RunDirectory -Force | Out-Null
+New-Item -ItemType Directory -Path $RunDirectory, $ModelDirectory, $PhotoSourceDirectory, $PhotoOutputDirectory -Force | Out-Null
 Assert-ProductionConfiguration
-[void](Set-QlhvProductionWriteFlags -Path $ProductionConfig)
-Assert-ProductionWriteFlags
-$productionConfigHash = (Get-FileHash -LiteralPath $ProductionConfig -Algorithm SHA256).Hash
 
+$shortcutExistedBefore = Test-Path -LiteralPath $ShortcutPath -PathType Leaf
+if ($shortcutExistedBefore) {
+    Copy-Item -LiteralPath $ShortcutPath -Destination $ShortcutBackup
+}
 $newRuntimeInstalled = $false
 $rollbackAvailable = $false
+$newLauncherInstalled = $false
+$launcherRollbackAvailable = $false
 try {
+    $script:UpdateStage = 'production-config'
+    Protect-ProductionConfigurationTree
+    [void](Set-QlhvProductionWriteFlags -Path $ProductionConfig)
+    Protect-ProductionConfigurationTree
+    Assert-ProductionWriteFlags
+    Write-Host ("Photo processing model status: " + (Get-QlhvPhotoModelStatus -Path $ProductionConfig))
+    $productionConfigHash = (Get-FileHash -LiteralPath $ProductionConfig -Algorithm SHA256).Hash
+
     # Build completely before touching the current runtime.
     $script:UpdateStage = 'build-publish'
     Build-PublishPackage
@@ -420,14 +930,26 @@ try {
         $script:UpdateStage = 'remove-previous-rollback'
         Remove-Item -LiteralPath $RollbackApp -Recurse -Force
     }
+    if (Test-Path -LiteralPath $RollbackLauncher) {
+        $script:UpdateStage = 'remove-previous-launcher-rollback'
+        Remove-Item -LiteralPath $RollbackLauncher -Recurse -Force
+    }
     $script:UpdateStage = 'backup-current-runtime'
     Move-Item -LiteralPath $AppDirectory -Destination $RollbackApp
     $rollbackAvailable = $true
+    if (Test-Path -LiteralPath $LauncherDirectory -PathType Container) {
+        $script:UpdateStage = 'backup-current-launcher'
+        Move-Item -LiteralPath $LauncherDirectory -Destination $RollbackLauncher
+        $launcherRollbackAvailable = $true
+    }
 
     try {
         $script:UpdateStage = 'activate-runtime'
         Move-Item -LiteralPath $StageApp -Destination $AppDirectory
         $newRuntimeInstalled = $true
+        $script:UpdateStage = 'activate-launcher'
+        Move-Item -LiteralPath $StageLauncher -Destination $LauncherDirectory
+        $newLauncherInstalled = $true
         $script:UpdateStage = 'runtime-permissions'
         Grant-RuntimeAppReadAccess
         Remove-Item -LiteralPath $LegacyRuntimeMarker -Force -ErrorAction SilentlyContinue
@@ -441,6 +963,9 @@ try {
         # LAN API running with that token; the operator starts it from the shortcut.
         $script:UpdateStage = 'stop-elevated-smoke-runtime'
         & $StopScript -Quiet
+        $script:UpdateStage = 'desktop-shortcut'
+        Install-DesktopShortcut
+        Remove-Item -LiteralPath $ShortcutBackup -Force -ErrorAction SilentlyContinue
         $script:UpdateStage = 'complete'
         Write-Host 'QLHV was updated and passed liveness/readiness checks.'
         Write-Host 'Runtime is stopped. Start it normally with the QLHV Thanh Cong shortcut.'
@@ -464,6 +989,15 @@ try {
             $failedApp = Join-Path $RunDirectory ("failed-app-" + [Guid]::NewGuid().ToString('N'))
             Move-Item -LiteralPath $AppDirectory -Destination $failedApp
             $newRuntimeInstalled = $false
+        }
+        if ($newLauncherInstalled -and (Test-Path -LiteralPath $LauncherDirectory -PathType Container)) {
+            $failedLauncher = Join-Path $RunDirectory ("failed-launcher-" + [Guid]::NewGuid().ToString('N'))
+            Move-Item -LiteralPath $LauncherDirectory -Destination $failedLauncher
+            $newLauncherInstalled = $false
+        }
+        if ($launcherRollbackAvailable -and (Test-Path -LiteralPath $RollbackLauncher -PathType Container)) {
+            Move-Item -LiteralPath $RollbackLauncher -Destination $LauncherDirectory
+            $launcherRollbackAvailable = $false
         }
         if ($rollbackAvailable -and (Test-Path -LiteralPath $RollbackApp)) {
             Move-Item -LiteralPath $RollbackApp -Destination $AppDirectory
@@ -493,6 +1027,14 @@ catch {
         Write-SafeDeploymentFailure -Stage $script:UpdateStage -Message ([string]$outerUpdateError.Exception.Message)
         $script:UpdateFailureLogged = $true
     }
+    if ($shortcutExistedBefore -and (Test-Path -LiteralPath $ShortcutBackup -PathType Leaf)) {
+        Copy-Item -LiteralPath $ShortcutBackup -Destination $ShortcutPath -Force
+        Remove-Item -LiteralPath $ShortcutBackup -Force -ErrorAction SilentlyContinue
+    }
+    elseif (-not $shortcutExistedBefore -and (Test-Path -LiteralPath $ShortcutPath -PathType Leaf)) {
+        Remove-Item -LiteralPath $ShortcutPath -Force -ErrorAction SilentlyContinue
+    }
+    Restore-QlhvProductionConfigurationBackup
 
     # If transition failed after Stop but before app->rollback completed, the prior
     # app is still installed. Health-check it with legacy compatibility, then stop
@@ -520,5 +1062,10 @@ finally {
     if (-not $newRuntimeInstalled -and $rollbackAvailable -and
         -not (Test-Path -LiteralPath $AppDirectory) -and (Test-Path -LiteralPath $RollbackApp)) {
         Move-Item -LiteralPath $RollbackApp -Destination $AppDirectory -ErrorAction SilentlyContinue
+    }
+    if (-not $newLauncherInstalled -and $launcherRollbackAvailable -and
+        -not (Test-Path -LiteralPath $LauncherDirectory) -and
+        (Test-Path -LiteralPath $RollbackLauncher)) {
+        Move-Item -LiteralPath $RollbackLauncher -Destination $LauncherDirectory -ErrorAction SilentlyContinue
     }
 }

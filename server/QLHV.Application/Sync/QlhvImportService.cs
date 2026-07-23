@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using System.Text.Json;
 using QLHV.Application.CsdtConnections;
+using QLHV.Application.HocVien.Photos;
 using QLHV.Application.Sync.Configuration;
 using QLHV.Application.Sync.Dtos;
 using QLHV.Application.Sync.Mapping;
@@ -27,6 +28,7 @@ public sealed class QlhvImportService : IQlhvImportService
     private readonly SyncExecutionOptions _executionOptions;
     private readonly IQlhvSourceOperationLock _operationLock;
     private readonly IQlhvOperationHistoryRepository _operationHistory;
+    private readonly IHocVienPhotoProcessingService? _photoProcessing;
 
     public QlhvImportService(
         IQlhvImportReadRepository readRepository,
@@ -35,7 +37,8 @@ public sealed class QlhvImportService : IQlhvImportService
         IOptions<SyncOptions> syncOptions,
         IOptions<SyncExecutionOptions> executionOptions,
         IQlhvSourceOperationLock operationLock,
-        IQlhvOperationHistoryRepository operationHistory)
+        IQlhvOperationHistoryRepository operationHistory,
+        IHocVienPhotoProcessingService? photoProcessing = null)
     {
         _readRepository = readRepository;
         _targetRepository = targetRepository;
@@ -44,6 +47,7 @@ public sealed class QlhvImportService : IQlhvImportService
         _executionOptions = executionOptions.Value;
         _operationLock = operationLock;
         _operationHistory = operationHistory;
+        _photoProcessing = photoProcessing;
     }
 
     public async Task<QlhvImportPlanDto> GetPlanAsync(
@@ -81,6 +85,8 @@ public sealed class QlhvImportService : IQlhvImportService
             HocVien = plan.HocVien,
             KhoaHoc = plan.KhoaHoc,
             GiaoVien = plan.GiaoVien,
+            KhoaHocGiaoVien = plan.KhoaHocGiaoVien,
+            Photo = plan.Photo,
             DuplicateSourceKeys = plan.DuplicateSourceKeys,
             RelationConflicts = plan.RelationConflicts,
             Blockers = plan.Blockers,
@@ -146,6 +152,7 @@ public sealed class QlhvImportService : IQlhvImportService
         CancellationToken cancellationToken = default)
     {
         request ??= new QlhvImportExecuteRequest();
+        var operationActor = QlhvOperationActors.NormalizeInternal(request.Actor);
         var normalized = Normalize(request);
 
         if (!QlhvOperationSourceCatalog.TryGet(
@@ -201,7 +208,8 @@ public sealed class QlhvImportService : IQlhvImportService
                         QlhvOperationTypes.FullSync,
                         QlhvOperationTypes.Running,
                         startedAt,
-                        startedAt),
+                        startedAt,
+                        operationActor),
                     cancellationToken);
             }
             catch (QlhvOperationsStoreUnavailableException ex)
@@ -315,20 +323,30 @@ public sealed class QlhvImportService : IQlhvImportService
                     operationId);
             }
 
+            var (photoQueue, photoWarning) = await QueuePhotosAfterCommitSafelyAsync(
+                context.Payload.HocVienRows,
+                operationActor);
+            var completedPlan = photoWarning is null
+                ? context.Plan
+                : AddWarning(context.Plan, photoWarning);
+
             var historyWarning = await TryCompleteSucceededHistoryAsync(
                 operationId,
-                context.Plan,
+                completedPlan,
                 write,
+                photoQueue,
                 cancellationToken);
             return new QlhvImportExecuteResultDto
             {
                 OperationId = operationId,
                 Executed = true,
                 Status = "ThanhCong",
-                Message = historyWarning is null
-                    ? "Full sync khoa hoc, giao vien va hoc vien tu CSDT BAK vao QLHV_APP hoan tat."
-                    : "Full sync da commit vao QLHV_APP, nhung cap nhat lich su that bai; khong duoc retry tu dong.",
-                Plan = context.Plan,
+                Message = historyWarning is not null
+                    ? "Full sync da commit vao QLHV_APP, nhung cap nhat lich su that bai; khong duoc retry tu dong."
+                    : photoWarning is not null
+                        ? "Full sync DB da commit hoan tat; xu ly anh duoc tach rieng va co canh bao."
+                        : "Full sync khoa hoc, giao vien va hoc vien tu CSDT BAK vao QLHV_APP hoan tat.",
+                Plan = completedPlan,
                 InsertedHocVienRows = write.Inserted,
                 UpdatedHocVienRows = write.Updated,
                 ReactivatedHocVienRows = write.Reactivated,
@@ -337,6 +355,8 @@ public sealed class QlhvImportService : IQlhvImportService
                 HocVien = ToDto(write.HocVien),
                 KhoaHoc = ToDto(write.KhoaHoc),
                 GiaoVien = ToDto(write.GiaoVien),
+                KhoaHocGiaoVien = ToDto(write.Relation),
+                PhotoQueue = photoQueue,
             };
         }
         catch (OperationCanceledException)
@@ -732,6 +752,28 @@ public sealed class QlhvImportService : IQlhvImportService
             }
         }
 
+        var photoPlan = new HocVienPhotoPlanDto(0, 0, 0, 0, 0);
+        if (_photoProcessing is not null)
+        {
+            try
+            {
+                photoPlan = await _photoProcessing.BuildPlanAsync(
+                    ToPhotoSources(sourceModels),
+                    cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // Photo inventory is advisory. A missing photo patch/model or an inaccessible
+                // source root must never turn a valid database full-sync plan into a blocker.
+                warnings.Add(
+                    $"Khong lap duoc ke hoach anh the ({ex.GetType().Name}); full sync DB van duoc phep.");
+            }
+        }
+
         warnings = warnings
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Distinct(StringComparer.Ordinal)
@@ -757,6 +799,10 @@ public sealed class QlhvImportService : IQlhvImportService
             source.KhoaHocSourceRows.Count > 0 ? source.KhoaHocSourceRows.Count : source.KhoaHocRows,
             duplicateKhoaHocKeys);
         var giaoVienDto = ToDto(giaoVienPlan, source.GiaoVienRows.Count, duplicateGiaoVienKeys);
+        var relationDto = ToDto(
+            relationPlan,
+            source.KhoaHocGiaoVienRows.Count,
+            relationConflicts);
 
         var plan = new QlhvImportPlanDto
         {
@@ -788,6 +834,8 @@ public sealed class QlhvImportService : IQlhvImportService
             HocVien = hocVienDto,
             KhoaHoc = khoaHocDto,
             GiaoVien = giaoVienDto,
+            KhoaHocGiaoVien = relationDto,
+            Photo = photoPlan,
             DuplicateSourceKeys = duplicateSourceKeys,
             RelationConflicts = relationConflicts,
             SourceRelationRows = source.KhoaHocGiaoVienRows.Count,
@@ -818,6 +866,17 @@ public sealed class QlhvImportService : IQlhvImportService
         => normalizedMaDks
             .GroupBy(value => value, StringComparer.OrdinalIgnoreCase)
             .Count(group => group.Skip(1).Any());
+
+    private static IReadOnlyList<HocVienPhotoProcessingSource> ToPhotoSources(
+        IReadOnlyList<QlhvImportHocVienWriteModel> rows)
+        => rows
+            .Select(row => new HocVienPhotoProcessingSource(
+                row.SourceProfileCode,
+                row.SourceMaDK,
+                row.MaKhoa,
+                row.AnhRelativePath,
+                row.SourcePhotoPathInvalid))
+            .ToArray();
 
     private static int CountDuplicateKeys(IEnumerable<string?> values)
         => values
@@ -917,6 +976,10 @@ public sealed class QlhvImportService : IQlhvImportService
             {
                 SourceRows = source?.GiaoVienRows.Count ?? 0,
             },
+            KhoaHocGiaoVien = new QlhvEntitySyncCountsDto
+            {
+                SourceRows = source?.KhoaHocGiaoVienRows.Count ?? 0,
+            },
             DuplicateSourceKeys = duplicateSourceMaDkRows,
             SourceRelationRows = source?.KhoaHocGiaoVienRows.Count ?? 0,
             Blockers = blockers,
@@ -954,11 +1017,56 @@ public sealed class QlhvImportService : IQlhvImportService
             HocVien = plan.HocVien,
             KhoaHoc = plan.KhoaHoc,
             GiaoVien = plan.GiaoVien,
+            KhoaHocGiaoVien = plan.KhoaHocGiaoVien,
+            Photo = plan.Photo,
             DuplicateSourceKeys = plan.DuplicateSourceKeys,
             RelationConflicts = plan.RelationConflicts,
             SourceRelationRows = plan.SourceRelationRows,
             Blockers = plan.Blockers.Concat(new[] { blocker }).Distinct(StringComparer.Ordinal).ToArray(),
             Warnings = plan.Warnings,
+        };
+
+    private static QlhvImportPlanDto AddWarning(QlhvImportPlanDto plan, string warning)
+        => new()
+        {
+            SourceProfileCode = plan.SourceProfileCode,
+            SourceDatabaseName = plan.SourceDatabaseName,
+            BackupSnapshotToken = plan.BackupSnapshotToken,
+            GeneratedAtUtc = plan.GeneratedAtUtc,
+            MaCSDT = plan.MaCSDT,
+            MaKhoaHoc = plan.MaKhoaHoc,
+            SourceHocVienRows = plan.SourceHocVienRows,
+            SourceDistinctMaDkRows = plan.SourceDistinctMaDkRows,
+            DuplicateSourceMaDkRows = plan.DuplicateSourceMaDkRows,
+            SourceKhoaHocRows = plan.SourceKhoaHocRows,
+            CurrentAppHocVienRows = plan.CurrentAppHocVienRows,
+            CurrentAppKhoaHocRows = plan.CurrentAppKhoaHocRows,
+            TargetRowsForSourceProfile = plan.TargetRowsForSourceProfile,
+            TargetExactIdentityMatches = plan.TargetExactIdentityMatches,
+            TargetMaDkConflictsOtherProfiles = plan.TargetMaDkConflictsOtherProfiles,
+            SoftDeletedIdentityConflicts = plan.SoftDeletedIdentityConflicts,
+            SourceProfileConstraintExists = plan.SourceProfileConstraintExists,
+            SourceProfileAllowedByConstraint = plan.SourceProfileAllowedByConstraint,
+            PlannedInsertHocVienRows = plan.PlannedInsertHocVienRows,
+            PlannedUpdateHocVienRows = plan.PlannedUpdateHocVienRows,
+            PlannedReactivateHocVienRows = plan.PlannedReactivateHocVienRows,
+            PlannedSoftDeleteHocVienRows = plan.PlannedSoftDeleteHocVienRows,
+            PlannedSkipHocVienRows = plan.PlannedSkipHocVienRows,
+            PlannedUpsertHocVienRows = plan.PlannedUpsertHocVienRows,
+            PlannedUpsertKhoaHocRows = plan.PlannedUpsertKhoaHocRows,
+            HocVien = plan.HocVien,
+            KhoaHoc = plan.KhoaHoc,
+            GiaoVien = plan.GiaoVien,
+            KhoaHocGiaoVien = plan.KhoaHocGiaoVien,
+            Photo = plan.Photo,
+            DuplicateSourceKeys = plan.DuplicateSourceKeys,
+            RelationConflicts = plan.RelationConflicts,
+            SourceRelationRows = plan.SourceRelationRows,
+            Blockers = plan.Blockers,
+            Warnings = plan.Warnings.Concat(new[] { warning })
+                .Distinct(StringComparer.Ordinal)
+                .Take(100)
+                .ToArray(),
         };
 
     private static QlhvImportExecuteResultDto Blocked(QlhvImportPlanDto plan, string message)
@@ -970,10 +1078,43 @@ public sealed class QlhvImportService : IQlhvImportService
             Plan = plan,
         };
 
+    private async Task<(HocVienPhotoQueueBatchResult? Result, string? Warning)>
+        QueuePhotosAfterCommitSafelyAsync(
+            IReadOnlyList<QlhvImportHocVienWriteModel> rows,
+            string actor)
+    {
+        if (_photoProcessing is null)
+        {
+            return (null, null);
+        }
+
+        try
+        {
+            var result = await _photoProcessing.QueueAfterSyncAsync(
+                ToPhotoSources(rows),
+                actor,
+                CancellationToken.None);
+            var warning = result.Failed > 0
+                ? $"Co {result.Failed} anh thieu, khong hop le hoac chua xu ly duoc; full sync DB da commit an toan."
+                : null;
+            return (result, warning);
+        }
+        catch (Exception ex)
+        {
+            // This method is called strictly after the database transaction returned as
+            // committed. Photo failures are reported separately and must never change the
+            // full-sync outcome or invite an unsafe automatic retry.
+            return (
+                null,
+                $"Khong khoi tao duoc hang doi anh ({ex.GetType().Name}); full sync DB da commit an toan.");
+        }
+    }
+
     private async Task<string?> TryCompleteSucceededHistoryAsync(
         Guid operationId,
         QlhvImportPlanDto plan,
         QlhvImportFullSyncWriteResult write,
+        HocVienPhotoQueueBatchResult? photoQueue,
         CancellationToken cancellationToken)
     {
         var sourceRows = write.TotalSourceRows;
@@ -998,6 +1139,7 @@ public sealed class QlhvImportService : IQlhvImportService
                 KhoaHoc = write.KhoaHoc,
                 GiaoVien = write.GiaoVien,
                 KhoaHocGiaoVien = write.Relation,
+                PhotoQueue = photoQueue,
                 TargetActiveHocVienRows = Math.Max(
                     0,
                     plan.CurrentAppHocVienRows + write.Inserted + write.Reactivated - write.SoftDeleted),
@@ -1102,6 +1244,8 @@ public sealed class QlhvImportService : IQlhvImportService
             HocVien = result.HocVien,
             KhoaHoc = result.KhoaHoc,
             GiaoVien = result.GiaoVien,
+            KhoaHocGiaoVien = result.KhoaHocGiaoVien,
+            PhotoQueue = result.PhotoQueue,
         };
 
     private static string TryResolveSourceType(string sourceProfileCode)
@@ -1159,6 +1303,7 @@ public sealed class QlhvImportService : IQlhvImportService
             KhoaHocModels,
             GiaoVienModels,
             RelationModels,
-            SourceModels);
+            SourceModels,
+            Plan.BackupSnapshotToken);
     }
 }

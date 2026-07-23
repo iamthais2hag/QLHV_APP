@@ -20,6 +20,9 @@ public sealed class SqlServerRuntimeReadinessProbe : IRuntimeReadinessProbe
         "App_UserRole",
         "App_HocVien",
         "App_QlhvSyncOperationHistory",
+        "App_QlhvAutoSyncRun",
+        "App_QlhvSyncPartitionState",
+        "App_DataVersion",
     ];
 
     private readonly IConnectionSettingsProvider _connections;

@@ -23,6 +23,12 @@ public interface IQlhvOperationHistoryRepository
         string sourceType,
         CancellationToken cancellationToken = default);
 
+    Task<QlhvOperationHistoryDto?> GetByOperationIdAsync(
+        Guid operationId,
+        CancellationToken cancellationToken = default)
+        => Task.FromException<QlhvOperationHistoryDto?>(
+            new NotSupportedException("Repository does not support lookup by operation id."));
+
     Task<QlhvOperationHistoryDto?> GetLatestCompletedAsync(
         string sourceType,
         string operationType,

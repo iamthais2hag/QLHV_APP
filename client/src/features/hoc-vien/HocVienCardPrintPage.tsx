@@ -4,6 +4,7 @@ import {
   getHocVienHangHocLookups,
   getHocVienCardLogoUrl,
   getHocVienKhoaLookups,
+  getHocVienPhotoCacheVersion,
   getHocVienPhotoPreviewUrl,
   previewHocVienCardsA4,
   printHocVienCardsA4,
@@ -27,6 +28,7 @@ import type {
   HocVienSearchParams,
 } from './types';
 import { formatGioiTinh, formatNgaySinh } from './utils';
+import { useDataVersionRefresh } from '../data-version/useDataVersionRefresh';
 
 const PAGE_SIZE = 20;
 const TITLE_MAX_LENGTH = 100;
@@ -302,10 +304,19 @@ function downloadBlob(blob: Blob, fileName: string) {
   URL.revokeObjectURL(url);
 }
 
-function CardPhoto({ item }: { item: HocVienCardPrintPreviewItem }) {
+function CardPhoto({
+  item,
+  photoCacheVersion,
+}: {
+  item: HocVienCardPrintPreviewItem;
+  photoCacheVersion?: string | number | null;
+}) {
   const [failed, setFailed] = useState(!item.hasPhoto);
 
-  useEffect(() => setFailed(!item.hasPhoto), [item.hocVienId, item.hasPhoto]);
+  useEffect(
+    () => setFailed(!item.hasPhoto),
+    [item.hocVienId, item.hasPhoto, photoCacheVersion],
+  );
 
   if (failed) {
     return (
@@ -318,7 +329,7 @@ function CardPhoto({ item }: { item: HocVienCardPrintPreviewItem }) {
   return (
     <img
       className="card-preview__photo-image"
-      src={getHocVienPhotoPreviewUrl(item.hocVienId)}
+      src={getHocVienPhotoPreviewUrl(item.hocVienId, photoCacheVersion)}
       alt={`Ảnh thẻ ${item.hoVaTen}`}
       onError={() => setFailed(true)}
     />
@@ -403,11 +414,13 @@ function CardSheetPreview({
   typography,
   trainingRankLabel,
   logo,
+  photoCacheVersion,
 }: {
   preview: HocVienCardPrintPreview;
   typography: HocVienCardTypographySettings;
   trainingRankLabel: string;
   logo: HocVienCardLogoSettings;
+  photoCacheVersion?: string | number | null;
 }) {
   const slots = Array.from(
     { length: 12 },
@@ -466,7 +479,9 @@ function CardSheetPreview({
                   </div>
                 </header>
                 <div className="card-preview__body">
-                  <div className="card-preview__photo"><CardPhoto item={item} /></div>
+                  <div className="card-preview__photo">
+                    <CardPhoto item={item} photoCacheVersion={photoCacheVersion} />
+                  </div>
                   <div className="card-preview__content">
                     {logo.watermark.enabled && (
                       <span
@@ -514,15 +529,21 @@ function CardSheetPreview({
   );
 }
 
-function ResultPhoto({ row }: { row: HocVienListItem }) {
+function ResultPhoto({
+  row,
+  photoCacheVersion,
+}: {
+  row: HocVienListItem;
+  photoCacheVersion?: string | number | null;
+}) {
   const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [row.hocVienId]);
+  useEffect(() => setFailed(false), [row.hocVienId, photoCacheVersion]);
   return failed ? (
     <span className="hocvien-photo hocvien-photo--placeholder">Ảnh</span>
   ) : (
     <span className="hocvien-photo">
       <img
-        src={getHocVienPhotoPreviewUrl(row.hocVienId)}
+        src={getHocVienPhotoPreviewUrl(row.hocVienId, photoCacheVersion)}
         alt={`Ảnh ${row.hoVaTen}`}
         onError={() => setFailed(true)}
       />
@@ -594,15 +615,36 @@ export default function HocVienCardPrintPage() {
       setTotalItems(result.totalItems);
       setTotalPages(result.totalPages);
       setListStatus('success');
+      return true;
     } catch (error) {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) return false;
       setRows([]);
       setTotalItems(0);
       setTotalPages(0);
       setListStatus('error');
       setListError(error instanceof Error ? error.message : 'Không thể tải danh sách học viên.');
+      return false;
     }
   }, []);
+
+  const dataVersion = useDataVersionRefresh({
+    resources: ['hocVienVersion', 'photoVersion'],
+    onVersionChanged: async () => {
+      setSelectedIds(new Set());
+      const rowsRefreshed = await loadRows({
+        ...currentFilters(),
+        page,
+        pageSize: PAGE_SIZE,
+      });
+      let previewRefreshed = true;
+      if (printRequest) {
+        previewRefreshed = await loadPrintPreview(printRequest);
+      }
+      if (!rowsRefreshed || !previewRefreshed) {
+        throw new Error('Không thể tải lại dữ liệu in thẻ theo phiên bản mới.');
+      }
+    },
+  });
 
   useEffect(() => {
     loadRows({ ...currentFilters(), page, pageSize: PAGE_SIZE });
@@ -773,10 +815,12 @@ export default function HocVienCardPrintPage() {
       });
       setPrintPreview(result);
       setPrintStatus('success');
+      return true;
     } catch (error) {
       setPrintPreview(null);
       setPrintStatus('error');
       setPrintError(error instanceof Error ? error.message : 'Không thể tạo bản xem trước.');
+      return false;
     }
   }
 
@@ -1120,6 +1164,15 @@ export default function HocVienCardPrintPage() {
           </div>
 
           <div className="toolbar__actions">
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={() => void dataVersion.reload()}
+              disabled={dataVersion.checking}
+              title="Đọc phiên bản mới nhất và tải lại danh sách in thẻ"
+            >
+              {dataVersion.checking ? 'Đang tải lại...' : 'Tải lại dữ liệu'}
+            </button>
             <button type="button" className="btn btn--primary" onClick={handleSearch}>Tìm kiếm</button>
             <button type="button" className="btn btn--ghost" onClick={handleReset}>Làm mới</button>
             <button type="button" className="btn btn--ghost"
@@ -1134,6 +1187,7 @@ export default function HocVienCardPrintPage() {
             </button>
           </div>
         </div>
+        {dataVersion.error && <div className="toolbar__error">{dataVersion.error}</div>}
       </div>
 
       <div className="table-wrap card-print-results">
@@ -1162,7 +1216,16 @@ export default function HocVienCardPrintPage() {
                 <td><input type="checkbox" aria-label={`Chọn ${row.hoVaTen}`}
                   checked={selectedIds.has(row.hocVienId)}
                   onChange={(event) => toggleSelection(row.hocVienId, event.target.checked)} /></td>
-                <td>{startIndex + index + 1}</td><td><ResultPhoto row={row} /></td>
+                <td>{startIndex + index + 1}</td>
+                <td>
+                  <ResultPhoto
+                    row={row}
+                    photoCacheVersion={getHocVienPhotoCacheVersion(
+                      dataVersion.version?.hocVienVersion,
+                      dataVersion.version?.photoVersion,
+                    )}
+                  />
+                </td>
                 <td className="cell-ellipsis" title={row.hoVaTen}>{row.hoVaTen}</td>
                 <td className="cell-ellipsis" title={row.maDangKy}>{row.maDangKy}</td>
                 <td title={row.maHangDT ? `Mã hạng học: ${row.maHangDT}` : ''}>{row.hangGplxHoc ?? ''}</td>
@@ -1221,6 +1284,10 @@ export default function HocVienCardPrintPage() {
                 printRequest.trainingRankLabel ?? savedSettings.trainingRankLabel
               }
               logo={printRequest.logo ?? savedSettings.logo ?? createOfficialLogoSettings()}
+              photoCacheVersion={getHocVienPhotoCacheVersion(
+                dataVersion.version?.hocVienVersion,
+                dataVersion.version?.photoVersion,
+              )}
             />
             {pdfStatus === 'loading' && <section className="pdf-preview-panel"><div className="pdf-preview-panel__status"><div className="spinner" /><div>Đang tạo PDF để xem trước...</div></div></section>}
             {pdfStatus === 'error' && <div className="pdf-preview-panel__error" role="alert">{pdfError}</div>}

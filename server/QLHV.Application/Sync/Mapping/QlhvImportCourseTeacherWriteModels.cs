@@ -100,4 +100,5 @@ public sealed record QlhvImportFullSyncPayload(
     IReadOnlyList<QlhvImportKhoaHocWriteModel> KhoaHocRows,
     IReadOnlyList<QlhvImportGiaoVienWriteModel> GiaoVienRows,
     IReadOnlyList<QlhvImportKhoaHocGiaoVienWriteModel> RelationRows,
-    IReadOnlyList<QlhvImportHocVienWriteModel> HocVienRows);
+    IReadOnlyList<QlhvImportHocVienWriteModel> HocVienRows,
+    string BackupSnapshotToken = "");

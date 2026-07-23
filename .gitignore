@@ -10,6 +10,8 @@ node_modules/
 *.user
 appsettings.Production.json
 appsettings.Local.json
+**/appsettings.Production.Local.json
+**/appsettings.Production.Local.*.bak
 
 # Database backups / real data
 *.bak
@@ -21,6 +23,9 @@ appsettings.Local.json
 IM_GPLX/*
 !IM_GPLX/.gitkeep
 !IM_GPLX/README.md
+
+# Local inference models are installed outside Git and verified by checksum.
+*.onnx
 
 # Temporary files
 *.tmp
