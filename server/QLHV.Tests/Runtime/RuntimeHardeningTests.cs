@@ -203,6 +203,11 @@ public sealed class RuntimeHardeningTests
         Assert.Contains("\"App_QlhvSyncPartitionState\"", source, StringComparison.Ordinal);
         Assert.Contains("\"App_QlhvAutoSyncRun\"", source, StringComparison.Ordinal);
         Assert.Contains("\"App_DataVersion\"", source, StringComparison.Ordinal);
+        Assert.Contains("AutoSyncActiveSlotReadinessSql", source, StringComparison.Ordinal);
+        Assert.Contains("activeSlotColumn.is_computed = 0", source, StringComparison.Ordinal);
+        Assert.Contains("CK_App_QlhvAutoSyncRun_ActiveSlot", source, StringComparison.Ordinal);
+        Assert.Contains("UX_App_QlhvAutoSyncRun_ActiveSlot", source, StringComparison.Ordinal);
+        Assert.Contains("N'(ActiveSlot=(1))'", source, StringComparison.Ordinal);
     }
 
     [Fact]

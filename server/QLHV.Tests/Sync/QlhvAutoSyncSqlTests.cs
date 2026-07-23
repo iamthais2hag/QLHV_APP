@@ -24,7 +24,9 @@ public sealed class QlhvAutoSyncSqlTests
         Assert.Contains("SESSION_START", patch, StringComparison.Ordinal);
         Assert.Contains("CurrentStage", patch, StringComparison.Ordinal);
         Assert.Contains("UX_App_QlhvAutoSyncRun_ActiveSlot", patch, StringComparison.Ordinal);
-        Assert.Contains("WHERE ActiveSlot IS NOT NULL", patch, StringComparison.Ordinal);
+        Assert.Contains("WHERE ActiveSlot = 1", patch, StringComparison.Ordinal);
+        Assert.DoesNotContain("WHERE ActiveSlot IS NOT NULL", patch, StringComparison.Ordinal);
+        Assert.Contains("WITH (TABLOCKX, HOLDLOCK)", patch, StringComparison.Ordinal);
         Assert.Contains("activeKey.key_ordinal = 1", patch, StringComparison.Ordinal);
         Assert.Contains("activeColumn.name = N'ActiveSlot'", patch, StringComparison.Ordinal);
         Assert.Contains("extraKey.key_ordinal > 1", patch, StringComparison.Ordinal);
@@ -126,7 +128,7 @@ public sealed class QlhvAutoSyncSqlTests
             .Select(match => match.Groups["column"].Value)
             .ToArray();
 
-        Assert.Equal(new[] { "Actor", "CurrentStage" }, alteredColumns);
+        Assert.Equal(new[] { "Actor", "CurrentStage", "ActiveSlot" }, alteredColumns);
 
         foreach (var transactionalBatch in batches.Where(
                      batch => batch.Contains(
@@ -138,6 +140,141 @@ public sealed class QlhvAutoSyncSqlTests
             Assert.Contains("BEGIN CATCH", transactionalBatch, StringComparison.Ordinal);
             Assert.Contains("ROLLBACK TRANSACTION;", transactionalBatch, StringComparison.Ordinal);
         }
+    }
+
+    [Fact]
+    public void Active_slot_patch_migrates_computed_or_missing_columns_to_nullable_tinyint()
+    {
+        var patch = ReadPatch("20260723_add_qlhv_auto_sync.sql");
+        var batches = SplitSqlBatches(patch);
+
+        Assert.DoesNotMatch(@"(?is)\bActiveSlot\s+AS\s*\(", patch);
+        Assert.Contains("ActiveSlot tinyint NULL", patch, StringComparison.Ordinal);
+        Assert.Contains("'IsComputed') = 1", patch, StringComparison.Ordinal);
+        Assert.Contains("DROP COLUMN ActiveSlot;", patch, StringComparison.Ordinal);
+        Assert.Contains(
+            "COL_LENGTH(N'dbo.App_QlhvAutoSyncRun', N'ActiveSlot') IS NULL",
+            patch,
+            StringComparison.Ordinal);
+        Assert.Contains("activeSlotColumn.is_computed = 0", patch, StringComparison.Ordinal);
+        Assert.Contains("activeSlotColumn.is_nullable = 1", patch, StringComparison.Ordinal);
+        Assert.Contains("activeSlotType.name = N'tinyint'", patch, StringComparison.Ordinal);
+        Assert.Contains("activeStatistic.user_created = 1", patch, StringComparison.Ordinal);
+        Assert.Contains("sys.fulltext_index_columns", patch, StringComparison.Ordinal);
+        Assert.Contains("activeExpression.is_schema_bound_reference = 1", patch, StringComparison.Ordinal);
+        Assert.Contains("is_unique_constraint = 1", patch, StringComparison.Ordinal);
+
+        var dropBatch = FindSingleBatch(batches, @"DROP\s+COLUMN\s+ActiveSlot");
+        var addBatch = FindSingleBatch(
+            batches,
+            @"\bADD\s+ActiveSlot\s+tinyint\s+NULL\b");
+        var verifyBatch = FindSingleBatch(
+            batches,
+            @"THROW\s+527337,\s*'dbo\.App_QlhvAutoSyncRun\.ActiveSlot must be a nullable tinyint column\.'");
+        var backfillBatch = FindSingleBatch(
+            batches,
+            @"SET\s+ActiveSlot\s*=\s*CASE");
+
+        Assert.True(dropBatch < addBatch);
+        Assert.True(addBatch < verifyBatch);
+        Assert.True(verifyBatch < backfillBatch);
+        AssertColumnAddBatchHasNoCompiledReferences(batches[addBatch], "ActiveSlot");
+
+        var migrationBatch = batches[dropBatch];
+        var earlyDuplicateGuard = migrationBatch.IndexOf("THROW 527338", StringComparison.Ordinal);
+        var computedColumnDrop = migrationBatch.IndexOf(
+            "DROP COLUMN ActiveSlot;",
+            StringComparison.Ordinal);
+        Assert.True(earlyDuplicateGuard >= 0);
+        Assert.True(earlyDuplicateGuard < computedColumnDrop);
+    }
+
+    [Fact]
+    public void Active_slot_constraint_and_unique_index_enforce_one_global_active_run()
+    {
+        var patch = ReadPatch("20260723_add_qlhv_auto_sync.sql");
+
+        Assert.Contains(
+            "CHECK (ActiveSlot IS NULL OR ActiveSlot = 1)",
+            patch,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "WITH CHECK CHECK CONSTRAINT CK_App_QlhvAutoSyncRun_ActiveSlot",
+            patch,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "CREATE UNIQUE NONCLUSTERED INDEX UX_App_QlhvAutoSyncRun_ActiveSlot",
+            patch,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ON dbo.App_QlhvAutoSyncRun (ActiveSlot)",
+            patch,
+            StringComparison.Ordinal);
+        Assert.Contains("WHERE ActiveSlot = 1", patch, StringComparison.Ordinal);
+        Assert.Contains("activeIndex.type <> 2", patch, StringComparison.Ordinal);
+        Assert.Contains("activeIndex.is_hypothetical = 1", patch, StringComparison.Ordinal);
+        Assert.Contains("includedColumn.is_included_column = 1", patch, StringComparison.Ordinal);
+        Assert.Contains("activeIndex.filter_definition IS NULL", patch, StringComparison.Ordinal);
+        Assert.DoesNotMatch(
+            @"(?is)CREATE\s+UNIQUE\s+NONCLUSTERED\s+INDEX\s+UX_App_QlhvAutoSyncRun_ActiveSlot[^;]*?\bINCLUDE\b",
+            patch);
+        Assert.DoesNotMatch(
+            @"(?is)CREATE\s+UNIQUE(?:\s+NONCLUSTERED)?\s+INDEX\b[^;]*?\bON\s+dbo\.App_QlhvAutoSyncRun\s*\(\s*Status\s*\)",
+            patch);
+
+        Assert.Matches(
+            @"(?is)COUNT_BIG\(\*\).*?Status\s+IN\s*\(N'QUEUED',\s*N'RUNNING'\).*?>\s*1.*?THROW\s+527338",
+            patch);
+        Assert.Matches(
+            @"(?is)SET\s+ActiveSlot\s*=\s*CASE\s+WHEN\s+Status\s+IN\s*\(N'QUEUED',\s*N'RUNNING'\)\s+THEN\s+CONVERT\(tinyint,\s*1\)\s+ELSE\s+NULL\s+END",
+            patch);
+        Assert.Matches(
+            @"(?is)COUNT_BIG\(\*\).*?WHERE\s+ActiveSlot\s*=\s*1.*?>\s*1.*?THROW\s+527339",
+            patch);
+    }
+
+    [Fact]
+    public void Auto_sync_repository_sets_and_releases_the_durable_active_slot_atomically()
+    {
+        var repository = File.ReadAllText(FindWorkspaceFile(
+            "server",
+            "QLHV.Infrastructure",
+            "Sync",
+            "QlhvAutoSyncRunRepository.cs"));
+
+        Assert.Contains("WHERE ActiveSlot = 1", repository, StringComparison.Ordinal);
+        Assert.Matches(
+            @"(?is)INSERT\s+INTO\s+dbo\.App_QlhvAutoSyncRun.*?CurrentSourceType,\s*CurrentStage,\s*ActiveSlot.*?NULL,\s*N'CONNECTING',\s*1,",
+            repository);
+        Assert.Matches(
+            @"(?is)SET\s+Status\s*=\s*N'RUNNING',\s*ActiveSlot\s*=\s*1",
+            repository);
+        Assert.Matches(
+            @"(?is)SET\s+Status\s*=\s*@Status,\s*ActiveSlot\s*=\s*NULL",
+            repository);
+        Assert.Matches(
+            @"(?is)SET\s+Status\s*=\s*N'QUEUED',\s*ActiveSlot\s*=\s*1",
+            repository);
+        Assert.Contains(
+            "AND Status IN (N'QUEUED', N'RUNNING')",
+            repository,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "AND ActiveSlot = 1;",
+            repository,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "QlhvAutoSyncConstants.PartialFailed",
+            repository,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Auto Sync chi duoc hoan tat bang trang thai terminal.",
+            repository,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "SET ActiveSlot = NULL WHERE",
+            repository,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

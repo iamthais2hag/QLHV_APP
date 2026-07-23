@@ -152,6 +152,16 @@ public sealed class QlhvAutoSyncRunRepository : IQlhvAutoSyncRunRepository
         QlhvAutoSyncOutcome outcome,
         CancellationToken cancellationToken = default)
     {
+        if (outcome.Status is not (
+                QlhvAutoSyncConstants.Succeeded or
+                QlhvAutoSyncConstants.PartialFailed or
+                QlhvAutoSyncConstants.Failed))
+        {
+            throw new ArgumentException(
+                "Auto Sync chi duoc hoan tat bang trang thai terminal.",
+                nameof(outcome));
+        }
+
         var connectionString = await ResolveTargetAsync(cancellationToken);
         try
         {
@@ -328,7 +338,7 @@ ErrorMessage";
     private const string ActiveExistsSql = @"
 SELECT COUNT(1)
 FROM dbo.App_QlhvAutoSyncRun WITH (UPDLOCK, HOLDLOCK)
-WHERE Status IN (N'QUEUED', N'RUNNING')
+WHERE ActiveSlot = 1
    OR
    (
        @DedupeNotBeforeUtc IS NOT NULL
@@ -340,13 +350,13 @@ WHERE Status IN (N'QUEUED', N'RUNNING')
 INSERT INTO dbo.App_QlhvAutoSyncRun
 (
     RunId, TriggerType, Actor, Status, SourceOrderJson,
-    CurrentSourceType, CurrentStage,
+    CurrentSourceType, CurrentStage, ActiveSlot,
     CreatedAtUtc, StartedAtUtc, CompletedAtUtc, UpdatedAtUtc
 )
 VALUES
 (
     @RunId, @TriggerType, @Actor, N'QUEUED', @SourceOrderJson,
-    NULL, N'CONNECTING', @CreatedAtUtc, NULL, NULL, @CreatedAtUtc
+    NULL, N'CONNECTING', 1, @CreatedAtUtc, NULL, NULL, @CreatedAtUtc
 );";
 
     private const string ByIdSql = "SELECT TOP (1) " + Projection + @"
@@ -355,7 +365,7 @@ WHERE RunId = @RunId;";
 
     private const string ActiveSql = "SELECT TOP (1) " + Projection + @"
 FROM dbo.App_QlhvAutoSyncRun
-WHERE Status IN (N'QUEUED', N'RUNNING')
+WHERE ActiveSlot = 1
 ORDER BY CreatedAtUtc, Id;";
 
     private const string LatestSql = "SELECT TOP (1) " + Projection + @"
@@ -365,43 +375,50 @@ ORDER BY CreatedAtUtc DESC, Id DESC;";
     private const string MarkRunningSql = @"
 UPDATE dbo.App_QlhvAutoSyncRun
 SET Status = N'RUNNING',
+    ActiveSlot = 1,
     CurrentStage = N'CONNECTING',
     StartedAtUtc = @StartedAtUtc,
     UpdatedAtUtc = @StartedAtUtc
 WHERE RunId = @RunId
-  AND Status = N'QUEUED';";
+  AND Status = N'QUEUED'
+  AND ActiveSlot = 1;";
 
     private const string SetCurrentSourceSql = @"
 UPDATE dbo.App_QlhvAutoSyncRun
 SET CurrentSourceType = @SourceType,
     UpdatedAtUtc = @UpdatedAtUtc
 WHERE RunId = @RunId
-  AND Status = N'RUNNING';";
+  AND Status = N'RUNNING'
+  AND ActiveSlot = 1;";
 
     private const string SetCurrentStageSql = @"
 UPDATE dbo.App_QlhvAutoSyncRun
 SET CurrentStage = @Stage,
     UpdatedAtUtc = @UpdatedAtUtc
 WHERE RunId = @RunId
-  AND Status = N'RUNNING';";
+  AND Status = N'RUNNING'
+  AND ActiveSlot = 1;";
 
     private const string SetOtoResultSql = @"
 UPDATE dbo.App_QlhvAutoSyncRun
 SET OtoResultJson = @ResultJson,
     UpdatedAtUtc = @UpdatedAtUtc
 WHERE RunId = @RunId
-  AND Status = N'RUNNING';";
+  AND Status = N'RUNNING'
+  AND ActiveSlot = 1;";
 
     private const string SetMotoResultSql = @"
 UPDATE dbo.App_QlhvAutoSyncRun
 SET MotoResultJson = @ResultJson,
     UpdatedAtUtc = @UpdatedAtUtc
 WHERE RunId = @RunId
-  AND Status = N'RUNNING';";
+  AND Status = N'RUNNING'
+  AND ActiveSlot = 1;";
 
     private const string CompleteSql = @"
 UPDATE dbo.App_QlhvAutoSyncRun
 SET Status = @Status,
+    ActiveSlot = NULL,
     CurrentSourceType = NULL,
     CurrentStage = CASE
         WHEN @Status = N'SUCCEEDED' THEN N'COMPLETED'
@@ -411,18 +428,21 @@ SET Status = @Status,
     UpdatedAtUtc = @CompletedAtUtc,
     ErrorMessage = @ErrorMessage
 WHERE RunId = @RunId
-  AND Status IN (N'QUEUED', N'RUNNING');";
+  AND Status IN (N'QUEUED', N'RUNNING')
+  AND ActiveSlot = 1;";
 
     private const string RequeueInterruptedSql = @"
 UPDATE dbo.App_QlhvAutoSyncRun
 SET Status = N'QUEUED',
+    ActiveSlot = 1,
     CurrentSourceType = NULL,
     CurrentStage = N'CONNECTING',
     StartedAtUtc = NULL,
     UpdatedAtUtc = @UpdatedAtUtc,
     ErrorMessage = N'Auto Sync bi gian doan va duoc thu lai sau khi host khoi dong.'
 WHERE RunId = @RunId
-  AND Status = N'RUNNING';";
+  AND Status = N'RUNNING'
+  AND ActiveSlot = 1;";
 
     private sealed class RunRow
     {

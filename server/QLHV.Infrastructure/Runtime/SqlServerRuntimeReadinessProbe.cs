@@ -106,6 +106,21 @@ public sealed class SqlServerRuntimeReadinessProbe : IRuntimeReadinessProbe
 
                     if (requiredSchemaReady)
                     {
+                        var activeSlotReady = await connection.ExecuteScalarAsync<bool>(
+                            new CommandDefinition(
+                                AutoSyncActiveSlotReadinessSql,
+                                commandTimeout: CommandTimeoutSeconds,
+                                cancellationToken: cancellationToken));
+                        if (!activeSlotReady)
+                        {
+                            requiredSchemaReady = false;
+                            messages.Add(
+                                "Auto Sync active-slot schema chua san sang hoac khong bao dam duy nhat.");
+                        }
+                    }
+
+                    if (requiredSchemaReady)
+                    {
                         var auth = await connection.QuerySingleAsync<AuthReadinessRow>(new CommandDefinition(
                             AuthenticationReadinessSql,
                             new
@@ -359,6 +374,87 @@ INNER JOIN sys.schemas AS schemaRow
     ON schemaRow.schema_id = tableRow.schema_id
 WHERE schemaRow.name = N'dbo'
   AND tableRow.name IN @RequiredTables;
+""";
+
+    private const string AutoSyncActiveSlotReadinessSql = """
+SELECT CAST
+(
+    CASE
+        WHEN EXISTS
+        (
+            SELECT 1
+            FROM sys.columns AS activeSlotColumn
+            INNER JOIN sys.types AS activeSlotType
+                ON activeSlotType.user_type_id = activeSlotColumn.user_type_id
+            WHERE activeSlotColumn.object_id =
+                    OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U')
+              AND activeSlotColumn.name = N'ActiveSlot'
+              AND activeSlotType.name = N'tinyint'
+              AND activeSlotColumn.max_length = 1
+              AND activeSlotColumn.is_nullable = 1
+              AND activeSlotColumn.is_computed = 0
+        )
+        AND EXISTS
+        (
+            SELECT 1
+            FROM sys.check_constraints AS activeSlotCheck
+            WHERE activeSlotCheck.parent_object_id =
+                    OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U')
+              AND activeSlotCheck.name = N'CK_App_QlhvAutoSyncRun_ActiveSlot'
+              AND activeSlotCheck.is_disabled = 0
+              AND activeSlotCheck.is_not_trusted = 0
+        )
+        AND EXISTS
+        (
+            SELECT 1
+            FROM sys.indexes AS activeSlotIndex
+            INNER JOIN sys.index_columns AS activeSlotKey
+                ON activeSlotKey.object_id = activeSlotIndex.object_id
+               AND activeSlotKey.index_id = activeSlotIndex.index_id
+               AND activeSlotKey.key_ordinal = 1
+            INNER JOIN sys.columns AS activeSlotKeyColumn
+                ON activeSlotKeyColumn.object_id = activeSlotKey.object_id
+               AND activeSlotKeyColumn.column_id = activeSlotKey.column_id
+            WHERE activeSlotIndex.object_id =
+                    OBJECT_ID(N'dbo.App_QlhvAutoSyncRun', N'U')
+              AND activeSlotIndex.name = N'UX_App_QlhvAutoSyncRun_ActiveSlot'
+              AND activeSlotIndex.is_unique = 1
+              AND activeSlotIndex.is_disabled = 0
+              AND activeSlotIndex.is_hypothetical = 0
+              AND activeSlotIndex.type = 2
+              AND activeSlotIndex.is_primary_key = 0
+              AND activeSlotIndex.is_unique_constraint = 0
+              AND activeSlotIndex.has_filter = 1
+              AND activeSlotIndex.filter_definition IS NOT NULL
+              AND REPLACE(
+                    REPLACE(
+                        REPLACE(activeSlotIndex.filter_definition, N'[', N''),
+                        N']',
+                        N''),
+                    N' ',
+                    N'') = N'(ActiveSlot=(1))'
+              AND activeSlotKeyColumn.name = N'ActiveSlot'
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM sys.index_columns AS extraActiveSlotKey
+                  WHERE extraActiveSlotKey.object_id = activeSlotIndex.object_id
+                    AND extraActiveSlotKey.index_id = activeSlotIndex.index_id
+                    AND extraActiveSlotKey.key_ordinal > 1
+              )
+              AND NOT EXISTS
+              (
+                  SELECT 1
+                  FROM sys.index_columns AS includedActiveSlotColumn
+                  WHERE includedActiveSlotColumn.object_id = activeSlotIndex.object_id
+                    AND includedActiveSlotColumn.index_id = activeSlotIndex.index_id
+                    AND includedActiveSlotColumn.is_included_column = 1
+              )
+        )
+        THEN 1
+        ELSE 0
+    END AS bit
+);
 """;
 
     private const string AuthenticationReadinessSql = """
