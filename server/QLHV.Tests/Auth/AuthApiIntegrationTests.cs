@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using QLHV.Application.Auth;
 using QLHV.Application.Runtime;
+using QLHV.Application.Sync;
 using QLHV.Application.Sync.Dtos;
 
 namespace QLHV.Tests.Auth;
@@ -87,6 +88,39 @@ public sealed class AuthApiIntegrationTests : IClassFixture<AuthApiFactory>
             Assert.NotEqual(HttpStatusCode.Unauthorized, response.StatusCode);
             Assert.NotEqual(HttpStatusCode.Forbidden, response.StatusCode);
         });
+    }
+
+    [Fact]
+    public async Task Operations_status_applies_the_current_Admin_or_Viewer_authorization()
+    {
+        using var adminClient = CreateClient();
+        using var viewerClient = CreateClient();
+        await LoginAsync(adminClient, "admin", AuthApiFactory.AdminPassword);
+        await LoginAsync(viewerClient, "viewer", AuthApiFactory.ViewerPassword);
+
+        var admin = await adminClient.GetFromJsonAsync<QlhvOperationsStatusDto>(
+            "/api/dong-bo-v2/qlhv/operations/status?sourceType=OTO");
+        var viewer = await viewerClient.GetFromJsonAsync<QlhvOperationsStatusDto>(
+            "/api/dong-bo-v2/qlhv/operations/status?sourceType=OTO");
+
+        Assert.NotNull(admin);
+        Assert.Equal(AppRoles.Admin, admin.CurrentUserRole);
+        Assert.True(admin.WriteAuthorized);
+        Assert.DoesNotContain("Bạn không có quyền Admin.", admin.RefreshBlockers);
+        Assert.True(admin.DryRun);
+        Assert.False(admin.TargetWritesEnabled);
+        Assert.False(admin.CanRefresh);
+        Assert.False(admin.CanSync);
+        Assert.Contains("Chế độ DryRun đang bật.", admin.RefreshBlockers);
+        Assert.Contains("Quyền ghi dữ liệu đang tắt.", admin.SyncBlockers);
+
+        Assert.NotNull(viewer);
+        Assert.Equal(AppRoles.Viewer, viewer.CurrentUserRole);
+        Assert.False(viewer.WriteAuthorized);
+        Assert.False(viewer.CanRefresh);
+        Assert.False(viewer.CanSync);
+        Assert.Contains("Bạn không có quyền Admin.", viewer.RefreshBlockers);
+        Assert.Contains("Bạn không có quyền Admin.", viewer.SyncBlockers);
     }
 
     [Fact]
@@ -285,6 +319,10 @@ public sealed class AuthApiFactory : WebApplicationFactory<Program>
             services.AddSingleton<IAppUserRepository>(_users);
             services.RemoveAll<IRuntimeReadinessService>();
             services.AddSingleton<IRuntimeReadinessService>(new ReadyRuntimeReadinessService());
+            services.RemoveAll<IQlhvOperationsRepository>();
+            services.AddSingleton<IQlhvOperationsRepository>(new ReadyOperationsRepository());
+            services.RemoveAll<IQlhvOperationHistoryRepository>();
+            services.AddSingleton<IQlhvOperationHistoryRepository>(new EmptyOperationHistoryRepository());
             services.RemoveAll<IHostedService>();
             services.PostConfigure<CookieAuthenticationOptions>(
                 CookieAuthenticationDefaults.AuthenticationScheme,
@@ -312,6 +350,46 @@ public sealed class AuthApiFactory : WebApplicationFactory<Program>
             CheckedAtUtc = DateTime.UtcNow,
             Messages = ["ready"],
         });
+    }
+
+    private sealed class ReadyOperationsRepository : IQlhvOperationsRepository
+    {
+        public Task<QlhvOperationDataSnapshot> ReadStatusSnapshotAsync(
+            QlhvOperationSourceDefinition source,
+            CancellationToken cancellationToken = default) => Task.FromResult(new QlhvOperationDataSnapshot(
+                new QlhvOperationRowCountsDto { NguoiLX = 10 },
+                new QlhvOperationRowCountsDto { NguoiLX = 10 },
+                10,
+                "test-snapshot-token"));
+    }
+
+    private sealed class EmptyOperationHistoryRepository : IQlhvOperationHistoryRepository
+    {
+        public Task<bool> TryCreateAsync(
+            QlhvOperationHistoryCreate entry,
+            CancellationToken cancellationToken = default) => Task.FromResult(true);
+
+        public Task MarkRunningAsync(Guid operationId, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task CompleteAsync(
+            QlhvOperationHistoryCompletion completion,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<IReadOnlyList<QlhvOperationHistoryDto>> SearchAsync(
+            string sourceType,
+            int take,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<QlhvOperationHistoryDto>>(Array.Empty<QlhvOperationHistoryDto>());
+
+        public Task<QlhvOperationHistoryDto?> GetActiveAsync(
+            string sourceType,
+            CancellationToken cancellationToken = default) => Task.FromResult<QlhvOperationHistoryDto?>(null);
+
+        public Task<QlhvOperationHistoryDto?> GetLatestCompletedAsync(
+            string sourceType,
+            string operationType,
+            CancellationToken cancellationToken = default) => Task.FromResult<QlhvOperationHistoryDto?>(null);
     }
 
     private sealed class InMemoryAppUserRepository : IAppUserRepository

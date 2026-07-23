@@ -81,7 +81,9 @@ public sealed class QlhvImportReadRepository : IQlhvImportReadRepository
                 commandTimeout: _options.TimeoutSeconds,
                 cancellationToken: ct));
             var hocVienRows = (await grid.ReadAsync<V2HocVienSourceRow>()).ToList();
-            var khoaHocRows = await grid.ReadSingleAsync<int>();
+            var khoaHocRows = (await grid.ReadAsync<QlhvKhoaHocSourceRow>()).ToList();
+            var giaoVienRows = (await grid.ReadAsync<QlhvGiaoVienSourceRow>()).ToList();
+            var relationRows = (await grid.ReadAsync<QlhvKhoaHocGiaoVienSourceRow>()).ToList();
             grid.Dispose();
             var snapshotAfter = await ReadSnapshotMetadataAsync(connection, ct);
             var snapshotToken = ResolveSnapshotToken(sourceDatabaseName, snapshotAfter);
@@ -97,7 +99,10 @@ public sealed class QlhvImportReadRepository : IQlhvImportReadRepository
                 BackupSnapshotToken = snapshotToken,
                 GeneratedAtUtc = DateTime.UtcNow,
                 HocVienRows = hocVienRows,
-                KhoaHocRows = khoaHocRows,
+                KhoaHocRows = khoaHocRows.Count,
+                KhoaHocSourceRows = khoaHocRows,
+                GiaoVienRows = giaoVienRows,
+                KhoaHocGiaoVienRows = relationRows,
             };
         }, cancellationToken);
     }
@@ -120,7 +125,7 @@ public sealed class QlhvImportReadRepository : IQlhvImportReadRepository
             return metadata.SnapshotToken.Trim();
         }
 
-        return QlhvBackupSnapshotToken.CreateMetadataFallback(
+        return QlhvBackupSnapshotToken.CreateImportMetadataFallback(
             databaseName,
             DateTime.SpecifyKind(metadata.CreateDate, DateTimeKind.Utc),
             new QlhvOperationRowCountsDto
@@ -128,7 +133,9 @@ public sealed class QlhvImportReadRepository : IQlhvImportReadRepository
                 NguoiLX = metadata.NguoiLXRows,
                 NguoiLXHoSo = metadata.NguoiLXHoSoRows,
                 KhoaHoc = metadata.KhoaHocRows,
-            });
+            },
+            metadata.GiaoVienRows,
+            metadata.KhoaHocGiaoVienRows);
     }
 
     public async Task<QlhvImportTargetSnapshot> ReadTargetAsync(
@@ -142,10 +149,6 @@ public sealed class QlhvImportReadRepository : IQlhvImportReadRepository
             await using var connection = new SqlConnection(connectionString);
             await connection.OpenAsync(ct);
 
-            var schema = await connection.QuerySingleAsync<TargetImportSchemaRow>(new CommandDefinition(
-                TargetImportSchemaSql,
-                commandTimeout: _options.TimeoutSeconds,
-                cancellationToken: ct));
             var writeColumns = await connection.QueryAsync<RequiredColumnCheckDto>(new CommandDefinition(
                 TargetHocVienWriteColumnsSql,
                 commandTimeout: _options.TimeoutSeconds,
@@ -161,16 +164,21 @@ public sealed class QlhvImportReadRepository : IQlhvImportReadRepository
                     string.Join(", ", missingWriteColumns) + ".");
             }
 
-            var countQuery = QlhvImportSqlBuilder.BuildTargetKhoaHocCount(
-                request,
-                schema.AppKhoaHocExists,
-                schema.AppKhoaHocHasMaKhoa,
-                schema.AppKhoaHocHasIsDeleted);
-            var appKhoaHocRows = await connection.ExecuteScalarAsync<int>(new CommandDefinition(
-                countQuery.Sql,
-                countQuery.Parameters,
+            var entityWriteColumns = await connection.QueryAsync<RequiredTableColumnCheckRow>(new CommandDefinition(
+                TargetCourseTeacherWriteColumnsSql,
                 commandTimeout: _options.TimeoutSeconds,
                 cancellationToken: ct));
+            var missingEntityWriteColumns = entityWriteColumns
+                .Where(column => !column.Exists)
+                .Select(column => $"{column.TableName}.{column.ColumnName}")
+                .ToArray();
+            if (missingEntityWriteColumns.Length > 0)
+            {
+                throw new QlhvImportReadException(
+                    "Target chua ap dung patch full sync khoa hoc/giao vien: " +
+                    string.Join(", ", missingEntityWriteColumns) + ".");
+            }
+
             var currentAppHocVienRows = await connection.ExecuteScalarAsync<int>(new CommandDefinition(
                 CurrentAppHocVienRowsSql,
                 new
@@ -180,6 +188,20 @@ public sealed class QlhvImportReadRepository : IQlhvImportReadRepository
                 },
                 commandTimeout: _options.TimeoutSeconds,
                 cancellationToken: ct));
+
+            using var entityGrid = await connection.QueryMultipleAsync(new CommandDefinition(
+                TargetEntityPartitionRowsSql,
+                new { request.SourceProfileCode },
+                commandTimeout: _options.TimeoutSeconds,
+                cancellationToken: ct));
+            var khoaHocTargetRows = MapEntityTargetRows(
+                (await entityGrid.ReadAsync<EntityHashRow>()).ToList());
+            var giaoVienTargetRows = MapEntityTargetRows(
+                (await entityGrid.ReadAsync<EntityHashRow>()).ToList());
+            var relationTargetRows = MapEntityTargetRows(
+                (await entityGrid.ReadAsync<EntityHashRow>()).ToList());
+            entityGrid.Dispose();
+            var appKhoaHocRows = khoaHocTargetRows.Count(row => !row.IsDeleted);
 
             var targetPartitionRows = (await connection.QueryAsync<ExistingHashRow>(new CommandDefinition(
                 TargetPartitionRowsSql,
@@ -192,10 +214,14 @@ public sealed class QlhvImportReadRepository : IQlhvImportReadRepository
             var exactIdentityRows = targetPartitionRows
                 .Where(row => normalizedSourceKeys.Contains(row.SourceMaDK?.Trim() ?? string.Empty))
                 .ToList();
-            var duplicateTargetIdentities = targetPartitionRows
+            var duplicateHocVienTargetIdentities = targetPartitionRows
                 .Where(row => !string.IsNullOrWhiteSpace(row.SourceMaDK))
                 .GroupBy(row => row.SourceMaDK.Trim(), StringComparer.OrdinalIgnoreCase)
                 .Count(group => group.Skip(1).Any());
+            var duplicateTargetIdentities = duplicateHocVienTargetIdentities +
+                CountDuplicateEntityTargetIdentities(khoaHocTargetRows) +
+                CountDuplicateEntityTargetIdentities(giaoVienTargetRows) +
+                CountDuplicateEntityTargetIdentities(relationTargetRows);
             var targetPlannerRows = targetPartitionRows
                 .Select(row => new QlhvFullSyncTargetRow(
                     row.SourceMaDK?.Trim() ?? string.Empty,
@@ -240,6 +266,9 @@ public sealed class QlhvImportReadRepository : IQlhvImportReadRepository
                 AppKhoaHocRows = appKhoaHocRows,
                 ExistingHocVienHashes = existingHashes,
                 HocVienRows = targetPlannerRows,
+                KhoaHocRows = khoaHocTargetRows,
+                GiaoVienRows = giaoVienTargetRows,
+                RelationRows = relationTargetRows,
                 DuplicateTargetIdentityRows = duplicateTargetIdentities,
                 TargetRowsForSourceProfile = targetRowsForSourceProfile,
                 TargetExactIdentityMatches = exactIdentityRows.Count,
@@ -402,11 +431,29 @@ public sealed class QlhvImportReadRepository : IQlhvImportReadRepository
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
+    private static IReadOnlyList<QlhvEntityFullSyncTargetRow> MapEntityTargetRows(
+        IReadOnlyList<EntityHashRow> rows)
+        => rows
+            .Select(row => new QlhvEntityFullSyncTargetRow(
+                row.SourceKey?.Trim() ?? string.Empty,
+                row.SourceHash,
+                row.IsDeleted))
+            .ToArray();
+
+    private static int CountDuplicateEntityTargetIdentities(
+        IReadOnlyList<QlhvEntityFullSyncTargetRow> rows)
+        => rows
+            .Where(row => !string.IsNullOrWhiteSpace(row.SourceKey))
+            .GroupBy(row => row.SourceKey.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Count(group => group.Skip(1).Any());
+
     private const string SourceSchemaSql = @"
 SELECT
     CAST(CASE WHEN OBJECT_ID(N'dbo.NguoiLX', N'U') IS NULL THEN 0 ELSE 1 END AS bit) AS NguoiLxExists,
     CAST(CASE WHEN OBJECT_ID(N'dbo.NguoiLX_HoSo', N'U') IS NULL THEN 0 ELSE 1 END AS bit) AS NguoiLxHoSoExists,
     CAST(CASE WHEN OBJECT_ID(N'dbo.KhoaHoc', N'U') IS NULL THEN 0 ELSE 1 END AS bit) AS KhoaHocExists,
+    CAST(CASE WHEN OBJECT_ID(N'dbo.GiaoVien', N'U') IS NULL THEN 0 ELSE 1 END AS bit) AS GiaoVienExists,
+    CAST(CASE WHEN OBJECT_ID(N'dbo.KhoaHoc_GiaoVien', N'U') IS NULL THEN 0 ELSE 1 END AS bit) AS KhoaHocGiaoVienExists,
     CAST(CASE WHEN OBJECT_ID(N'dbo.DM_HangDT', N'U') IS NULL THEN 0 ELSE 1 END AS bit) AS DmHangDtExists,
     CAST(CASE WHEN OBJECT_ID(N'dbo.DM_DVHC', N'U') IS NULL THEN 0 ELSE 1 END AS bit) AS DmDvhcExists,
     CAST(CASE WHEN COL_LENGTH(N'dbo.KhoaHoc', N'MaCSDT') IS NULL THEN 0 ELSE 1 END AS bit) AS KhoaHocHasMaCsdt,
@@ -421,7 +468,9 @@ SELECT
     CAST(snapshotProperty.value AS nvarchar(512)) AS SnapshotToken,
     (SELECT COUNT(1) FROM dbo.NguoiLX) AS NguoiLXRows,
     (SELECT COUNT(1) FROM dbo.NguoiLX_HoSo) AS NguoiLXHoSoRows,
-    (SELECT COUNT(1) FROM dbo.KhoaHoc) AS KhoaHocRows
+    (SELECT COUNT(1) FROM dbo.KhoaHoc) AS KhoaHocRows,
+    (SELECT COUNT(1) FROM dbo.GiaoVien) AS GiaoVienRows,
+    (SELECT COUNT(1) FROM dbo.KhoaHoc_GiaoVien) AS KhoaHocGiaoVienRows
 FROM sys.databases AS databaseRow
 OUTER APPLY
 (
@@ -482,6 +531,142 @@ LEFT JOIN sys.columns AS targetColumn
     ON targetColumn.object_id = OBJECT_ID(N'dbo.App_HocVien', N'U')
    AND targetColumn.name = requiredColumns.ColumnName
 ORDER BY requiredColumns.SortOrder;";
+
+    private const string TargetCourseTeacherWriteColumnsSql = @"
+SELECT
+    requiredColumns.TableName,
+    requiredColumns.ColumnName,
+    CAST(CASE WHEN targetColumn.column_id IS NULL THEN 0 ELSE 1 END AS bit) AS [Exists]
+FROM (
+    VALUES
+        (N'dbo.App_KhoaHoc', N'SourceProfileCode'),
+        (N'dbo.App_KhoaHoc', N'SourceMaKhoaHoc'),
+        (N'dbo.App_KhoaHoc', N'SourceHash'),
+        (N'dbo.App_KhoaHoc', N'MaKhoa'),
+        (N'dbo.App_KhoaHoc', N'TenKhoa'),
+        (N'dbo.App_KhoaHoc', N'MaCSDT'),
+        (N'dbo.App_KhoaHoc', N'MaSoGTVT'),
+        (N'dbo.App_KhoaHoc', N'HangGPLX'),
+        (N'dbo.App_KhoaHoc', N'HangDaoTao'),
+        (N'dbo.App_KhoaHoc', N'SoQuyetDinhKhaiGiang'),
+        (N'dbo.App_KhoaHoc', N'NgayQuyetDinhKhaiGiang'),
+        (N'dbo.App_KhoaHoc', N'NgayKhaiGiang'),
+        (N'dbo.App_KhoaHoc', N'NgayBeGiang'),
+        (N'dbo.App_KhoaHoc', N'MucTieuDaoTao'),
+        (N'dbo.App_KhoaHoc', N'NgayThi'),
+        (N'dbo.App_KhoaHoc', N'NgaySatHach'),
+        (N'dbo.App_KhoaHoc', N'TongSoHocVien'),
+        (N'dbo.App_KhoaHoc', N'SoHocVienTotNghiep'),
+        (N'dbo.App_KhoaHoc', N'SoHocVienDuocCapGPLX'),
+        (N'dbo.App_KhoaHoc', N'ThoiGianDaoTao'),
+        (N'dbo.App_KhoaHoc', N'SoNgayOnKiemTra'),
+        (N'dbo.App_KhoaHoc', N'SoNgayThucHoc'),
+        (N'dbo.App_KhoaHoc', N'SoNgayNghiLe'),
+        (N'dbo.App_KhoaHoc', N'TongSoNgay'),
+        (N'dbo.App_KhoaHoc', N'GhiChuV2'),
+        (N'dbo.App_KhoaHoc', N'TrangThaiNguon'),
+        (N'dbo.App_KhoaHoc', N'TtXuLy'),
+        (N'dbo.App_KhoaHoc', N'HinhThucDaoTao'),
+        (N'dbo.App_KhoaHoc', N'V2RowHash'),
+        (N'dbo.App_KhoaHoc', N'LastSyncFromV2At'),
+        (N'dbo.App_KhoaHoc', N'IsDeleted'),
+        (N'dbo.App_KhoaHoc', N'CreatedAtUtc'),
+        (N'dbo.App_KhoaHoc', N'UpdatedAtUtc'),
+
+        (N'dbo.App_GiaoVien', N'SourceProfileCode'),
+        (N'dbo.App_GiaoVien', N'SourceMaGV'),
+        (N'dbo.App_GiaoVien', N'SourceHash'),
+        (N'dbo.App_GiaoVien', N'MaGV'),
+        (N'dbo.App_GiaoVien', N'HoTen'),
+        (N'dbo.App_GiaoVien', N'HoTenDem'),
+        (N'dbo.App_GiaoVien', N'TenGV'),
+        (N'dbo.App_GiaoVien', N'NgaySinh'),
+        (N'dbo.App_GiaoVien', N'SoCCCD'),
+        (N'dbo.App_GiaoVien', N'GioiTinh'),
+        (N'dbo.App_GiaoVien', N'DienThoai'),
+        (N'dbo.App_GiaoVien', N'DiaChi'),
+        (N'dbo.App_GiaoVien', N'NoiCtMaDvhc'),
+        (N'dbo.App_GiaoVien', N'NoiCtMaDvql'),
+        (N'dbo.App_GiaoVien', N'HinhThucTuyenDung'),
+        (N'dbo.App_GiaoVien', N'TrinhDoVanHoa'),
+        (N'dbo.App_GiaoVien', N'TrinhDoChuyenMon'),
+        (N'dbo.App_GiaoVien', N'TrinhDoSuPham'),
+        (N'dbo.App_GiaoVien', N'HangGPLX'),
+        (N'dbo.App_GiaoVien', N'NgayCapGPLX'),
+        (N'dbo.App_GiaoVien', N'NgayHetHanGPLX'),
+        (N'dbo.App_GiaoVien', N'ThamNienLaiXe'),
+        (N'dbo.App_GiaoVien', N'MonHocGiangDay'),
+        (N'dbo.App_GiaoVien', N'AnhRelativePath'),
+        (N'dbo.App_GiaoVien', N'GhiChu'),
+        (N'dbo.App_GiaoVien', N'MaCSDT'),
+        (N'dbo.App_GiaoVien', N'MaSoGTVT'),
+        (N'dbo.App_GiaoVien', N'SoQuyetDinhGCN'),
+        (N'dbo.App_GiaoVien', N'NgayQuyetDinhGCN'),
+        (N'dbo.App_GiaoVien', N'LoaiHinhDaoTao'),
+        (N'dbo.App_GiaoVien', N'CacHangGPLXDuocDaoTao'),
+        (N'dbo.App_GiaoVien', N'CauTaoSuaChua'),
+        (N'dbo.App_GiaoVien', N'DaoDucLaiXe'),
+        (N'dbo.App_GiaoVien', N'NghiepVuVanTai'),
+        (N'dbo.App_GiaoVien', N'LuatGTDB'),
+        (N'dbo.App_GiaoVien', N'KyThuatLaiXe'),
+        (N'dbo.App_GiaoVien', N'MaFileTiepNhanXml'),
+        (N'dbo.App_GiaoVien', N'ThoiGianTiepNhanXml'),
+        (N'dbo.App_GiaoVien', N'NoiCapGCN'),
+        (N'dbo.App_GiaoVien', N'LoaiGiaoVien'),
+        (N'dbo.App_GiaoVien', N'CacHangDaCo'),
+        (N'dbo.App_GiaoVien', N'TrangThaiNguon'),
+        (N'dbo.App_GiaoVien', N'V2RowHash'),
+        (N'dbo.App_GiaoVien', N'LastSyncFromV2At'),
+        (N'dbo.App_GiaoVien', N'IsDeleted'),
+        (N'dbo.App_GiaoVien', N'CreatedAtUtc'),
+        (N'dbo.App_GiaoVien', N'UpdatedAtUtc'),
+
+        (N'dbo.App_KhoaHoc_GiaoVien', N'SourceProfileCode'),
+        (N'dbo.App_KhoaHoc_GiaoVien', N'SourceMaLichLV'),
+        (N'dbo.App_KhoaHoc_GiaoVien', N'SourceMaKhoaHoc'),
+        (N'dbo.App_KhoaHoc_GiaoVien', N'SourceMaGV'),
+        (N'dbo.App_KhoaHoc_GiaoVien', N'SourceHash'),
+        (N'dbo.App_KhoaHoc_GiaoVien', N'MaKhoa'),
+        (N'dbo.App_KhoaHoc_GiaoVien', N'MaGV'),
+        (N'dbo.App_KhoaHoc_GiaoVien', N'TenGV'),
+        (N'dbo.App_KhoaHoc_GiaoVien', N'MaMonHoc'),
+        (N'dbo.App_KhoaHoc_GiaoVien', N'TenMonHoc'),
+        (N'dbo.App_KhoaHoc_GiaoVien', N'BienSoXe'),
+        (N'dbo.App_KhoaHoc_GiaoVien', N'LoaiGV'),
+        (N'dbo.App_KhoaHoc_GiaoVien', N'SoHocVien'),
+        (N'dbo.App_KhoaHoc_GiaoVien', N'NgayHieuLuc'),
+        (N'dbo.App_KhoaHoc_GiaoVien', N'NgayHetHieuLuc'),
+        (N'dbo.App_KhoaHoc_GiaoVien', N'NgayBatDau'),
+        (N'dbo.App_KhoaHoc_GiaoVien', N'NgayKetThuc'),
+        (N'dbo.App_KhoaHoc_GiaoVien', N'IsKhoaHocGiaoVien'),
+        (N'dbo.App_KhoaHoc_GiaoVien', N'GhiChu'),
+        (N'dbo.App_KhoaHoc_GiaoVien', N'TrangThaiNguon'),
+        (N'dbo.App_KhoaHoc_GiaoVien', N'V2RowHash'),
+        (N'dbo.App_KhoaHoc_GiaoVien', N'LastSyncFromV2At'),
+        (N'dbo.App_KhoaHoc_GiaoVien', N'IsDeleted'),
+        (N'dbo.App_KhoaHoc_GiaoVien', N'CreatedAtUtc'),
+        (N'dbo.App_KhoaHoc_GiaoVien', N'UpdatedAtUtc')
+) AS requiredColumns(TableName, ColumnName)
+LEFT JOIN sys.columns AS targetColumn
+    ON targetColumn.object_id = OBJECT_ID(requiredColumns.TableName, N'U')
+   AND targetColumn.name = requiredColumns.ColumnName
+ORDER BY requiredColumns.TableName, requiredColumns.ColumnName;";
+
+    private const string TargetEntityPartitionRowsSql = @"
+SELECT SourceMaKhoaHoc AS SourceKey, SourceHash, IsDeleted
+FROM dbo.App_KhoaHoc
+WHERE SourceProfileCode = @SourceProfileCode
+ORDER BY SourceMaKhoaHoc, KhoaHocId;
+
+SELECT SourceMaGV AS SourceKey, SourceHash, IsDeleted
+FROM dbo.App_GiaoVien
+WHERE SourceProfileCode = @SourceProfileCode
+ORDER BY SourceMaGV, GiaoVienId;
+
+SELECT CONVERT(nvarchar(30), SourceMaLichLV) AS SourceKey, SourceHash, IsDeleted
+FROM dbo.App_KhoaHoc_GiaoVien
+WHERE SourceProfileCode = @SourceProfileCode
+ORDER BY SourceMaLichLV, Id;";
 
     private const string CurrentAppHocVienRowsSql = @"
 SELECT COUNT(1)
@@ -544,6 +729,8 @@ WHERE MaDK IN @SourceMaDks
         public bool NguoiLxExists { get; init; }
         public bool NguoiLxHoSoExists { get; init; }
         public bool KhoaHocExists { get; init; }
+        public bool GiaoVienExists { get; init; }
+        public bool KhoaHocGiaoVienExists { get; init; }
         public bool DmHangDtExists { get; init; }
         public bool DmDvhcExists { get; init; }
         public bool KhoaHocHasMaCsdt { get; init; }
@@ -558,6 +745,8 @@ WHERE MaDK IN @SourceMaDks
             if (!NguoiLxExists) missing.Add("dbo.NguoiLX");
             if (!NguoiLxHoSoExists) missing.Add("dbo.NguoiLX_HoSo");
             if (!KhoaHocExists) missing.Add("dbo.KhoaHoc");
+            if (!GiaoVienExists) missing.Add("dbo.GiaoVien");
+            if (!KhoaHocGiaoVienExists) missing.Add("dbo.KhoaHoc_GiaoVien");
             if (!DmHangDtExists) missing.Add("dbo.DM_HangDT");
             if (!DmDvhcExists) missing.Add("dbo.DM_DVHC");
             return missing;
@@ -588,6 +777,8 @@ WHERE MaDK IN @SourceMaDks
         public int NguoiLXRows { get; init; }
         public int NguoiLXHoSoRows { get; init; }
         public int KhoaHocRows { get; init; }
+        public int GiaoVienRows { get; init; }
+        public int KhoaHocGiaoVienRows { get; init; }
     }
 
     private sealed class ExistingHashRow
@@ -595,6 +786,20 @@ WHERE MaDK IN @SourceMaDks
         public string SourceMaDK { get; init; } = string.Empty;
         public string? V2RowHash { get; init; }
         public bool IsDeleted { get; init; }
+    }
+
+    private sealed class EntityHashRow
+    {
+        public string? SourceKey { get; init; }
+        public string? SourceHash { get; init; }
+        public bool IsDeleted { get; init; }
+    }
+
+    private sealed class RequiredTableColumnCheckRow
+    {
+        public string TableName { get; init; } = string.Empty;
+        public string ColumnName { get; init; } = string.Empty;
+        public bool Exists { get; init; }
     }
 
     private sealed class CheckConstraintDefinitionRow

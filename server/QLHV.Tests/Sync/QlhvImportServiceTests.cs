@@ -49,8 +49,14 @@ public sealed class QlhvImportServiceTests
         Assert.Equal(1, plan.PlannedInsertHocVienRows);
         Assert.Equal(1, plan.PlannedUpdateHocVienRows);
         Assert.Equal(2, plan.PlannedUpsertHocVienRows);
-        Assert.Equal(0, plan.PlannedUpsertKhoaHocRows);
-        Assert.Contains(QlhvImportService.AppKhoaHocNotSupportedWarning, plan.Warnings);
+        Assert.Equal(1, plan.PlannedUpsertKhoaHocRows);
+        Assert.DoesNotContain(QlhvImportService.AppKhoaHocNotSupportedWarning, plan.Warnings);
+        Assert.Equal(2, plan.HocVien.SourceRows);
+        Assert.Equal(1, plan.KhoaHoc.SourceRows);
+        Assert.Equal(1, plan.KhoaHoc.Insert);
+        Assert.Equal(0, plan.GiaoVien.SourceRows);
+        Assert.Equal(0, plan.DuplicateSourceKeys);
+        Assert.Equal(0, plan.RelationConflicts);
         Assert.Equal(0, target.UpsertCalls);
     }
 
@@ -236,6 +242,11 @@ public sealed class QlhvImportServiceTests
         Assert.Equal(5, diagnostics.TargetRowsForSourceProfile);
         Assert.Equal(1, diagnostics.TargetExactIdentityMatches);
         Assert.True(diagnostics.SourceProfileAllowedByConstraint);
+        Assert.Equal(2, diagnostics.HocVien.SourceRows);
+        Assert.Equal(1, diagnostics.KhoaHoc.SourceRows);
+        Assert.Equal(0, diagnostics.GiaoVien.SourceRows);
+        Assert.Equal(0, diagnostics.DuplicateSourceKeys);
+        Assert.Equal(0, diagnostics.RelationConflicts);
         Assert.Empty(diagnostics.Blockers);
         Assert.Equal(0, target.UpsertCalls);
     }
@@ -359,6 +370,33 @@ public sealed class QlhvImportServiceTests
     }
 
     [Fact]
+    public async Task Plan_blocks_assignment_that_does_not_reference_teacher_in_same_snapshot()
+    {
+        var reads = new FakeReadRepository
+        {
+            Source = new QlhvImportSourceSnapshot
+            {
+                HocVienRows = new[] { Source("66029-001") },
+                KhoaHocGiaoVienRows = new[]
+                {
+                    new QlhvKhoaHocGiaoVienSourceRow
+                    {
+                        MaLichLV = 1, MaKH = "66029K01", MaGV = "GV-MISSING",
+                        TenGV = "Khong co", TrangThai = true, IsKhoaHocGiaoVien = true,
+                    },
+                },
+            },
+        };
+        var service = CreateService(reads, new FakeTargetRepository());
+
+        var plan = await service.GetPlanAsync(OtoRequest());
+
+        Assert.False(plan.Executable);
+        Assert.Equal(1, plan.RelationConflicts);
+        Assert.Contains(plan.Blockers, blocker => blocker.Contains("quan he", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task Execute_upserts_with_actual_source_profile_and_source_ma_dk()
     {
         var reads = new FakeReadRepository
@@ -409,6 +447,80 @@ public sealed class QlhvImportServiceTests
         Assert.Equal(2, result.InsertedHocVienRows);
         Assert.Equal(1, target.UpsertCalls);
         Assert.Equal(2, target.WrittenRows.Count);
+    }
+
+    [Fact]
+    public async Task Execute_sends_course_teacher_relation_and_student_as_one_payload_and_history_has_group_counts()
+    {
+        var history = new FakeOperationHistoryRepository();
+        var reads = new FakeReadRepository
+        {
+            Source = new QlhvImportSourceSnapshot
+            {
+                HocVienRows = new[] { Source("66029-001") },
+                KhoaHocSourceRows = new[]
+                {
+                    new QlhvKhoaHocSourceRow
+                    {
+                        MaKH = "66029K01", MaCSDT = "66029", MaSoGTVT = "66029",
+                        TenKH = "Khoa OTO", TrangThai = true,
+                    },
+                },
+                GiaoVienRows = new[]
+                {
+                    new QlhvGiaoVienSourceRow
+                    {
+                        MaGV = "GV000001", MaCSDT = "66029", MaSoGTVT = "66029",
+                        HoTenDem = "Nguyen Van", TenGV = "An", NgaySinh = "19800102",
+                        SoCMT = "001234567890", NgayCapGPLX = new DateTime(2020, 1, 1),
+                        TrangThai = true,
+                    },
+                },
+                KhoaHocGiaoVienRows = new[]
+                {
+                    new QlhvKhoaHocGiaoVienSourceRow
+                    {
+                        MaLichLV = 7, MaKH = "66029K01", MaGV = "GV000001",
+                        TenGV = "Nguyen Van An", TrangThai = true,
+                        IsKhoaHocGiaoVien = true,
+                    },
+                },
+            },
+        };
+        var target = new FakeTargetRepository
+        {
+            FullSyncResult = new QlhvImportFullSyncWriteResult(
+                new QlhvEntityWriteCounts(1, 1, 0, 0, 0, 0),
+                new QlhvEntityWriteCounts(1, 1, 0, 0, 0, 0),
+                new QlhvEntityWriteCounts(1, 1, 0, 0, 0, 0),
+                new QlhvEntityWriteCounts(1, 1, 0, 0, 0, 0),
+                0, 0, 0, 0, 0, 0),
+        };
+        var service = CreateService(
+            reads,
+            target,
+            dryRun: false,
+            enableWrites: true,
+            operationHistory: history);
+
+        var result = await service.ExecuteAsync(ExecuteRequest());
+
+        Assert.True(result.Executed);
+        var payload = Assert.IsType<QlhvImportFullSyncPayload>(target.LastPayload);
+        Assert.Single(payload.KhoaHocRows);
+        Assert.Single(payload.GiaoVienRows);
+        var relation = Assert.Single(payload.RelationRows);
+        Assert.Single(payload.HocVienRows);
+        Assert.Equal("66029K01", relation.SourceMaKhoaHoc);
+        Assert.Equal("CSDT_OTO:GV000001", relation.MaGV);
+        Assert.Equal(1, result.KhoaHoc.Insert);
+        Assert.Equal(1, result.GiaoVien.Insert);
+
+        var completion = Assert.Single(history.Completed).Value;
+        Assert.NotNull(completion.DetailJson);
+        Assert.Contains("KhoaHocGiaoVien", completion.DetailJson, StringComparison.Ordinal);
+        Assert.Equal(4, completion.SourceRows);
+        Assert.Equal(4, completion.InsertedRows);
     }
 
     [Fact]
@@ -658,6 +770,21 @@ public sealed class QlhvImportServiceTests
             CancellationToken cancellationToken = default)
         {
             SourceReads++;
+            var courseRows = Source.KhoaHocSourceRows.Count > 0
+                ? Source.KhoaHocSourceRows
+                : Source.HocVienRows
+                    .Where(row => !string.IsNullOrWhiteSpace(row.MaKhoaHoc))
+                    .GroupBy(row => row.MaKhoaHoc!.Trim(), StringComparer.OrdinalIgnoreCase)
+                    .Select(group => new QlhvKhoaHocSourceRow
+                    {
+                        MaKH = group.Key,
+                        MaCSDT = request.MaCSDT,
+                        MaSoGTVT = request.MaCSDT,
+                        TenKH = group.First().TenKH,
+                        HangDT = group.First().HangDaoTao,
+                        TrangThai = true,
+                    })
+                    .ToArray();
             return Task.FromResult(new QlhvImportSourceSnapshot
             {
                 SourceDatabaseName = string.IsNullOrWhiteSpace(Source.SourceDatabaseName)
@@ -668,7 +795,10 @@ public sealed class QlhvImportServiceTests
                     : Source.BackupSnapshotToken,
                 GeneratedAtUtc = Source.GeneratedAtUtc == default ? DateTime.UtcNow : Source.GeneratedAtUtc,
                 HocVienRows = Source.HocVienRows,
-                KhoaHocRows = Source.KhoaHocRows,
+                KhoaHocRows = courseRows.Count > 0 ? courseRows.Count : Source.KhoaHocRows,
+                KhoaHocSourceRows = courseRows,
+                GiaoVienRows = Source.GiaoVienRows,
+                KhoaHocGiaoVienRows = Source.KhoaHocGiaoVienRows,
             });
         }
 
@@ -689,6 +819,7 @@ public sealed class QlhvImportServiceTests
         public int DiagnosticsReads { get; private set; }
         public int UpsertCalls { get; private set; }
         public string? LastFullSyncProfile { get; private set; }
+        public QlhvImportFullSyncPayload? LastPayload { get; private set; }
         public List<QlhvImportHocVienWriteModel> WrittenRows { get; } = new();
         public UpsertCounts UpsertResult { get; init; } = UpsertCounts.Empty;
         public QlhvImportFullSyncWriteResult FullSyncResult { get; init; } =
@@ -745,6 +876,15 @@ public sealed class QlhvImportServiceTests
                 UpsertResult,
                 0,
                 0));
+        }
+
+        public Task<QlhvImportFullSyncWriteResult> FullSyncAsync(
+            string sourceProfileCode,
+            QlhvImportFullSyncPayload payload,
+            CancellationToken cancellationToken = default)
+        {
+            LastPayload = payload;
+            return FullSyncAsync(sourceProfileCode, payload.HocVienRows, cancellationToken);
         }
 
         public Task<QlhvImportFullSyncWriteResult> FullSyncAsync(

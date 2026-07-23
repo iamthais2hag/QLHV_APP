@@ -2572,6 +2572,47 @@
   margin-top: 14px;
 }
 
+.qlhv-import-entity-groups {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.qlhv-import-entity-group {
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid #d8e7f6;
+  border-radius: 9px;
+  background: #f8fbff;
+}
+
+.qlhv-import-entity-group h3 {
+  margin: 0 0 10px;
+  color: var(--tc-blue-900);
+  font-size: 14px;
+}
+
+.qlhv-import-entity-group .qlhv-import-metrics {
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+}
+
+.qlhv-import-entity-group .qlhv-import-metric {
+  padding: 9px 10px;
+}
+
+.qlhv-import-entity-group .qlhv-import-metric strong {
+  font-size: 16px;
+}
+
+.qlhv-import-entity-group__unavailable {
+  padding: 10px 12px;
+  border: 1px dashed var(--tc-border);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--tc-text-muted);
+  font-size: 12px;
+}
+
 .qlhv-import-summary-row {
   display: grid;
   gap: 3px;
@@ -3043,6 +3084,23 @@
 
 .qlhv-operation-card__actions .btn:last-child {
   grid-column: 1 / -1;
+}
+
+.qlhv-operation-card__disabled-reasons {
+  display: grid;
+  gap: 6px;
+  margin: 0 20px 20px;
+  padding: 10px 12px;
+  border: 1px solid #f1b8b2;
+  border-radius: 8px;
+  background: #fff4f2;
+  color: #8f241d;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.qlhv-operation-card__disabled-reasons p {
+  margin: 0;
 }
 
 .qlhv-operation-state,

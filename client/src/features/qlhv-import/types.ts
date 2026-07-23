@@ -16,6 +16,16 @@ export interface QlhvImportExecuteRequest extends QlhvImportRequest {
   expectedSnapshotToken: string;
 }
 
+export interface QlhvImportEntityCounts {
+  sourceRows: number;
+  insert: number;
+  update: number;
+  reactivate: number;
+  softDelete: number;
+  skip: number;
+  duplicateSourceKeys: number;
+}
+
 export interface QlhvImportDiagnostics {
   isReadOnly: boolean;
   sourceDatabaseName: string;
@@ -38,6 +48,11 @@ export interface QlhvImportDiagnostics {
   plannedSoftDeleteHocVienRows: number;
   plannedSkipHocVienRows: number;
   plannedUpsertHocVienRows: number;
+  hocVien: QlhvImportEntityCounts;
+  khoaHoc: QlhvImportEntityCounts;
+  giaoVien: QlhvImportEntityCounts;
+  duplicateSourceKeys: number;
+  relationConflicts: number;
   executable: boolean;
   blockers: string[];
   warnings: string[];
@@ -70,6 +85,11 @@ export interface QlhvImportPlan {
   plannedSkipHocVienRows: number;
   plannedUpsertHocVienRows: number;
   plannedUpsertKhoaHocRows: number;
+  hocVien: QlhvImportEntityCounts;
+  khoaHoc: QlhvImportEntityCounts;
+  giaoVien: QlhvImportEntityCounts;
+  duplicateSourceKeys: number;
+  relationConflicts: number;
   executable: boolean;
   blockers: string[];
   warnings: string[];
@@ -85,6 +105,9 @@ export interface QlhvImportExecuteResult {
   reactivatedHocVienRows: number;
   softDeletedHocVienRows: number;
   skippedHocVienRows: number;
+  hocVien?: QlhvImportEntityCounts;
+  khoaHoc?: QlhvImportEntityCounts;
+  giaoVien?: QlhvImportEntityCounts;
 }
 
 export interface QlhvImportSnapshot<T> {
@@ -117,6 +140,12 @@ export interface QlhvOperationsStatus {
   targetActiveRows: number;
   lastSyncTimeUtc: string | null;
   lastError: string | null;
+  dryRun: boolean;
+  targetWritesEnabled: boolean;
+  currentUserRole: string;
+  writeAuthorized: boolean;
+  refreshBlockers: string[];
+  syncBlockers: string[];
   canRefresh: boolean;
   canSync: boolean;
 }

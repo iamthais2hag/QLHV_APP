@@ -19,7 +19,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\qlhv-l
 
 Installer:
 
-1. tạo/preserve cấu hình Production riêng của máy;
+1. tạo/preserve cấu hình Production riêng của máy và chuẩn hóa hai cờ vận hành ghi;
 2. build frontend cùng-origin `/api` và publish API Release;
 3. cài vào `D:\QLHV_APP_RUNTIME\app`;
 4. khởi động ẩn, chờ `/health/live`, rồi chờ `/health/ready`;
@@ -52,7 +52,7 @@ Có thể chỉ rõ tài khoản vận hành khi cài. Installer đồng thời 
 .\scripts\windows\qlhv-lan\Install-QLHV-App.ps1 -RuntimeAccount 'MAYCHU\TaiKhoanVanHanh'
 ```
 
-Nếu file Production local đã tồn tại và JSON hợp lệ, installer giữ nguyên nội dung và chỉ củng cố ACL. Updater kiểm tra SHA-256 trước/sau và không ghi, di chuyển hay xóa file này. Không đặt password/secret trong Git, command line hoặc tài liệu.
+Nếu file Production local đã tồn tại và JSON hợp lệ, installer/updater chỉ chuẩn hóa `Sync:DryRun=false` và `SyncExecution:EnableTargetWrites=true`; mọi section/giá trị local khác được giữ nguyên. Việc thay nội dung được thực hiện atomically, giữ ACL của file, không in JSON hay secret. Updater lấy SHA-256 sau bước chuẩn hóa rồi bảo vệ file khỏi mọi thay đổi ngoài ý muốn trong phần còn lại của quá trình. Không đặt password/secret trong Git, command line hoặc tài liệu.
 
 ## Sử dụng hằng ngày
 
@@ -109,7 +109,7 @@ Cập nhật bằng PowerShell Administrator:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\QLHV_APP\scripts\windows\qlhv-lan\Update-QLHV-App.ps1
 ```
 
-Updater build/publish vào staging trước, giữ nguyên config local, dừng đúng PID, rename runtime cũ vào rollback, cài runtime mới và chờ ready. Nếu thất bại, nó phục hồi runtime cũ và kiểm tra legacy/current health. Vì updater chạy Administrator, process dùng để smoke/rollback validation luôn được dừng sau kiểm tra; hãy bấm shortcut để chạy lại bằng tài khoản vận hành bình thường. Updater không tự chạy SQL patch, refresh BAK hoặc full sync.
+Updater chuẩn hóa đúng hai cờ vận hành nói trên rồi lấy hash cấu hình, build/publish vào staging, dừng đúng PID, rename runtime cũ vào rollback, cài runtime mới và chờ ready. Các giá trị local còn lại không bị thay đổi. Nếu thất bại, nó phục hồi runtime cũ và kiểm tra legacy/current health. Vì updater chạy Administrator, process dùng để smoke/rollback validation luôn được dừng sau kiểm tra; hãy bấm shortcut để chạy lại bằng tài khoản vận hành bình thường. Updater không tự chạy SQL patch, refresh BAK hoặc full sync.
 
 Nếu lỗi xảy ra đúng khoảng chuyển tiếp sau khi runtime cũ đã dừng nhưng trước khi move vào backup hoàn tất, script không bỏ mặc app ở trạng thái dừng không rõ nguyên nhân: nó kiểm tra lại binary cũ bằng legacy-compatible health, dừng process kiểm tra mang token Administrator, giữ marker cần thiết và hướng dẫn khởi động bằng shortcut.
 

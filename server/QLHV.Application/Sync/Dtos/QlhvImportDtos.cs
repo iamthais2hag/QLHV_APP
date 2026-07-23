@@ -68,6 +68,18 @@ public sealed class QlhvImportPlanDto
 
     public int PlannedUpsertKhoaHocRows { get; init; }
 
+    public QlhvEntitySyncCountsDto HocVien { get; init; } = new();
+
+    public QlhvEntitySyncCountsDto KhoaHoc { get; init; } = new();
+
+    public QlhvEntitySyncCountsDto GiaoVien { get; init; } = new();
+
+    public int DuplicateSourceKeys { get; init; }
+
+    public int RelationConflicts { get; init; }
+
+    internal int SourceRelationRows { get; init; }
+
     public bool Executable => Blockers.Count == 0;
 
     public IReadOnlyList<string> Blockers { get; init; } = Array.Empty<string>();
@@ -96,6 +108,31 @@ public sealed class QlhvImportExecuteResultDto
     public int SoftDeletedHocVienRows { get; init; }
 
     public int SkippedHocVienRows { get; init; }
+
+    public QlhvEntitySyncCountsDto HocVien { get; init; } = new();
+
+    public QlhvEntitySyncCountsDto KhoaHoc { get; init; } = new();
+
+    public QlhvEntitySyncCountsDto GiaoVien { get; init; } = new();
+}
+
+public sealed class QlhvEntitySyncCountsDto
+{
+    public int SourceRows { get; init; }
+
+    public int Insert { get; init; }
+
+    public int Update { get; init; }
+
+    public int Reactivate { get; init; }
+
+    public int SoftDelete { get; init; }
+
+    public int Skip { get; init; }
+
+    public int DuplicateSourceKeys { get; init; }
+
+    public int Upsert => Insert + Update + Reactivate;
 }
 
 public sealed class QlhvImportDiagnosticsDto
@@ -142,6 +179,16 @@ public sealed class QlhvImportDiagnosticsDto
 
     public int PlannedUpsertHocVienRows { get; init; }
 
+    public QlhvEntitySyncCountsDto HocVien { get; init; } = new();
+
+    public QlhvEntitySyncCountsDto KhoaHoc { get; init; } = new();
+
+    public QlhvEntitySyncCountsDto GiaoVien { get; init; } = new();
+
+    public int DuplicateSourceKeys { get; init; }
+
+    public int RelationConflicts { get; init; }
+
     public bool Executable => Blockers.Count == 0;
 
     public IReadOnlyList<string> Blockers { get; init; } = Array.Empty<string>();
@@ -160,6 +207,15 @@ public sealed class QlhvImportSourceSnapshot
     public IReadOnlyList<V2HocVienSourceRow> HocVienRows { get; init; } = Array.Empty<V2HocVienSourceRow>();
 
     public int KhoaHocRows { get; init; }
+
+    public IReadOnlyList<QlhvKhoaHocSourceRow> KhoaHocSourceRows { get; init; } =
+        Array.Empty<QlhvKhoaHocSourceRow>();
+
+    public IReadOnlyList<QlhvGiaoVienSourceRow> GiaoVienRows { get; init; } =
+        Array.Empty<QlhvGiaoVienSourceRow>();
+
+    public IReadOnlyList<QlhvKhoaHocGiaoVienSourceRow> KhoaHocGiaoVienRows { get; init; } =
+        Array.Empty<QlhvKhoaHocGiaoVienSourceRow>();
 }
 
 public sealed class QlhvImportTargetSnapshot
@@ -173,6 +229,15 @@ public sealed class QlhvImportTargetSnapshot
 
     public IReadOnlyList<global::QLHV.Application.Sync.QlhvFullSyncTargetRow> HocVienRows { get; init; } =
         Array.Empty<global::QLHV.Application.Sync.QlhvFullSyncTargetRow>();
+
+    public IReadOnlyList<global::QLHV.Application.Sync.QlhvEntityFullSyncTargetRow> KhoaHocRows { get; init; } =
+        Array.Empty<global::QLHV.Application.Sync.QlhvEntityFullSyncTargetRow>();
+
+    public IReadOnlyList<global::QLHV.Application.Sync.QlhvEntityFullSyncTargetRow> GiaoVienRows { get; init; } =
+        Array.Empty<global::QLHV.Application.Sync.QlhvEntityFullSyncTargetRow>();
+
+    public IReadOnlyList<global::QLHV.Application.Sync.QlhvEntityFullSyncTargetRow> RelationRows { get; init; } =
+        Array.Empty<global::QLHV.Application.Sync.QlhvEntityFullSyncTargetRow>();
 
     public int DuplicateTargetIdentityRows { get; init; }
 

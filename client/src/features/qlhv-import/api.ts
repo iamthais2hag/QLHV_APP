@@ -1,5 +1,6 @@
 import type {
   QlhvImportDiagnostics,
+  QlhvImportEntityCounts,
   QlhvImportExecuteOutcome,
   QlhvImportExecuteRequest,
   QlhvImportExecuteResult,
@@ -251,6 +252,12 @@ function isOperationsStatus(value: unknown): value is QlhvOperationsStatus {
     && isFiniteNumber(value.targetActiveRows)
     && isNullableString(value.lastSyncTimeUtc)
     && isNullableString(value.lastError)
+    && typeof value.dryRun === 'boolean'
+    && typeof value.targetWritesEnabled === 'boolean'
+    && typeof value.currentUserRole === 'string'
+    && typeof value.writeAuthorized === 'boolean'
+    && isStringArray(value.refreshBlockers)
+    && isStringArray(value.syncBlockers)
     && typeof value.canRefresh === 'boolean'
     && typeof value.canSync === 'boolean';
 }
@@ -288,10 +295,14 @@ function isExecuteResult(value: unknown): value is QlhvImportExecuteResult {
     return false;
   }
 
+  const entityCountsAreValid = ['hocVien', 'khoaHoc', 'giaoVien']
+    .every((key) => value[key] === undefined || isImportEntityCounts(value[key]));
+
   return typeof value.executed === 'boolean'
     && typeof value.status === 'string'
     && typeof value.message === 'string'
     && isImportPlan(value.plan)
+    && entityCountsAreValid
     && hasFiniteNumbers(value, [
       'insertedHocVienRows',
       'updatedHocVienRows',
@@ -314,6 +325,11 @@ function isImportPlan(value: unknown): value is QlhvImportPlan {
     && typeof value.sourceProfileAllowedByConstraint === 'boolean'
     && isStringArray(value.blockers)
     && isStringArray(value.warnings)
+    && isImportEntityCounts(value.hocVien)
+    && isImportEntityCounts(value.khoaHoc)
+    && isImportEntityCounts(value.giaoVien)
+    && isFiniteNumber(value.duplicateSourceKeys)
+    && isFiniteNumber(value.relationConflicts)
     && hasFiniteNumbers(value, [
       'sourceHocVienRows',
       'sourceDistinctMaDkRows',
@@ -346,6 +362,11 @@ function isImportDiagnostics(value: unknown): value is QlhvImportDiagnostics {
     && typeof value.sourceProfileAllowedByConstraint === 'boolean'
     && isStringArray(value.blockers)
     && isStringArray(value.warnings)
+    && isImportEntityCounts(value.hocVien)
+    && isImportEntityCounts(value.khoaHoc)
+    && isImportEntityCounts(value.giaoVien)
+    && isFiniteNumber(value.duplicateSourceKeys)
+    && isFiniteNumber(value.relationConflicts)
     && hasFiniteNumbers(value, [
       'sourceHocVienRows',
       'sourceDistinctMaDkRows',
@@ -361,6 +382,19 @@ function isImportDiagnostics(value: unknown): value is QlhvImportDiagnostics {
       'plannedSoftDeleteHocVienRows',
       'plannedSkipHocVienRows',
       'plannedUpsertHocVienRows',
+    ]);
+}
+
+function isImportEntityCounts(value: unknown): value is QlhvImportEntityCounts {
+  return isRecord(value)
+    && hasFiniteNumbers(value, [
+      'sourceRows',
+      'insert',
+      'update',
+      'reactivate',
+      'softDelete',
+      'skip',
+      'duplicateSourceKeys',
     ]);
 }
 

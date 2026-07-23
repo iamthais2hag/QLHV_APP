@@ -38,6 +38,22 @@ public static class QlhvBackupSnapshotToken
             rows.NguoiLXHoSo.ToString(CultureInfo.InvariantCulture),
             rows.KhoaHoc.ToString(CultureInfo.InvariantCulture));
 
+    public static string CreateImportMetadataFallback(
+        string databaseName,
+        DateTime createDateUtc,
+        QlhvOperationRowCountsDto rows,
+        int giaoVienRows,
+        int khoaHocGiaoVienRows)
+        => Hash(
+            "metadata-import",
+            databaseName,
+            createDateUtc.ToUniversalTime().Ticks.ToString(CultureInfo.InvariantCulture),
+            rows.NguoiLX.ToString(CultureInfo.InvariantCulture),
+            rows.NguoiLXHoSo.ToString(CultureInfo.InvariantCulture),
+            rows.KhoaHoc.ToString(CultureInfo.InvariantCulture),
+            giaoVienRows.ToString(CultureInfo.InvariantCulture),
+            khoaHocGiaoVienRows.ToString(CultureInfo.InvariantCulture));
+
     private static string Hash(params string[] values)
     {
         var canonical = string.Join("|", values);

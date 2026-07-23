@@ -6,6 +6,8 @@ public interface IQlhvOperationsService
 {
     Task<QlhvOperationsStatusDto> GetStatusAsync(
         string sourceType,
+        string currentUserRole,
+        bool writeAuthorized,
         CancellationToken cancellationToken = default);
 
     Task<QlhvRefreshBackupResultDto> QueueRefreshBackupAsync(

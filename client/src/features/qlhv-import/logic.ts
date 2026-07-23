@@ -99,7 +99,14 @@ export function canOpenExecute(
     && isPlanSnapshotCurrent(plan.data, status)
     && plan.data.executable
     && plan.data.blockers.length === 0
+    && plan.data.duplicateSourceKeys === 0
+    && plan.data.relationConflicts === 0
     && plan.data.sourceHocVienRows > 0
+    && status.currentUserRole === 'Admin'
+    && status.writeAuthorized
+    && !status.dryRun
+    && status.targetWritesEnabled
+    && status.syncBlockers.length === 0
     && status.canSync
     && !isOperationBusy(status)
     && !busy;
@@ -143,6 +150,21 @@ export function getExecuteDisabledReason(
   if (isOperationBusy(status)) {
     return 'Nguồn này đang refresh hoặc đồng bộ. Vui lòng chờ thao tác hiện tại hoàn tất.';
   }
+  if (!status.writeAuthorized || status.currentUserRole !== 'Admin') {
+    return 'Bạn không có quyền Admin.';
+  }
+  if (status.dryRun) {
+    return 'Chế độ DryRun đang bật.';
+  }
+  if (!status.targetWritesEnabled) {
+    return 'Quyền ghi dữ liệu đang tắt.';
+  }
+  if (busy) {
+    return 'Đang xử lý yêu cầu khác cho nguồn này.';
+  }
+  if (status.syncBlockers.length > 0) {
+    return status.syncBlockers[0];
+  }
   if (!status.canSync) {
     return 'Backend hiện không cho phép đồng bộ nguồn này.';
   }
@@ -158,11 +180,14 @@ export function getExecuteDisabledReason(
   if (plan.data.sourceHocVienRows <= 0) {
     return 'Snapshot nguồn rỗng; không được phép đồng bộ hoặc xóa mềm phân vùng.';
   }
+  if (plan.data.duplicateSourceKeys > 0) {
+    return 'Nguồn có khóa định danh trùng; kế hoạch đã bị chặn.';
+  }
+  if (plan.data.relationConflicts > 0) {
+    return 'Nguồn có xung đột quan hệ giáo viên – khóa học; kế hoạch đã bị chặn.';
+  }
   if (plan.data.blockers.length > 0 || !plan.data.executable) {
     return 'Kế hoạch có điểm chặn và không thể thực hiện.';
-  }
-  if (busy) {
-    return 'Đang xử lý yêu cầu khác cho nguồn này.';
   }
   return null;
 }
@@ -180,6 +205,18 @@ export function getRefreshDisabledReason(
   }
   if (isOperationBusy(status) || busy) {
     return 'Nguồn này đang có thao tác vận hành.';
+  }
+  if (!status.writeAuthorized || status.currentUserRole !== 'Admin') {
+    return 'Bạn không có quyền Admin.';
+  }
+  if (status.dryRun) {
+    return 'Chế độ DryRun đang bật.';
+  }
+  if (!status.targetWritesEnabled) {
+    return 'Quyền ghi dữ liệu đang tắt.';
+  }
+  if (status.refreshBlockers.length > 0) {
+    return status.refreshBlockers[0];
   }
   if (!status.canRefresh) {
     return 'Backend hiện không cho phép làm mới BAK.';
