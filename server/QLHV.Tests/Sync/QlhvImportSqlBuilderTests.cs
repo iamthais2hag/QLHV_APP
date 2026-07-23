@@ -25,6 +25,11 @@ public sealed class QlhvImportSqlBuilderTests
         Assert.Equal("66029", query.Parameters.Get<string>("MaCSDT"));
         Assert.Equal("66029K01", query.Parameters.Get<string>("MaKhoaHoc"));
         Assert.DoesNotContain("66029K01", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("FROM dbo.GiaoVien AS gv", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("FROM dbo.KhoaHoc_GiaoVien AS relation", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("relation.IsKhoaHocGiaoVien", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("gv.NoiCT_MaDVHC", query.Sql, StringComparison.Ordinal);
+        Assert.Contains("gv.MaFileTiepNhanXML", query.Sql, StringComparison.Ordinal);
         AssertReadOnly(query.Sql);
     }
 
@@ -41,7 +46,10 @@ public sealed class QlhvImportSqlBuilderTests
 
         Assert.Contains("LTRIM(RTRIM(nlx.MaDK)) LIKE @MaDkPrefix", query.Sql, StringComparison.Ordinal);
         Assert.Contains("LTRIM(RTRIM(kh.MaKH)) LIKE @MaDkPrefix", query.Sql, StringComparison.Ordinal);
-        Assert.DoesNotContain("kh.MaCSDT", query.Sql, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "LTRIM(RTRIM(kh.MaCSDT)) = @MaCSDT",
+            query.Sql,
+            StringComparison.Ordinal);
         Assert.Equal("66030%", query.Parameters.Get<string>("MaDkPrefix"));
         AssertReadOnly(query.Sql);
     }

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using QLHV.Application.Auth;
 using QLHV.Application.Sync.Configuration;
 using QLHV.Application.Sync.Dtos;
 
@@ -28,6 +29,8 @@ public sealed class QlhvOperationsService : IQlhvOperationsService
 
     public async Task<QlhvOperationsStatusDto> GetStatusAsync(
         string sourceType,
+        string currentUserRole,
+        bool writeAuthorized,
         CancellationToken cancellationToken = default)
     {
         var source = QlhvOperationSourceCatalog.GetRequired(sourceType);
@@ -86,9 +89,26 @@ public sealed class QlhvOperationsService : IQlhvOperationsService
 
         var latest = Latest(latestRefresh, latestSync);
         var hasActive = active is not null;
-        var writesEnabled = !_syncOptions.DryRun && _executionOptions.EnableTargetWrites;
         var token = data.BackupSnapshotToken ?? latestRefresh?.SnapshotToken;
         var latestRefreshFailed = latestRefresh is { Status: QlhvOperationTypes.Failed };
+        var refreshBlockers = BuildRefreshBlockers(
+            currentUserRole,
+            writeAuthorized,
+            statusError,
+            hasActive);
+        var syncBlockers = new List<string>(refreshBlockers);
+        if (latestRefreshFailed)
+        {
+            syncBlockers.Add("Lần làm mới BAK gần nhất thất bại; hãy làm mới BAK lại.");
+        }
+        if (data.BackupRows.NguoiLX <= 0)
+        {
+            syncBlockers.Add("Snapshot BAK không có học viên; đồng bộ đã bị khóa.");
+        }
+        if (string.IsNullOrWhiteSpace(data.BackupSnapshotToken))
+        {
+            syncBlockers.Add("Snapshot BAK chưa có token hợp lệ.");
+        }
 
         return new QlhvOperationsStatusDto
         {
@@ -112,13 +132,14 @@ public sealed class QlhvOperationsService : IQlhvOperationsService
             LastError = statusError ?? (latest is { Status: QlhvOperationTypes.Failed }
                 ? latest.ErrorMessage
                 : null),
-            CanRefresh = statusError is null && !hasActive && writesEnabled,
-            CanSync = statusError is null &&
-                      !hasActive &&
-                      !latestRefreshFailed &&
-                      writesEnabled &&
-                      data.BackupRows.NguoiLX > 0 &&
-                      !string.IsNullOrWhiteSpace(data.BackupSnapshotToken),
+            DryRun = _syncOptions.DryRun,
+            TargetWritesEnabled = _executionOptions.EnableTargetWrites,
+            CurrentUserRole = currentUserRole,
+            WriteAuthorized = writeAuthorized,
+            RefreshBlockers = refreshBlockers,
+            SyncBlockers = syncBlockers,
+            CanRefresh = refreshBlockers.Count == 0,
+            CanSync = syncBlockers.Count == 0,
         };
     }
 
@@ -275,4 +296,37 @@ public sealed class QlhvOperationsService : IQlhvOperationsService
             QlhvOperationTypes.Failed => "failed",
             _ => "idle",
         };
+
+    private List<string> BuildRefreshBlockers(
+        string currentUserRole,
+        bool writeAuthorized,
+        string? statusError,
+        bool hasActive)
+    {
+        var blockers = new List<string>();
+        if (!writeAuthorized)
+        {
+            blockers.Add(string.Equals(currentUserRole, AppRoles.Viewer, StringComparison.Ordinal)
+                ? "Bạn không có quyền Admin."
+                : "Phiên hiện tại không có quyền ghi dữ liệu.");
+        }
+        if (_syncOptions.DryRun)
+        {
+            blockers.Add("Chế độ DryRun đang bật.");
+        }
+        if (!_executionOptions.EnableTargetWrites)
+        {
+            blockers.Add("Quyền ghi dữ liệu đang tắt.");
+        }
+        if (statusError is not null)
+        {
+            blockers.Add("Không đọc được đầy đủ trạng thái vận hành hiện tại.");
+        }
+        if (hasActive)
+        {
+            blockers.Add("Nguồn đang có thao tác khác.");
+        }
+
+        return blockers;
+    }
 }

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace QLHV.Tests.Hosting;
@@ -172,11 +173,13 @@ public sealed class LanHostingScriptTests
     }
 
     [Fact]
-    public void Installer_preserves_existing_config_and_restricts_its_acl()
+    public void Installer_preserves_existing_local_values_except_operational_flags_and_restricts_acl()
     {
         var installer = Read("Install-QLHV-App.ps1");
 
-        Assert.Contains("existing valid local production file is never rewritten", installer, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Set-QlhvProductionWriteFlags", installer, StringComparison.Ordinal);
+        Assert.Contains("operational write flags were normalized", installer, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[IO.File]::Replace", installer, StringComparison.Ordinal);
         Assert.Contains("SetAccessRuleProtection", installer, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("S-1-5-18", installer, StringComparison.Ordinal);
         Assert.Contains("S-1-5-32-544", installer, StringComparison.Ordinal);
@@ -326,19 +329,69 @@ public sealed class LanHostingScriptTests
     }
 
     [Fact]
-    public void Updater_never_modifies_local_config_and_uses_ready_rollback()
+    public void Updater_normalizes_write_flags_then_protects_the_result_during_ready_rollback()
     {
         var update = Read("Update-QLHV-App.ps1");
 
         Assert.Contains("appsettings.Production.Local.json", update, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Get-FileHash", update, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Set-QlhvProductionWriteFlags", update, StringComparison.Ordinal);
+        Assert.Contains("[IO.File]::Replace", update, StringComparison.Ordinal);
         Assert.Contains("Assert-ConfigurationUnchanged", update, StringComparison.Ordinal);
         Assert.Contains("/health/live", update, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("/health/ready", update, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("No SQL patch was run", update, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotMatch(
-            new Regex(@"(Set-Content|Add-Content|Move-Item|Copy-Item|Remove-Item)[^\r\n]*\$ProductionConfig", RegexOptions.IgnoreCase),
-            update);
+        var normalize = update.LastIndexOf("[void](Set-QlhvProductionWriteFlags -Path $ProductionConfig)", StringComparison.Ordinal);
+        var protectedHash = update.IndexOf("$productionConfigHash =", normalize, StringComparison.Ordinal);
+        Assert.True(normalize >= 0 && protectedHash > normalize,
+            "Updater must take its protected hash after the intentional flag normalization.");
+    }
+
+    [Theory]
+    [InlineData("Install-QLHV-App.ps1")]
+    [InlineData("Update-QLHV-App.ps1")]
+    public void Production_flag_normalizer_changes_only_two_flags_and_does_not_emit_config_values(string scriptName)
+    {
+        var temporaryDirectory = Path.Combine(Path.GetTempPath(), "qlhv-flags-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temporaryDirectory);
+        var configurationPath = Path.Combine(temporaryDirectory, "appsettings.Production.Local.json");
+        const string sentinel = "do-not-log-or-change-this-value";
+        try
+        {
+            File.WriteAllText(configurationPath, $$"""
+                {
+                  "ConnectionStrings": { "QLHV_APP": "{{sentinel}}" },
+                  "Sync": { "DryRun": true, "BatchSize": 321 },
+                  "SyncExecution": { "EnableTargetWrites": false, "RequireManualConfirmation": true },
+                  "CustomLocal": { "Sentinel": "{{sentinel}}", "Enabled": true }
+                }
+                """);
+
+            var firstOutput = InvokeProductionFlagNormalizer(scriptName, configurationPath);
+            var hashAfterFirstRun = Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(configurationPath)));
+            var secondOutput = InvokeProductionFlagNormalizer(scriptName, configurationPath);
+            var hashAfterSecondRun = Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(configurationPath)));
+
+            Assert.DoesNotContain(sentinel, firstOutput, StringComparison.Ordinal);
+            Assert.DoesNotContain(sentinel, secondOutput, StringComparison.Ordinal);
+            Assert.Equal(hashAfterFirstRun, hashAfterSecondRun);
+
+            using var document = JsonDocument.Parse(File.ReadAllText(configurationPath));
+            var root = document.RootElement;
+            Assert.False(root.GetProperty("Sync").GetProperty("DryRun").GetBoolean());
+            Assert.Equal(321, root.GetProperty("Sync").GetProperty("BatchSize").GetInt32());
+            Assert.True(root.GetProperty("SyncExecution").GetProperty("EnableTargetWrites").GetBoolean());
+            Assert.True(root.GetProperty("SyncExecution").GetProperty("RequireManualConfirmation").GetBoolean());
+            Assert.Equal(sentinel, root.GetProperty("ConnectionStrings").GetProperty("QLHV_APP").GetString());
+            Assert.Equal(sentinel, root.GetProperty("CustomLocal").GetProperty("Sentinel").GetString());
+            Assert.True(root.GetProperty("CustomLocal").GetProperty("Enabled").GetBoolean());
+        }
+        finally
+        {
+            Directory.Delete(temporaryDirectory, recursive: true);
+        }
     }
 
     [Fact]
@@ -526,6 +579,33 @@ public sealed class LanHostingScriptTests
             if ($null -eq $function) { throw 'Sanitizer function was not found.' }
             Invoke-Expression $function.Extent.Text
             [Console]::Out.Write((Protect-DeploymentLogMessage -Message '{{escapedMessage}}'))
+            """;
+        return InvokePowerShell(command);
+    }
+
+    private static string InvokeProductionFlagNormalizer(string scriptName, string configurationPath)
+    {
+        var scriptPath = Path.Combine(FindScriptsDirectory(), scriptName)
+            .Replace("'", "''", StringComparison.Ordinal);
+        var escapedConfigurationPath = configurationPath.Replace("'", "''", StringComparison.Ordinal);
+        var command = $$"""
+            $ErrorActionPreference = 'Stop'
+            $tokens = $null
+            $errors = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile('{{scriptPath}}', [ref]$tokens, [ref]$errors)
+            if ($errors.Count -gt 0) { throw 'Cannot parse deployment script.' }
+            $function = $ast.Find({
+                param($node)
+                $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                    $node.Name -eq 'Set-QlhvProductionWriteFlags'
+            }, $true)
+            if ($null -eq $function) { throw 'Production flag normalizer was not found.' }
+            Invoke-Expression $function.Extent.Text
+            $aclBefore = (Get-Acl -LiteralPath '{{escapedConfigurationPath}}').Sddl
+            [void](Set-QlhvProductionWriteFlags -Path '{{escapedConfigurationPath}}')
+            $aclAfter = (Get-Acl -LiteralPath '{{escapedConfigurationPath}}').Sddl
+            if ($aclAfter -cne $aclBefore) { throw 'Production configuration ACL changed.' }
+            [Console]::Out.Write('normalized')
             """;
         return InvokePowerShell(command);
     }

@@ -256,8 +256,22 @@ WHERE SourceProfileCode = @SourceProfileCode
         string sourceProfileCode,
         IReadOnlyList<QlhvImportHocVienWriteModel> rows,
         CancellationToken cancellationToken = default)
+        => await FullSyncAsync(
+            sourceProfileCode,
+            new QlhvImportFullSyncPayload(
+                Array.Empty<QlhvImportKhoaHocWriteModel>(),
+                Array.Empty<QlhvImportGiaoVienWriteModel>(),
+                Array.Empty<QlhvImportKhoaHocGiaoVienWriteModel>(),
+                rows),
+            cancellationToken);
+
+    public async Task<QlhvImportFullSyncWriteResult> FullSyncAsync(
+        string sourceProfileCode,
+        QlhvImportFullSyncPayload payload,
+        CancellationToken cancellationToken = default)
     {
         EnsureWritesEnabled();
+        ArgumentNullException.ThrowIfNull(payload);
 
         var normalizedProfile = NormalizeRequired(sourceProfileCode, nameof(sourceProfileCode))
             .ToUpperInvariant();
@@ -268,23 +282,42 @@ WHERE SourceProfileCode = @SourceProfileCode
                 "Full sync chi duoc ghi vao partition CSDT_OTO hoac CSDT_MOTO.");
         }
 
-        if (rows.Count == 0)
+        if (payload.HocVienRows.Count == 0)
         {
             throw new InvalidOperationException(
                 "Nguon hoc vien rong; repository tu choi full sync de bao ve partition.");
         }
 
-        ValidateFullSyncSourceIdentity(normalizedProfile, rows);
+        ValidateFullSyncSourceIdentity(normalizedProfile, payload.HocVienRows);
+        ValidateEntitySourceIdentity(
+            normalizedProfile,
+            payload.KhoaHocRows,
+            row => row.SourceProfileCode,
+            row => row.SourceMaKhoaHoc,
+            "KhoaHoc");
+        ValidateEntitySourceIdentity(
+            normalizedProfile,
+            payload.GiaoVienRows,
+            row => row.SourceProfileCode,
+            row => row.SourceMaGV,
+            "GiaoVien");
+        ValidateEntitySourceIdentity(
+            normalizedProfile,
+            payload.RelationRows,
+            row => row.SourceProfileCode,
+            row => row.SourceMaLichLV.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            "KhoaHoc_GiaoVien");
+        ValidateCourseTeacherRequiredValues(payload);
         var connectionString = await ResolveUsableTargetAsync(cancellationToken);
         return await SyncRetryPolicyFactory.CreateDefault(_options.MaxRetryAttempts).ExecuteAsync(
-            ct => FullSyncCoreAsync(connectionString, normalizedProfile, rows, ct),
+            ct => FullSyncCoreAsync(connectionString, normalizedProfile, payload, ct),
             cancellationToken);
     }
 
     private async Task<QlhvImportFullSyncWriteResult> FullSyncCoreAsync(
         string connectionString,
         string sourceProfileCode,
-        IReadOnlyList<QlhvImportHocVienWriteModel> rows,
+        QlhvImportFullSyncPayload payload,
         CancellationToken cancellationToken)
     {
         await using var connection = new SqlConnection(connectionString);
@@ -296,56 +329,109 @@ WHERE SourceProfileCode = @SourceProfileCode
         try
         {
             await connection.ExecuteAsync(new CommandDefinition(
-                QlhvFullSnapshotSyncSql.CreateStagingTable,
+                QlhvCourseTeacherFullSnapshotSyncSql.CreateStagingTables,
                 transaction: transaction,
                 commandTimeout: _options.TimeoutSeconds,
                 cancellationToken: cancellationToken));
 
-            using (var bulkCopy = new SqlBulkCopy(connection, SqlBulkCopyOptions.CheckConstraints, transaction)
-            {
-                DestinationTableName = QlhvFullSnapshotSyncSql.StagingTableName,
-                BatchSize = Math.Max(1, _options.BatchSize),
-                BulkCopyTimeout = _options.TimeoutSeconds,
-            })
-            {
-                using var table = BuildFullSyncStagingTable(rows);
-                foreach (DataColumn column in table.Columns)
-                {
-                    bulkCopy.ColumnMappings.Add(column.ColumnName, column.ColumnName);
-                }
-
-                await bulkCopy.WriteToServerAsync(table, cancellationToken);
-            }
+            await BulkCopyAsync(
+                connection,
+                transaction,
+                QlhvCourseTeacherFullSnapshotSyncSql.KhoaHocStagingTableName,
+                BuildKhoaHocStagingTable(payload.KhoaHocRows),
+                cancellationToken);
+            await BulkCopyAsync(
+                connection,
+                transaction,
+                QlhvCourseTeacherFullSnapshotSyncSql.GiaoVienStagingTableName,
+                BuildGiaoVienStagingTable(payload.GiaoVienRows),
+                cancellationToken);
+            await BulkCopyAsync(
+                connection,
+                transaction,
+                QlhvCourseTeacherFullSnapshotSyncSql.RelationStagingTableName,
+                BuildRelationStagingTable(payload.RelationRows),
+                cancellationToken);
+            await BulkCopyAsync(
+                connection,
+                transaction,
+                QlhvFullSnapshotSyncSql.StagingTableName,
+                BuildFullSyncStagingTable(payload.HocVienRows),
+                cancellationToken);
 
             var guard = await connection.QuerySingleAsync<FullSyncAtomicGuardRow>(new CommandDefinition(
-                QlhvFullSnapshotSyncSql.AtomicGuard,
+                QlhvCourseTeacherFullSnapshotSyncSql.AtomicGuard,
                 new { SourceProfileCode = sourceProfileCode },
                 transaction: transaction,
                 commandTimeout: _options.TimeoutSeconds,
                 cancellationToken: cancellationToken));
-            if (guard.StagedRows != rows.Count ||
+            if (guard.StagedKhoaHocRows != payload.KhoaHocRows.Count ||
+                guard.StagedGiaoVienRows != payload.GiaoVienRows.Count ||
+                guard.StagedRelationRows != payload.RelationRows.Count ||
+                guard.StagedHocVienRows != payload.HocVienRows.Count ||
                 guard.InvalidSourceProfileRows > 0 ||
                 guard.InvalidTargetIdentityRows > 0 ||
-                guard.DuplicateTargetIdentityRows > 0)
+                guard.DuplicateTargetIdentityRows > 0 ||
+                guard.RelationConflicts > 0 ||
+                guard.EmptyPartitionRiskGroups > 0 ||
+                guard.NaturalKeyConflicts > 0)
             {
                 await transaction.RollbackAsync(cancellationToken);
                 return new QlhvImportFullSyncWriteResult(
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    guard.InvalidSourceProfileRows + (guard.StagedRows == rows.Count ? 0 : 1),
+                    QlhvEntityWriteCounts.Empty,
+                    QlhvEntityWriteCounts.Empty,
+                    QlhvEntityWriteCounts.Empty,
+                    QlhvEntityWriteCounts.Empty,
+                    guard.InvalidSourceProfileRows + (guard.HasExpectedStageCounts(payload) ? 0 : 1),
                     guard.InvalidTargetIdentityRows,
-                    guard.DuplicateTargetIdentityRows);
+                    guard.DuplicateTargetIdentityRows,
+                    guard.RelationConflicts,
+                    guard.EmptyPartitionRiskGroups,
+                    guard.NaturalKeyConflicts);
             }
 
-            var mergeActions = (await connection.QueryAsync<string>(new CommandDefinition(
+            var khoaHocMergeActions = (await connection.QueryAsync<string>(new CommandDefinition(
+                QlhvCourseTeacherFullSnapshotSyncSql.MergeKhoaHoc,
+                transaction: transaction,
+                commandTimeout: _options.TimeoutSeconds,
+                cancellationToken: cancellationToken))).ToList();
+            var khoaHocSoftDeleteActions = (await connection.QueryAsync<string>(new CommandDefinition(
+                QlhvCourseTeacherFullSnapshotSyncSql.SoftDeleteKhoaHoc,
+                new { SourceProfileCode = sourceProfileCode },
+                transaction: transaction,
+                commandTimeout: _options.TimeoutSeconds,
+                cancellationToken: cancellationToken))).ToList();
+
+            var giaoVienMergeActions = (await connection.QueryAsync<string>(new CommandDefinition(
+                QlhvCourseTeacherFullSnapshotSyncSql.MergeGiaoVien,
+                transaction: transaction,
+                commandTimeout: _options.TimeoutSeconds,
+                cancellationToken: cancellationToken))).ToList();
+            var giaoVienSoftDeleteActions = (await connection.QueryAsync<string>(new CommandDefinition(
+                QlhvCourseTeacherFullSnapshotSyncSql.SoftDeleteGiaoVien,
+                new { SourceProfileCode = sourceProfileCode },
+                transaction: transaction,
+                commandTimeout: _options.TimeoutSeconds,
+                cancellationToken: cancellationToken))).ToList();
+
+            var relationMergeActions = (await connection.QueryAsync<string>(new CommandDefinition(
+                QlhvCourseTeacherFullSnapshotSyncSql.MergeRelation,
+                transaction: transaction,
+                commandTimeout: _options.TimeoutSeconds,
+                cancellationToken: cancellationToken))).ToList();
+            var relationSoftDeleteActions = (await connection.QueryAsync<string>(new CommandDefinition(
+                QlhvCourseTeacherFullSnapshotSyncSql.SoftDeleteRelation,
+                new { SourceProfileCode = sourceProfileCode },
+                transaction: transaction,
+                commandTimeout: _options.TimeoutSeconds,
+                cancellationToken: cancellationToken))).ToList();
+
+            var hocVienMergeActions = (await connection.QueryAsync<string>(new CommandDefinition(
                 QlhvFullSnapshotSyncSql.Merge,
                 transaction: transaction,
                 commandTimeout: _options.TimeoutSeconds,
                 cancellationToken: cancellationToken))).ToList();
-            var softDeleteActions = (await connection.QueryAsync<string>(new CommandDefinition(
+            var hocVienSoftDeleteActions = (await connection.QueryAsync<string>(new CommandDefinition(
                 QlhvFullSnapshotSyncSql.SoftDeleteMissing,
                 new { SourceProfileCode = sourceProfileCode },
                 transaction: transaction,
@@ -353,28 +439,20 @@ WHERE SourceProfileCode = @SourceProfileCode
                 cancellationToken: cancellationToken))).ToList();
 
             await connection.ExecuteAsync(new CommandDefinition(
-                QlhvFullSnapshotSyncSql.DropStagingTable,
+                QlhvCourseTeacherFullSnapshotSyncSql.DropStagingTables,
                 transaction: transaction,
                 commandTimeout: _options.TimeoutSeconds,
                 cancellationToken: cancellationToken));
             await transaction.CommitAsync(cancellationToken);
 
-            var inserted = mergeActions.Count(action =>
-                string.Equals(action, "INSERT", StringComparison.OrdinalIgnoreCase));
-            var reactivated = mergeActions.Count(action =>
-                string.Equals(action, "REACTIVATE", StringComparison.OrdinalIgnoreCase));
-            var updated = mergeActions.Count(action =>
-                string.Equals(action, "UPDATE", StringComparison.OrdinalIgnoreCase));
-            var softDeleted = softDeleteActions.Count(action =>
-                string.Equals(action, "SOFT_DELETE", StringComparison.OrdinalIgnoreCase));
-            var skipped = Math.Max(0, rows.Count - inserted - updated - reactivated);
-
             return new QlhvImportFullSyncWriteResult(
-                inserted,
-                updated,
-                reactivated,
-                softDeleted,
-                skipped,
+                BuildWriteCounts(payload.KhoaHocRows.Count, khoaHocMergeActions, khoaHocSoftDeleteActions),
+                BuildWriteCounts(payload.GiaoVienRows.Count, giaoVienMergeActions, giaoVienSoftDeleteActions),
+                BuildWriteCounts(payload.RelationRows.Count, relationMergeActions, relationSoftDeleteActions),
+                BuildWriteCounts(payload.HocVienRows.Count, hocVienMergeActions, hocVienSoftDeleteActions),
+                0,
+                0,
+                0,
                 0,
                 0,
                 0);
@@ -617,6 +695,148 @@ WHERE SourceProfileCode = @SourceProfileCode
         return table;
     }
 
+    private async Task BulkCopyAsync(
+        SqlConnection connection,
+        SqlTransaction transaction,
+        string destinationTableName,
+        DataTable table,
+        CancellationToken cancellationToken)
+    {
+        using (table)
+        {
+            if (table.Rows.Count == 0)
+            {
+                return;
+            }
+
+            using var bulkCopy = new SqlBulkCopy(connection, SqlBulkCopyOptions.CheckConstraints, transaction)
+            {
+                DestinationTableName = destinationTableName,
+                BatchSize = Math.Max(1, _options.BatchSize),
+                BulkCopyTimeout = _options.TimeoutSeconds,
+            };
+            foreach (DataColumn column in table.Columns)
+            {
+                bulkCopy.ColumnMappings.Add(column.ColumnName, column.ColumnName);
+            }
+
+            await bulkCopy.WriteToServerAsync(table, cancellationToken);
+        }
+    }
+
+    private static DataTable BuildKhoaHocStagingTable(
+        IReadOnlyList<QlhvImportKhoaHocWriteModel> rows)
+        => BuildEntityStagingTable(rows);
+
+    private static DataTable BuildGiaoVienStagingTable(
+        IReadOnlyList<QlhvImportGiaoVienWriteModel> rows)
+        => BuildEntityStagingTable(rows);
+
+    private static DataTable BuildRelationStagingTable(
+        IReadOnlyList<QlhvImportKhoaHocGiaoVienWriteModel> rows)
+        => BuildEntityStagingTable(rows);
+
+    private static DataTable BuildEntityStagingTable<T>(IReadOnlyList<T> rows)
+    {
+        var properties = typeof(T).GetProperties(System.Reflection.BindingFlags.Instance |
+                                                 System.Reflection.BindingFlags.Public);
+        var table = new DataTable();
+        foreach (var property in properties)
+        {
+            table.Columns.Add(
+                property.Name,
+                Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType);
+        }
+
+        foreach (var row in rows)
+        {
+            table.Rows.Add(properties
+                .Select(property => property.GetValue(row) ?? DBNull.Value)
+                .ToArray());
+        }
+
+        return table;
+    }
+
+    private static QlhvEntityWriteCounts BuildWriteCounts(
+        int sourceRows,
+        IReadOnlyCollection<string> mergeActions,
+        IReadOnlyCollection<string> softDeleteActions)
+    {
+        var inserted = mergeActions.Count(action =>
+            string.Equals(action, "INSERT", StringComparison.OrdinalIgnoreCase));
+        var updated = mergeActions.Count(action =>
+            string.Equals(action, "UPDATE", StringComparison.OrdinalIgnoreCase));
+        var reactivated = mergeActions.Count(action =>
+            string.Equals(action, "REACTIVATE", StringComparison.OrdinalIgnoreCase));
+        var softDeleted = softDeleteActions.Count(action =>
+            string.Equals(action, "SOFT_DELETE", StringComparison.OrdinalIgnoreCase));
+        return new QlhvEntityWriteCounts(
+            sourceRows,
+            inserted,
+            updated,
+            reactivated,
+            softDeleted,
+            Math.Max(0, sourceRows - inserted - updated - reactivated));
+    }
+
+    private static void ValidateEntitySourceIdentity<T>(
+        string sourceProfileCode,
+        IReadOnlyList<T> rows,
+        Func<T, string?> profileSelector,
+        Func<T, string?> keySelector,
+        string groupName)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in rows)
+        {
+            var profile = NormalizeRequired(profileSelector(row), $"{groupName}.SourceProfileCode")
+                .ToUpperInvariant();
+            if (!string.Equals(profile, sourceProfileCode, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"Snapshot {groupName} chua SourceProfileCode ngoai partition duoc yeu cau.");
+            }
+
+            var key = NormalizeRequired(keySelector(row), $"{groupName}.SourceKey");
+            if (!seen.Add(key))
+            {
+                throw new InvalidOperationException(
+                    $"Snapshot {groupName} co source key trung: {key}.");
+            }
+        }
+    }
+
+    private static void ValidateCourseTeacherRequiredValues(QlhvImportFullSyncPayload payload)
+    {
+        foreach (var row in payload.KhoaHocRows)
+        {
+            _ = NormalizeRequired(row.SourceHash, "KhoaHoc.SourceHash");
+            _ = NormalizeRequired(row.MaKhoa, "KhoaHoc.MaKhoa");
+        }
+
+        foreach (var row in payload.GiaoVienRows)
+        {
+            _ = NormalizeRequired(row.SourceHash, "GiaoVien.SourceHash");
+            _ = NormalizeRequired(row.MaGV, "GiaoVien.MaGV");
+            _ = NormalizeRequired(row.HoTen, "GiaoVien.HoTen");
+        }
+
+        foreach (var row in payload.RelationRows)
+        {
+            if (row.SourceMaLichLV <= 0)
+            {
+                throw new InvalidOperationException("KhoaHoc_GiaoVien.SourceMaLichLV phai lon hon 0.");
+            }
+
+            _ = NormalizeRequired(row.SourceMaKhoaHoc, "KhoaHoc_GiaoVien.SourceMaKhoaHoc");
+            _ = NormalizeRequired(row.SourceMaGV, "KhoaHoc_GiaoVien.SourceMaGV");
+            _ = NormalizeRequired(row.SourceHash, "KhoaHoc_GiaoVien.SourceHash");
+            _ = NormalizeRequired(row.MaKhoa, "KhoaHoc_GiaoVien.MaKhoa");
+            _ = NormalizeRequired(row.MaGV, "KhoaHoc_GiaoVien.MaGV");
+        }
+    }
+
     private static void ValidateFullSyncSourceIdentity(
         string sourceProfileCode,
         IReadOnlyList<QlhvImportHocVienWriteModel> rows)
@@ -779,9 +999,21 @@ ORDER BY requiredColumns.SortOrder;";
 
     private sealed class FullSyncAtomicGuardRow
     {
-        public int StagedRows { get; init; }
+        public int StagedKhoaHocRows { get; init; }
+        public int StagedGiaoVienRows { get; init; }
+        public int StagedRelationRows { get; init; }
+        public int StagedHocVienRows { get; init; }
         public int InvalidSourceProfileRows { get; init; }
         public int InvalidTargetIdentityRows { get; init; }
         public int DuplicateTargetIdentityRows { get; init; }
+        public int RelationConflicts { get; init; }
+        public int EmptyPartitionRiskGroups { get; init; }
+        public int NaturalKeyConflicts { get; init; }
+
+        public bool HasExpectedStageCounts(QlhvImportFullSyncPayload payload)
+            => StagedKhoaHocRows == payload.KhoaHocRows.Count &&
+               StagedGiaoVienRows == payload.GiaoVienRows.Count &&
+               StagedRelationRows == payload.RelationRows.Count &&
+               StagedHocVienRows == payload.HocVienRows.Count;
     }
 }

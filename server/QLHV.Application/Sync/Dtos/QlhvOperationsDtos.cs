@@ -49,6 +49,18 @@ public sealed class QlhvOperationsStatusDto
 
     public string? LastError { get; init; }
 
+    public bool DryRun { get; init; }
+
+    public bool TargetWritesEnabled { get; init; }
+
+    public string CurrentUserRole { get; init; } = string.Empty;
+
+    public bool WriteAuthorized { get; init; }
+
+    public IReadOnlyList<string> RefreshBlockers { get; init; } = Array.Empty<string>();
+
+    public IReadOnlyList<string> SyncBlockers { get; init; } = Array.Empty<string>();
+
     public bool CanRefresh { get; init; }
 
     public bool CanSync { get; init; }

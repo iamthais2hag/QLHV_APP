@@ -150,6 +150,110 @@ function Assert-ProductionConfiguration {
     }
 }
 
+function Set-QlhvProductionWriteFlags {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    try {
+        $configuration = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+    }
+    catch {
+        throw "Local production configuration JSON is invalid: $Path. No configuration value was logged."
+    }
+    if ($null -eq $configuration) {
+        throw "Local production configuration JSON is empty: $Path"
+    }
+
+    $syncProperty = $configuration.PSObject.Properties['Sync']
+    if ($null -eq $syncProperty) {
+        Add-Member -InputObject $configuration -MemberType NoteProperty -Name 'Sync' -Value ([pscustomobject]@{})
+        $sync = $configuration.PSObject.Properties['Sync'].Value
+    }
+    elseif ($syncProperty.Value -isnot [pscustomobject]) {
+        throw "Production configuration section Sync must be a JSON object."
+    }
+    else {
+        $sync = $syncProperty.Value
+    }
+
+    $syncExecutionProperty = $configuration.PSObject.Properties['SyncExecution']
+    if ($null -eq $syncExecutionProperty) {
+        Add-Member -InputObject $configuration -MemberType NoteProperty -Name 'SyncExecution' -Value ([pscustomobject]@{})
+        $syncExecution = $configuration.PSObject.Properties['SyncExecution'].Value
+    }
+    elseif ($syncExecutionProperty.Value -isnot [pscustomobject]) {
+        throw "Production configuration section SyncExecution must be a JSON object."
+    }
+    else {
+        $syncExecution = $syncExecutionProperty.Value
+    }
+
+    $dryRunProperty = $sync.PSObject.Properties['DryRun']
+    $enableWritesProperty = $syncExecution.PSObject.Properties['EnableTargetWrites']
+    $dryRunChanged = $null -eq $dryRunProperty -or
+        $dryRunProperty.Value -isnot [bool] -or
+        [bool]$dryRunProperty.Value
+    $enableWritesChanged = $null -eq $enableWritesProperty -or
+        $enableWritesProperty.Value -isnot [bool] -or
+        -not [bool]$enableWritesProperty.Value
+    $changed = $dryRunChanged -or $enableWritesChanged
+    if (-not $changed) {
+        return $false
+    }
+    Add-Member -InputObject $sync -MemberType NoteProperty -Name 'DryRun' -Value $false -Force
+    Add-Member -InputObject $syncExecution -MemberType NoteProperty -Name 'EnableTargetWrites' -Value $true -Force
+    if ([bool]$configuration.Sync.DryRun -or -not [bool]$configuration.SyncExecution.EnableTargetWrites) {
+        throw "Production operational write flags could not be normalized."
+    }
+
+    $directory = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($Path))
+    $temporaryPath = Join-Path $directory ('.appsettings.flags.' + [Guid]::NewGuid().ToString('N') + '.tmp')
+    $backupPath = Join-Path $directory ('.appsettings.flags.' + [Guid]::NewGuid().ToString('N') + '.bak')
+    try {
+        $json = $configuration | ConvertTo-Json -Depth 100
+        [IO.File]::WriteAllText($temporaryPath, $json, [Text.UTF8Encoding]::new($false))
+        $written = Get-Content -LiteralPath $temporaryPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ([bool]$written.Sync.DryRun -or -not [bool]$written.SyncExecution.EnableTargetWrites) {
+            throw "Production operational write flags could not be serialized."
+        }
+        # File.Replace atomically swaps the content while retaining the destination ACL.
+        [IO.File]::Replace($temporaryPath, $Path, $backupPath, $true)
+        $replaced = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ([bool]$replaced.Sync.DryRun -or -not [bool]$replaced.SyncExecution.EnableTargetWrites) {
+            throw "Production operational write flags could not be published."
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue
+    }
+    $verified = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ([bool]$verified.Sync.DryRun -or -not [bool]$verified.SyncExecution.EnableTargetWrites) {
+        throw "Production operational write flags did not remain published."
+    }
+    return $true
+}
+
+function Assert-ProductionWriteFlags {
+    $configuration = Get-Content -LiteralPath $ProductionConfig -Raw -Encoding UTF8 | ConvertFrom-Json
+    $sync = $configuration.PSObject.Properties['Sync']
+    $syncExecution = $configuration.PSObject.Properties['SyncExecution']
+    $dryRun = if ($null -eq $sync) { $null } else { $sync.Value.PSObject.Properties['DryRun'] }
+    $enableWrites = if ($null -eq $syncExecution) {
+        $null
+    }
+    else {
+        $syncExecution.Value.PSObject.Properties['EnableTargetWrites']
+    }
+    if ($null -eq $dryRun -or $dryRun.Value -isnot [bool] -or [bool]$dryRun.Value) {
+        throw "Local production configuration must set Sync:DryRun to false: $ProductionConfig"
+    }
+    if ($null -eq $enableWrites -or
+        $enableWrites.Value -isnot [bool] -or
+        -not [bool]$enableWrites.Value) {
+        throw "Local production configuration must set SyncExecution:EnableTargetWrites to true: $ProductionConfig"
+    }
+}
+
 function Assert-ConfigurationUnchanged {
     param([Parameter(Mandatory = $true)][string]$ExpectedHash)
 
@@ -295,6 +399,8 @@ Assert-Administrator
 Assert-SafePaths
 New-Item -ItemType Directory -Path $RunDirectory -Force | Out-Null
 Assert-ProductionConfiguration
+[void](Set-QlhvProductionWriteFlags -Path $ProductionConfig)
+Assert-ProductionWriteFlags
 $productionConfigHash = (Get-FileHash -LiteralPath $ProductionConfig -Algorithm SHA256).Hash
 
 $newRuntimeInstalled = $false

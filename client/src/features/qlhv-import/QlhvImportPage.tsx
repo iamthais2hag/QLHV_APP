@@ -22,6 +22,7 @@ import {
 } from './logic';
 import type {
   QlhvImportDiagnostics,
+  QlhvImportEntityCounts,
   QlhvImportExecuteResult,
   QlhvImportPlan,
   QlhvImportSnapshot,
@@ -36,7 +37,7 @@ const DATE_FORMAT = new Intl.DateTimeFormat('vi-VN', {
   timeStyle: 'medium',
 });
 const POLL_INTERVAL_MS = 2_500;
-const NO_WRITE_PERMISSION_MESSAGE = 'Bạn không có quyền thực hiện';
+const NO_WRITE_PERMISSION_MESSAGE = 'Bạn không có quyền thực hiện: bạn không có quyền Admin';
 
 type QlhvImportLastResult = QlhvImportSnapshot<QlhvImportExecuteResult> & {
   outcomeKind: 'executed' | 'blocked';
@@ -123,6 +124,7 @@ export default function QlhvImportPage() {
         }
         if (results[0].status === 'rejected') {
           patchSource(sourceKind, {
+            status: null,
             statusLoading: false,
             statusError: toSafeClientMessage(results[0].reason, 'Không thể đọc trạng thái.'),
           });
@@ -182,6 +184,7 @@ export default function QlhvImportPage() {
           });
         } else {
           patchSource(sourceKind, {
+            status: null,
             statusError: toSafeClientMessage(
               statusResult.reason,
               'Không thể cập nhật trạng thái đang chạy.',
@@ -211,6 +214,8 @@ export default function QlhvImportPage() {
 
   async function reloadStatus(sourceKind: QlhvImportSourceKind, includeHistory = false) {
     patchSource(sourceKind, {
+      // Fail closed while the current permission/configuration snapshot is unknown.
+      status: null,
       statusLoading: true,
       statusError: null,
       ...(includeHistory ? { historyLoading: true, historyError: null } : {}),
@@ -227,6 +232,7 @@ export default function QlhvImportPage() {
       });
     } else {
       patchSource(sourceKind, {
+        status: null,
         statusLoading: false,
         statusError: toSafeClientMessage(statusResult.reason, 'Không thể tải lại trạng thái.'),
       });
@@ -465,7 +471,7 @@ export default function QlhvImportPage() {
         {active.status && <OperationsStatusView status={active.status} />}
         <div className="qlhv-import-full-sync-warning" role="note">
           Full sync chỉ cập nhật đường dẫn và metadata ảnh trong database; không sao chép file <code>.jp2</code> vật lý.
-          Học viên không còn trong snapshot sẽ bị xóa mềm, chỉ trong phân vùng {activeSourceDefinition.sourceProfileCode}.
+          Khóa học, giáo viên và học viên không còn trong snapshot sẽ chỉ bị xóa mềm trong phân vùng {activeSourceDefinition.sourceProfileCode}.
         </div>
         {active.operationNotice && <SuccessBanner message={active.operationNotice} />}
         {active.operationError && <ErrorBanner message={active.operationError} />}
@@ -610,26 +616,35 @@ function SourceCard({
           {state.executing ? 'Đang đồng bộ...' : 'Đồng bộ vào QLHV_APP'}
         </button>
       </div>
+      {(refreshReason || executeReason) && (
+        <div className="qlhv-operation-card__disabled-reasons" role="status">
+          {refreshReason && <p><strong>Làm mới BAK:</strong> {refreshReason}</p>}
+          {executeReason && <p><strong>Full sync:</strong> {executeReason}</p>}
+        </div>
+      )}
     </article>
   );
 }
 
 function DiagnosticsView({ diagnostics }: { diagnostics: QlhvImportDiagnostics }) {
   const metrics: MetricItem[] = [
-    ['Học viên nguồn', diagnostics.sourceHocVienRows, diagnostics.sourceHocVienRows > 0 ? 'ok' : 'blocked'],
-    ['MaDK phân biệt', diagnostics.sourceDistinctMaDkRows],
-    ['MaDK trùng', diagnostics.duplicateSourceMaDkRows, diagnostics.duplicateSourceMaDkRows > 0 ? 'blocked' : 'ok'],
     ['QLHV hiện có', diagnostics.currentAppHocVienRows],
     ['Khớp định danh', diagnostics.targetExactIdentityMatches],
     ['Profile khác cùng MaDK', diagnostics.targetMaDkConflictsOtherProfiles, diagnostics.targetMaDkConflictsOtherProfiles > 0 ? 'warning' : 'ok'],
-    ['Sẽ khôi phục', diagnostics.plannedReactivateHocVienRows],
-    ['Sẽ xóa mềm', diagnostics.plannedSoftDeleteHocVienRows, diagnostics.plannedSoftDeleteHocVienRows > 0 ? 'warning' : 'ok'],
+    ['Tổng khóa nguồn trùng', diagnostics.duplicateSourceKeys, diagnostics.duplicateSourceKeys > 0 ? 'blocked' : 'ok'],
+    ['Xung đột quan hệ', diagnostics.relationConflicts, diagnostics.relationConflicts > 0 ? 'blocked' : 'ok'],
     ['Có thể thực hiện', diagnostics.executable ? 'Có' : 'Không', diagnostics.executable ? 'ok' : 'blocked'],
   ];
   return (
     <>
       <ReadOnlySummary sourceDatabaseName={diagnostics.sourceDatabaseName} profile={diagnostics.sourceProfileCode} maCSDT={diagnostics.maCSDT} />
       <MetricGrid items={metrics} />
+      <EntityCountsGrid
+        hocVien={diagnostics.hocVien}
+        khoaHoc={diagnostics.khoaHoc}
+        giaoVien={diagnostics.giaoVien}
+        mode="diagnostics"
+      />
       <IssueList title="Điểm chặn chẩn đoán" items={diagnostics.blockers} variant="blocker" />
       <IssueList title="Cảnh báo chẩn đoán" items={diagnostics.warnings} variant="warning" />
     </>
@@ -638,13 +653,8 @@ function DiagnosticsView({ diagnostics }: { diagnostics: QlhvImportDiagnostics }
 
 function PlanView({ plan, snapshotCurrent }: { plan: QlhvImportPlan; snapshotCurrent: boolean }) {
   const metrics: MetricItem[] = [
-    ['Học viên nguồn', plan.sourceHocVienRows, plan.sourceHocVienRows > 0 ? 'ok' : 'blocked'],
-    ['Khóa học nguồn', plan.sourceKhoaHocRows],
-    ['Thêm', plan.plannedInsertHocVienRows],
-    ['Cập nhật', plan.plannedUpdateHocVienRows],
-    ['Khôi phục', plan.plannedReactivateHocVienRows],
-    ['Xóa mềm', plan.plannedSoftDeleteHocVienRows, plan.plannedSoftDeleteHocVienRows > 0 ? 'warning' : 'ok'],
-    ['Bỏ qua', plan.plannedSkipHocVienRows],
+    ['Tổng khóa nguồn trùng', plan.duplicateSourceKeys, plan.duplicateSourceKeys > 0 ? 'blocked' : 'ok'],
+    ['Xung đột quan hệ', plan.relationConflicts, plan.relationConflicts > 0 ? 'blocked' : 'ok'],
     ['Token hiện hành', snapshotCurrent ? 'Có' : 'Không', snapshotCurrent ? 'ok' : 'blocked'],
     ['Có thể thực hiện', plan.executable ? 'Có' : 'Không', plan.executable ? 'ok' : 'blocked'],
   ];
@@ -657,15 +667,82 @@ function PlanView({ plan, snapshotCurrent }: { plan: QlhvImportPlan; snapshotCur
         <strong>{snapshotCurrent ? 'Hiện hành' : 'Đã stale — phải lập lại plan'}</strong>
       </div>
       <MetricGrid items={metrics} />
+      <EntityCountsGrid
+        hocVien={plan.hocVien}
+        khoaHoc={plan.khoaHoc}
+        giaoVien={plan.giaoVien}
+      />
       <IssueList title="Điểm chặn kế hoạch" items={plan.blockers} variant="blocker" />
       <IssueList title="Cảnh báo kế hoạch" items={plan.warnings} variant="warning" />
     </>
   );
 }
 
+function EntityCountsGrid({
+  hocVien,
+  khoaHoc,
+  giaoVien,
+  mode = 'plan',
+}: {
+  hocVien: QlhvImportEntityCounts | null;
+  khoaHoc: QlhvImportEntityCounts | null;
+  giaoVien: QlhvImportEntityCounts | null;
+  mode?: 'diagnostics' | 'plan' | 'result';
+}) {
+  return (
+    <div className="qlhv-import-entity-groups">
+      <EntityCountsSection title="Học viên" counts={hocVien} mode={mode} />
+      <EntityCountsSection title="Khóa học" counts={khoaHoc} mode={mode} />
+      <EntityCountsSection title="Giáo viên" counts={giaoVien} mode={mode} />
+    </div>
+  );
+}
+
+function EntityCountsSection({
+  title,
+  counts,
+  mode,
+}: {
+  title: string;
+  counts: QlhvImportEntityCounts | null;
+  mode: 'diagnostics' | 'plan' | 'result';
+}) {
+  const resultMode = mode === 'result';
+  const contextLabel = mode === 'diagnostics' ? 'Chẩn đoán' : mode === 'result' ? 'Kết quả' : 'Kế hoạch';
+  return (
+    <section className="qlhv-import-entity-group" aria-label={`${contextLabel} ${title}`}>
+      <h3>{title}</h3>
+      {!counts ? (
+        <div className="qlhv-import-entity-group__unavailable">
+          Backend chưa trả số liệu kết quả chi tiết cho nhóm này.
+        </div>
+      ) : (
+        <MetricGrid items={[
+          ['Nguồn', counts.sourceRows, counts.sourceRows > 0 ? 'ok' : 'default'],
+          [resultMode ? 'Đã thêm' : 'Thêm', counts.insert],
+          [resultMode ? 'Đã cập nhật' : 'Cập nhật', counts.update],
+          [resultMode ? 'Đã khôi phục' : 'Khôi phục', counts.reactivate],
+          [resultMode ? 'Đã xóa mềm' : 'Xóa mềm', counts.softDelete, counts.softDelete > 0 ? 'warning' : 'default'],
+          [resultMode ? 'Đã bỏ qua' : 'Bỏ qua', counts.skip],
+          ['Khóa nguồn trùng', counts.duplicateSourceKeys, counts.duplicateSourceKeys > 0 ? 'blocked' : 'ok'],
+        ]} />
+      )}
+    </section>
+  );
+}
+
 function ResultView({ snapshot }: { snapshot: QlhvImportLastResult }) {
   const result = snapshot.data;
   const successful = snapshot.outcomeKind === 'executed' && result.executed;
+  const hocVien = result.hocVien ?? {
+    sourceRows: result.plan.hocVien.sourceRows,
+    insert: result.insertedHocVienRows,
+    update: result.updatedHocVienRows,
+    reactivate: result.reactivatedHocVienRows,
+    softDelete: result.softDeletedHocVienRows,
+    skip: result.skippedHocVienRows,
+    duplicateSourceKeys: result.plan.hocVien.duplicateSourceKeys,
+  };
   return (
     <div className={`qlhv-import-result qlhv-import-result--${successful ? 'success' : 'blocked'}`}>
       <div className="qlhv-import-result__heading">
@@ -675,12 +752,14 @@ function ResultView({ snapshot }: { snapshot: QlhvImportLastResult }) {
       <p>{result.message}</p>
       <div className="qlhv-import-result-grid">
         <SummaryRow label="Database snapshot" value={result.plan.sourceDatabaseName} />
-        <SummaryRow label="Đã thêm" value={formatNumber(result.insertedHocVienRows)} />
-        <SummaryRow label="Đã cập nhật" value={formatNumber(result.updatedHocVienRows)} />
-        <SummaryRow label="Đã khôi phục" value={formatNumber(result.reactivatedHocVienRows)} />
-        <SummaryRow label="Đã xóa mềm" value={formatNumber(result.softDeletedHocVienRows)} />
-        <SummaryRow label="Đã bỏ qua" value={formatNumber(result.skippedHocVienRows)} />
+        <SummaryRow label="Snapshot token" value={shortToken(result.plan.backupSnapshotToken)} />
       </div>
+      <EntityCountsGrid
+        hocVien={hocVien}
+        khoaHoc={result.khoaHoc ?? null}
+        giaoVien={result.giaoVien ?? null}
+        mode="result"
+      />
       {!successful && <IssueList title="Điểm chặn từ backend" items={result.plan.blockers} variant="blocker" />}
     </div>
   );
@@ -747,6 +826,10 @@ function OperationsStatusView({ status }: { status: QlhvOperationsStatus }) {
     ['BAK · NguoiLX_HoSo', status.backupRows.nguoiLXHoSo],
     ['BAK · KhoaHoc', status.backupRows.khoaHoc],
     ['QLHV_APP active', status.targetActiveRows],
+    ['Vai trò hiện tại', status.currentUserRole || 'Chưa xác định', status.currentUserRole === 'Admin' ? 'ok' : 'blocked'],
+    ['Quyền Admin ghi', status.writeAuthorized ? 'Có' : 'Không', status.writeAuthorized ? 'ok' : 'blocked'],
+    ['DryRun', status.dryRun ? 'Đang bật' : 'Đã tắt', status.dryRun ? 'blocked' : 'ok'],
+    ['Quyền ghi dữ liệu', status.targetWritesEnabled ? 'Đang bật' : 'Đang tắt', status.targetWritesEnabled ? 'ok' : 'blocked'],
     ['Có thể refresh', status.canRefresh ? 'Có' : 'Không', status.canRefresh ? 'ok' : 'blocked'],
     ['Có thể sync', status.canSync ? 'Có' : 'Không', status.canSync ? 'ok' : 'blocked'],
   ];
@@ -758,6 +841,8 @@ function OperationsStatusView({ status }: { status: QlhvOperationsStatus }) {
         <span>Token: {shortToken(status.backupSnapshotToken ?? '')}</span>
       </div>
       <MetricGrid items={metrics} />
+      <IssueList title="Lý do khóa làm mới BAK" items={status.refreshBlockers} variant="blocker" />
+      <IssueList title="Lý do khóa full sync" items={status.syncBlockers} variant="blocker" />
     </div>
   );
 }

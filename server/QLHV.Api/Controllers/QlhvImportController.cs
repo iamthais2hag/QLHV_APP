@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 using QLHV.Application.Auth;
 using QLHV.Application.Sync;
 using QLHV.Application.Sync.Dtos;
@@ -74,7 +75,14 @@ public sealed class QlhvImportController : ControllerBase
     {
         try
         {
-            return Ok(await _operationsService.GetStatusAsync(sourceType, cancellationToken));
+            var currentUserRole = AppRoles.SelectPrimary(
+                User.FindAll(ClaimTypes.Role).Select(claim => claim.Value)) ?? string.Empty;
+            var writeAuthorized = User.IsInRole(AppRoles.Admin);
+            return Ok(await _operationsService.GetStatusAsync(
+                sourceType,
+                currentUserRole,
+                writeAuthorized,
+                cancellationToken));
         }
         catch (ArgumentException ex)
         {

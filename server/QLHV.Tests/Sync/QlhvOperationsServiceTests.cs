@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using QLHV.Application.Auth;
 using QLHV.Application.Sync;
 using QLHV.Application.Sync.Configuration;
 using QLHV.Application.Sync.Dtos;
@@ -120,22 +121,75 @@ public sealed class QlhvOperationsServiceTests
             enableWrites: true,
             operations: operations);
 
-        var healthy = await service.GetStatusAsync("OTO");
+        var healthy = await service.GetStatusAsync("OTO", AppRoles.Admin, writeAuthorized: true);
         Assert.True(healthy.CanRefresh);
         Assert.True(healthy.CanSync);
+        Assert.False(healthy.DryRun);
+        Assert.True(healthy.TargetWritesEnabled);
+        Assert.True(healthy.WriteAuthorized);
+        Assert.Equal(AppRoles.Admin, healthy.CurrentUserRole);
+        Assert.Empty(healthy.RefreshBlockers);
+        Assert.Empty(healthy.SyncBlockers);
 
         history.LatestRefresh = CompletedHistory(
             QlhvOperationTypes.RefreshBackup,
             QlhvOperationTypes.Failed);
-        var failedRefresh = await service.GetStatusAsync("OTO");
+        var failedRefresh = await service.GetStatusAsync("OTO", AppRoles.Admin, writeAuthorized: true);
         Assert.True(failedRefresh.CanRefresh);
         Assert.False(failedRefresh.CanSync);
+        Assert.Contains(failedRefresh.SyncBlockers, blocker => blocker.Contains("thất bại", StringComparison.Ordinal));
 
         history.Active = ActiveHistory(QlhvOperationTypes.FullSync);
-        var busy = await service.GetStatusAsync("OTO");
+        var busy = await service.GetStatusAsync("OTO", AppRoles.Admin, writeAuthorized: true);
         Assert.False(busy.CanRefresh);
         Assert.False(busy.CanSync);
         Assert.Equal("syncing", busy.State);
+        Assert.Contains("Nguồn đang có thao tác khác.", busy.RefreshBlockers);
+    }
+
+    [Theory]
+    [InlineData(true, true, "Chế độ DryRun đang bật.")]
+    [InlineData(false, false, "Quyền ghi dữ liệu đang tắt.")]
+    public async Task Status_reports_the_exact_safety_configuration_blocker(
+        bool dryRun,
+        bool enableWrites,
+        string expectedBlocker)
+    {
+        var service = CreateService(
+            new FakeHistoryRepository(),
+            new FakeQueue(),
+            dryRun,
+            enableWrites,
+            HealthyOperations());
+
+        var status = await service.GetStatusAsync("OTO", AppRoles.Admin, writeAuthorized: true);
+
+        Assert.Equal(dryRun, status.DryRun);
+        Assert.Equal(enableWrites, status.TargetWritesEnabled);
+        Assert.False(status.CanRefresh);
+        Assert.False(status.CanSync);
+        Assert.Contains(expectedBlocker, status.RefreshBlockers);
+        Assert.Contains(expectedBlocker, status.SyncBlockers);
+    }
+
+    [Fact]
+    public async Task Viewer_status_never_grants_refresh_or_sync_when_runtime_flags_are_enabled()
+    {
+        var service = CreateService(
+            new FakeHistoryRepository(),
+            new FakeQueue(),
+            dryRun: false,
+            enableWrites: true,
+            operations: HealthyOperations());
+
+        var status = await service.GetStatusAsync("OTO", AppRoles.Viewer, writeAuthorized: false);
+
+        Assert.Equal(AppRoles.Viewer, status.CurrentUserRole);
+        Assert.False(status.WriteAuthorized);
+        Assert.False(status.CanRefresh);
+        Assert.False(status.CanSync);
+        Assert.Contains("Bạn không có quyền Admin.", status.RefreshBlockers);
+        Assert.Contains("Bạn không có quyền Admin.", status.SyncBlockers);
     }
 
     [Fact]
@@ -153,7 +207,7 @@ public sealed class QlhvOperationsServiceTests
             enableWrites: true,
             operations: operations);
 
-        var status = await service.GetStatusAsync("OTO");
+        var status = await service.GetStatusAsync("OTO", AppRoles.Admin, writeAuthorized: true);
 
         Assert.Equal("refreshing", status.State);
         Assert.False(status.CanRefresh);
@@ -177,6 +231,15 @@ public sealed class QlhvOperationsServiceTests
     private static QlhvRefreshBackupRequest ValidRefreshRequest() => new()
     {
         SourceType = "OTO",
+    };
+
+    private static FakeOperationsRepository HealthyOperations() => new()
+    {
+        Snapshot = new QlhvOperationDataSnapshot(
+            new QlhvOperationRowCountsDto { NguoiLX = 46 },
+            new QlhvOperationRowCountsDto { NguoiLX = 46 },
+            40,
+            "snapshot-token"),
     };
 
     private static QlhvOperationHistoryDto CompletedHistory(string operationType, string status) => new()
