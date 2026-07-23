@@ -78,3 +78,18 @@ public static class QlhvOperationTypes
     public const string Succeeded = "SUCCEEDED";
     public const string Failed = "FAILED";
 }
+
+public static class QlhvOperationActors
+{
+    public const string ManualAdmin = "MANUAL_ADMIN";
+    public const string SystemAutoSync = "SYSTEM_AUTO_SYNC";
+    public const string SystemSessionStart = "SYSTEM_SESSION_START";
+
+    public static string NormalizeInternal(string? actor)
+        => actor?.Trim().ToUpperInvariant() switch
+        {
+            SystemAutoSync => SystemAutoSync,
+            SystemSessionStart => SystemSessionStart,
+            _ => ManualAdmin,
+        };
+}

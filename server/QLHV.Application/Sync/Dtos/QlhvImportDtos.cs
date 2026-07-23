@@ -1,3 +1,7 @@
+using System.Text.Json.Serialization;
+
+using QLHV.Application.HocVien.Photos;
+
 namespace QLHV.Application.Sync.Dtos;
 
 public class QlhvImportRequest
@@ -12,6 +16,9 @@ public class QlhvImportRequest
 public sealed class QlhvImportExecuteRequest : QlhvImportRequest
 {
     public string? ExpectedSnapshotToken { get; set; }
+
+    [JsonIgnore]
+    public string Actor { get; set; } = QlhvOperationActors.ManualAdmin;
 }
 
 public sealed class QlhvImportPlanDto
@@ -74,6 +81,10 @@ public sealed class QlhvImportPlanDto
 
     public QlhvEntitySyncCountsDto GiaoVien { get; init; } = new();
 
+    public QlhvEntitySyncCountsDto KhoaHocGiaoVien { get; init; } = new();
+
+    public HocVienPhotoPlanDto Photo { get; init; } = new(0, 0, 0, 0, 0);
+
     public int DuplicateSourceKeys { get; init; }
 
     public int RelationConflicts { get; init; }
@@ -114,6 +125,10 @@ public sealed class QlhvImportExecuteResultDto
     public QlhvEntitySyncCountsDto KhoaHoc { get; init; } = new();
 
     public QlhvEntitySyncCountsDto GiaoVien { get; init; } = new();
+
+    public QlhvEntitySyncCountsDto KhoaHocGiaoVien { get; init; } = new();
+
+    public HocVienPhotoQueueBatchResult? PhotoQueue { get; init; }
 }
 
 public sealed class QlhvEntitySyncCountsDto
@@ -184,6 +199,10 @@ public sealed class QlhvImportDiagnosticsDto
     public QlhvEntitySyncCountsDto KhoaHoc { get; init; } = new();
 
     public QlhvEntitySyncCountsDto GiaoVien { get; init; } = new();
+
+    public QlhvEntitySyncCountsDto KhoaHocGiaoVien { get; init; } = new();
+
+    public HocVienPhotoPlanDto Photo { get; init; } = new(0, 0, 0, 0, 0);
 
     public int DuplicateSourceKeys { get; init; }
 

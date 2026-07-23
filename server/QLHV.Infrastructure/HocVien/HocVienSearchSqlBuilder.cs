@@ -11,6 +11,7 @@ FROM dbo.App_HocVien";
     private const string SelectColumns = @"
 SELECT
     HocVienId,
+    SourceProfileCode,
     MaDK           AS MaDangKy,
     HoTen          AS HoVaTen,
     NgaySinh,

@@ -48,6 +48,7 @@ public sealed class QlhvOperationHistoryRepository : IQlhvOperationHistoryReposi
                     entry.Source.SourceType,
                     entry.OperationType,
                     entry.Status,
+                    Actor = QlhvOperationActors.NormalizeInternal(entry.Actor),
                     entry.Source.LiveDatabaseName,
                     entry.Source.BackupDatabaseName,
                     MaCSDT = entry.Source.MaCsdt,
@@ -159,6 +160,14 @@ public sealed class QlhvOperationHistoryRepository : IQlhvOperationHistoryReposi
         CancellationToken cancellationToken = default)
         => GetSingleAsync(ActiveSql, new { SourceType = sourceType }, cancellationToken);
 
+    public Task<QlhvOperationHistoryDto?> GetByOperationIdAsync(
+        Guid operationId,
+        CancellationToken cancellationToken = default)
+        => GetSingleAsync(
+            ByOperationIdSql,
+            new { OperationId = operationId },
+            cancellationToken);
+
     public Task<QlhvOperationHistoryDto?> GetLatestCompletedAsync(
         string sourceType,
         string operationType,
@@ -203,7 +212,7 @@ public sealed class QlhvOperationHistoryRepository : IQlhvOperationHistoryReposi
 
     private static QlhvOperationsStoreUnavailableException StoreUnavailable(SqlException inner)
         => new(
-            "Lich su van hanh chua san sang; can chay patch tao dbo.App_QlhvSyncOperationHistory.",
+            "Lich su van hanh chua san sang; can chay cac patch QLHV operation history va Auto Sync.",
             inner);
 
     private static string? Truncate(string? value, int length)
@@ -218,13 +227,13 @@ WHERE SourceType = @SourceType
     private const string InsertSql = @"
 INSERT INTO dbo.App_QlhvSyncOperationHistory
 (
-    OperationId, SourceType, OperationType, Status,
+    OperationId, SourceType, OperationType, Status, Actor,
     LiveDatabaseName, BackupDatabaseName, MaCSDT, SourceProfileCode,
     CreatedAtUtc, StartedAtUtc, CompletedAtUtc, UpdatedAtUtc
 )
 VALUES
 (
-    @OperationId, @SourceType, @OperationType, @Status,
+    @OperationId, @SourceType, @OperationType, @Status, @Actor,
     @LiveDatabaseName, @BackupDatabaseName, @MaCSDT, @SourceProfileCode,
     @CreatedAtUtc, @StartedAtUtc, NULL, @CreatedAtUtc
 );";
@@ -262,6 +271,7 @@ OperationId,
 SourceType,
 OperationType,
 Status,
+Actor,
 COALESCE(StartedAtUtc, CreatedAtUtc) AS StartedAtUtc,
 CompletedAtUtc,
 CAST(COALESCE(SourceRows, 0) AS int) AS SourceRows,
@@ -273,6 +283,10 @@ CAST(SkippedRows AS int) AS SkippedRows,
 SnapshotToken,
 ErrorMessage,
 DetailJson";
+
+    private const string ByOperationIdSql = "SELECT TOP (1) " + Projection + @"
+FROM dbo.App_QlhvSyncOperationHistory
+WHERE OperationId = @OperationId;";
 
     private const string SearchSql = "SELECT TOP (@Take) " + Projection + @"
 FROM dbo.App_QlhvSyncOperationHistory

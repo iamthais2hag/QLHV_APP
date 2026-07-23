@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using QLHV.Application.HocVien.Photos;
 using QLHV.Application.Sync;
 using QLHV.Application.Sync.Configuration;
 using QLHV.Application.Sync.Dtos;
@@ -706,6 +707,89 @@ public sealed class QlhvImportServiceTests
         Assert.True(history.CompleteCalls >= 2);
     }
 
+    [Fact]
+    public async Task Plan_exposes_advisory_photo_counts_without_writing()
+    {
+        var target = new FakeTargetRepository();
+        var photos = new FakePhotoProcessingService
+        {
+            Plan = new HocVienPhotoPlanDto(
+                Found: 1,
+                Missing: 2,
+                Pending: 3,
+                ToReprocess: 4,
+                ReviewRequired: 5),
+        };
+        var service = CreateService(
+            OneOtoRow(new QlhvImportTargetSnapshot()),
+            target,
+            photoProcessing: photos);
+
+        var plan = await service.GetPlanAsync(OtoRequest());
+
+        Assert.Equal(photos.Plan, plan.Photo);
+        Assert.Equal(1, photos.BuildPlanCalls);
+        Assert.Equal(0, photos.QueueCalls);
+        Assert.Equal(0, target.UpsertCalls);
+    }
+
+    [Fact]
+    public async Task Execute_queues_photo_work_only_after_database_full_sync_returns()
+    {
+        var target = new FakeTargetRepository
+        {
+            FullSyncResult = new QlhvImportFullSyncWriteResult(1, 0, 0, 0, 0, 0, 0, 0),
+        };
+        var photos = new FakePhotoProcessingService
+        {
+            OnQueue = () => Assert.Equal(1, target.UpsertCalls),
+            QueueResult = new HocVienPhotoQueueBatchResult(1, 1, 0, 0),
+        };
+        var service = CreateService(
+            OneOtoRow(new QlhvImportTargetSnapshot()),
+            target,
+            dryRun: false,
+            enableWrites: true,
+            photoProcessing: photos);
+
+        var result = await service.ExecuteAsync(ExecuteRequest());
+
+        Assert.True(result.Executed);
+        Assert.Equal(1, photos.QueueCalls);
+        Assert.Equal(photos.QueueResult, result.PhotoQueue);
+        var queuedSource = Assert.Single(photos.LastQueuedSources);
+        Assert.Equal("CSDT_OTO", queuedSource.SourceProfileCode);
+        Assert.Equal("66029-001", queuedSource.SourceMaDK);
+    }
+
+    [Fact]
+    public async Task Photo_queue_failure_never_changes_the_committed_database_result()
+    {
+        var target = new FakeTargetRepository
+        {
+            FullSyncResult = new QlhvImportFullSyncWriteResult(1, 0, 0, 0, 0, 0, 0, 0),
+        };
+        var photos = new FakePhotoProcessingService
+        {
+            QueueException = new IOException("fixture"),
+        };
+        var service = CreateService(
+            OneOtoRow(new QlhvImportTargetSnapshot()),
+            target,
+            dryRun: false,
+            enableWrites: true,
+            photoProcessing: photos);
+
+        var result = await service.ExecuteAsync(ExecuteRequest());
+
+        Assert.True(result.Executed);
+        Assert.Equal(1, target.UpsertCalls);
+        Assert.Contains("da commit", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            result.Plan.Warnings,
+            warning => warning.Contains("hang doi anh", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static QlhvImportService CreateService(
         FakeReadRepository reads,
         FakeTargetRepository target,
@@ -713,7 +797,8 @@ public sealed class QlhvImportServiceTests
         bool enableWrites = false,
         int batchSize = 1000,
         IQlhvSourceOperationLock? operationLock = null,
-        IQlhvOperationHistoryRepository? operationHistory = null)
+        IQlhvOperationHistoryRepository? operationHistory = null,
+        IHocVienPhotoProcessingService? photoProcessing = null)
         => new(
             reads,
             target,
@@ -721,7 +806,8 @@ public sealed class QlhvImportServiceTests
             Options.Create(new AppSyncOptions { DryRun = dryRun, BatchSize = batchSize }),
             Options.Create(new SyncExecutionOptions { EnableTargetWrites = enableWrites }),
             operationLock ?? new FakeOperationLock(),
-            operationHistory ?? new FakeOperationHistoryRepository());
+            operationHistory ?? new FakeOperationHistoryRepository(),
+            photoProcessing);
 
     private static QlhvImportExecuteRequest ExecuteRequest() => new()
     {
@@ -901,6 +987,87 @@ public sealed class QlhvImportServiceTests
 
             return Task.FromResult(FullSyncResult);
         }
+    }
+
+    private sealed class FakePhotoProcessingService : IHocVienPhotoProcessingService
+    {
+        public HocVienPhotoPlanDto Plan { get; init; } = new(0, 0, 0, 0, 0);
+        public HocVienPhotoQueueBatchResult QueueResult { get; init; } = new(0, 0, 0, 0);
+        public Exception? QueueException { get; init; }
+        public Action? OnQueue { get; init; }
+        public int BuildPlanCalls { get; private set; }
+        public int QueueCalls { get; private set; }
+        public IReadOnlyList<HocVienPhotoProcessingSource> LastQueuedSources { get; private set; } =
+            Array.Empty<HocVienPhotoProcessingSource>();
+
+        public Task<BackgroundRemovalEngineReadiness> GetReadinessAsync(
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(new BackgroundRemovalEngineReadiness(
+                false,
+                "FIXTURE",
+                "fixture",
+                null,
+                "fixture"));
+
+        public Task<HocVienPhotoPlanDto> BuildPlanAsync(
+            IReadOnlyList<HocVienPhotoProcessingSource> sources,
+            CancellationToken cancellationToken = default)
+        {
+            BuildPlanCalls++;
+            return Task.FromResult(Plan);
+        }
+
+        public Task<HocVienPhotoQueueBatchResult> QueueAfterSyncAsync(
+            IReadOnlyList<HocVienPhotoProcessingSource> sources,
+            string actor,
+            CancellationToken cancellationToken = default)
+        {
+            QueueCalls++;
+            LastQueuedSources = sources;
+            OnQueue?.Invoke();
+            return QueueException is null
+                ? Task.FromResult(QueueResult)
+                : Task.FromException<HocVienPhotoQueueBatchResult>(QueueException);
+        }
+
+        public Task ProcessAsync(
+            HocVienPhotoProcessingWorkItem item,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<HocVienPhotoProcessingPageDto> SearchAsync(
+            HocVienPhotoSearchRequest request,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<HocVienPhotoRecordDto?> ApproveAsync(
+            long id,
+            long userId,
+            string actor,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<HocVienPhotoRecordDto?> ReprocessAsync(
+            long id,
+            string actor,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<HocVienPhotoContent?> GetSourceImageAsync(
+            long id,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<HocVienPhotoContent?> GetDerivedImageAsync(
+            long id,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<HocVienPhotoPrintSelection> GetPrintSelectionAsync(
+            string sourceProfileCode,
+            string sourceMaDk,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
     }
 
     private sealed class FakeOperationLock : IQlhvSourceOperationLock

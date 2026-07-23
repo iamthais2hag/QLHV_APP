@@ -42,22 +42,22 @@ public static class QlhvImportHocVienMapper
         }
 
         var baseModel = baseResult.Model;
-        if (!TryNormalizePhotoPath(
-                source.DuongDanAnh,
-                baseModel.MaKhoa,
-                baseModel.SourceMaDK,
-                out var relativePhotoPath))
-        {
-            return new MapResult(
-                null,
-                baseResult.Warnings,
-                new[]
+        var sourcePhotoPathInvalid = !TryNormalizePhotoPath(
+            source.DuongDanAnh,
+            out var relativePhotoPath);
+        var warnings = sourcePhotoPathInvalid
+            ? baseResult.Warnings.Concat(new[]
+            {
+                new HocVienDataWarningDto
                 {
-                    $"{UnsafePhotoPathCode}: Khong the map an toan cot {PhotoPathMapping}. " +
-                    "DuongDanAnh phai nam duoi IM_GPLX va khop MaKhoa/SourceMaDK.",
+                    MaDK = baseModel.SourceMaDK,
+                    Field = nameof(source.DuongDanAnh),
+                    Code = UnsafePhotoPathCode,
+                    Message =
+                        "DuongDanAnh khong an toan; full sync DB van tiep tuc va photo worker se danh dau INVALID_PATH.",
                 },
-                ShouldSkip: false);
-        }
+            }).ToArray()
+            : baseResult.Warnings;
 
         var modelWithoutHash = new QlhvImportHocVienWriteModel
         {
@@ -79,6 +79,7 @@ public static class QlhvImportHocVienMapper
             HangGPLXDaCo = baseModel.HangGPLXDaCo,
             NguoiNhanHoSo = baseModel.NguoiNhanHoSo,
             AnhRelativePath = relativePhotoPath,
+            SourcePhotoPathInvalid = sourcePhotoPathInvalid,
             ChatLuongAnh = source.ChatLuongAnh,
             NgayThuNhanAnh = source.NgayThuNhanAnh,
             NguoiThuNhanAnh = Trim(source.NguoiThuNhanAnh),
@@ -87,15 +88,13 @@ public static class QlhvImportHocVienMapper
 
         return new MapResult(
             CopyWithHash(modelWithoutHash, ComputeHash(modelWithoutHash)),
-            baseResult.Warnings,
+            warnings,
             Array.Empty<string>(),
             ShouldSkip: false);
     }
 
     private static bool TryNormalizePhotoPath(
         string? sourcePath,
-        string? maKhoa,
-        string sourceMaDk,
         out string? relativePath)
     {
         relativePath = null;
@@ -104,15 +103,15 @@ public static class QlhvImportHocVienMapper
             return true;
         }
 
-        if (!IsSafeSegment(maKhoa) || !IsSafeSegment(sourceMaDk))
+        var raw = sourcePath.Trim();
+        if (raw.IndexOf('\0') >= 0)
         {
             return false;
         }
 
-        var segments = sourcePath
-            .Trim()
+        var segments = raw
             .Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (segments.Length < 3)
+        if (segments.Length == 0 || segments.Any(segment => segment is "." or ".."))
         {
             return false;
         }
@@ -120,21 +119,25 @@ public static class QlhvImportHocVienMapper
         var imGplxIndex = Array.FindLastIndex(
             segments,
             value => string.Equals(value, "IM_GPLX", StringComparison.OrdinalIgnoreCase));
-        if (imGplxIndex < 0 || imGplxIndex != segments.Length - 3)
+        var relativeSegments = imGplxIndex >= 0
+            ? segments.Skip(imGplxIndex + 1).ToArray()
+            : Path.IsPathRooted(raw)
+                ? Array.Empty<string>()
+                : segments;
+        if (relativeSegments.Length == 0 || relativeSegments.Any(segment => !IsSafeSegment(segment)))
         {
             return false;
         }
 
-        var expectedFileName = sourceMaDk + ".jp2";
-        if (!string.Equals(segments[^2], maKhoa, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(segments[^1], expectedFileName, StringComparison.OrdinalIgnoreCase) ||
-            !IsSafeSegment(segments[^2]) ||
-            !IsSafeSegment(segments[^1]))
+        var extension = Path.GetExtension(relativeSegments[^1]);
+        if (!string.Equals(extension, ".jp2", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
 
-        relativePath = $"{maKhoa}/{expectedFileName}";
+        relativeSegments[^1] =
+            Path.GetFileNameWithoutExtension(relativeSegments[^1]) + ".jp2";
+        relativePath = string.Join('/', relativeSegments);
         return true;
     }
 
@@ -172,6 +175,7 @@ public static class QlhvImportHocVienMapper
             N(model.HangGPLXDaCo),
             N(model.NguoiNhanHoSo),
             N(model.AnhRelativePath),
+            model.SourcePhotoPathInvalid ? "1" : "0",
             model.ChatLuongAnh?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
             model.NgayThuNhanAnh?.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff", CultureInfo.InvariantCulture) ??
                 string.Empty,
@@ -207,6 +211,7 @@ public static class QlhvImportHocVienMapper
             HangGPLXDaCo = source.HangGPLXDaCo,
             NguoiNhanHoSo = source.NguoiNhanHoSo,
             AnhRelativePath = source.AnhRelativePath,
+            SourcePhotoPathInvalid = source.SourcePhotoPathInvalid,
             ChatLuongAnh = source.ChatLuongAnh,
             NgayThuNhanAnh = source.NgayThuNhanAnh,
             NguoiThuNhanAnh = source.NguoiThuNhanAnh,

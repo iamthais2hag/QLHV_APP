@@ -15,13 +15,16 @@ public sealed class QlhvImportController : ControllerBase
 {
     private readonly IQlhvImportService _importService;
     private readonly IQlhvOperationsService _operationsService;
+    private readonly IQlhvAutoSyncService _autoSyncService;
 
     public QlhvImportController(
         IQlhvImportService importService,
-        IQlhvOperationsService operationsService)
+        IQlhvOperationsService operationsService,
+        IQlhvAutoSyncService autoSyncService)
     {
         _importService = importService;
         _operationsService = operationsService;
+        _autoSyncService = autoSyncService;
     }
 
     /// <summary>
@@ -141,6 +144,58 @@ public sealed class QlhvImportController : ControllerBase
                 StatusCodes.Status503ServiceUnavailable,
                 new ProblemDetails { Title = "Lich su van hanh chua san sang.", Detail = ex.Message });
         }
+    }
+
+    /// <summary>Read-only status of the durable server-side Auto Sync run.</summary>
+    [HttpGet("operations/auto-sync/status")]
+    [ProducesResponseType(typeof(QlhvAutoSyncStatusDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<QlhvAutoSyncStatusDto>> AutoSyncStatus(
+        [FromQuery] Guid? runId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _autoSyncService.GetStatusAsync(runId, cancellationToken));
+        }
+        catch (QlhvAutoSyncStoreUnavailableException ex)
+        {
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new ProblemDetails
+                {
+                    Title = "Auto Sync history chua san sang.",
+                    Detail = ex.Message,
+                });
+        }
+    }
+
+    /// <summary>Queues one Admin-triggered OTO then MOTO Auto Sync run.</summary>
+    [HttpPost("operations/auto-sync")]
+    [Authorize(Policy = AuthPolicies.Admin)]
+    [ProducesResponseType(typeof(QlhvAutoSyncQueueResultDto), StatusCodes.Status202Accepted)]
+    [ProducesResponseType(typeof(QlhvAutoSyncQueueResultDto), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(QlhvAutoSyncQueueResultDto), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(QlhvAutoSyncQueueResultDto), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<QlhvAutoSyncQueueResultDto>> AutoSync(
+        CancellationToken cancellationToken)
+    {
+        var result = await _autoSyncService.QueueAsync(
+            QlhvAutoSyncConstants.ManualTrigger,
+            cancellationToken);
+        if (result.Accepted)
+        {
+            return Accepted(result);
+        }
+
+        if (result.IsConflict)
+        {
+            return Conflict(result);
+        }
+
+        return result.IsUnavailable
+            ? StatusCode(StatusCodes.Status503ServiceUnavailable, result)
+            : BadRequest(result);
     }
 
 }

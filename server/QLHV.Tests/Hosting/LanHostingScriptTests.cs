@@ -216,9 +216,13 @@ public sealed class LanHostingScriptTests
         Assert.Contains("StartedThisRun", launcher, StringComparison.Ordinal);
         Assert.Contains("-TimeoutSeconds 45", launcher, StringComparison.Ordinal);
 
-        var liveWait = launcher.LastIndexOf("-Url $LiveUrl", StringComparison.Ordinal);
-        var readyWait = launcher.LastIndexOf("-Url $ReadyUrl", StringComparison.Ordinal);
-        var browserOpen = launcher.LastIndexOf("Start-Process $ApplicationUrl", StringComparison.Ordinal);
+        const string startedProcessLiveWait =
+            "Wait-ForEndpoint -ProcessId $script:StartedProcessId -Url $LiveUrl";
+        const string startedProcessReadyWait =
+            "Wait-ForEndpoint -ProcessId $script:StartedProcessId -Url $ReadyUrl";
+        var liveWait = launcher.LastIndexOf(startedProcessLiveWait, StringComparison.Ordinal);
+        var readyWait = launcher.LastIndexOf(startedProcessReadyWait, StringComparison.Ordinal);
+        var browserOpen = launcher.LastIndexOf("Start-Process $browserUrl", StringComparison.Ordinal);
         Assert.True(liveWait >= 0 && readyWait > liveWait, "Liveness must be checked before readiness.");
         Assert.True(browserOpen > readyWait, "The browser must open only after readiness succeeds.");
     }
@@ -237,14 +241,14 @@ public sealed class LanHostingScriptTests
     }
 
     [Fact]
-    public void Launcher_reconciles_orphaned_exact_runtime_processes_without_broad_kills()
+    public void Launcher_detects_orphaned_exact_runtime_processes_without_stopping_them()
     {
         var launcher = Read("Start-QLHV-App.ps1");
 
         Assert.Contains("Get-QlhvRuntimeProcessIds", launcher, StringComparison.Ordinal);
         Assert.Contains("Get-CimInstance -ClassName Win32_Process", launcher, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("orphanedRuntimeId", launcher, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Stop-QlhvProcessById", launcher, StringComparison.Ordinal);
+        Assert.Contains("No process was stopped or started", launcher, StringComparison.Ordinal);
         Assert.DoesNotContain("taskkill", launcher, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotMatch(new Regex(@"Stop-Process[^\r\n]*-Name", RegexOptions.IgnoreCase), launcher);
     }
@@ -259,7 +263,7 @@ public sealed class LanHostingScriptTests
         Assert.Contains("AllowLegacyRollback", launcher, StringComparison.Ordinal);
         Assert.Contains("Wait-ForLegacyRollbackHealth", launcher, StringComparison.Ordinal);
         Assert.Contains("$LegacyHealthUrl", launcher, StringComparison.Ordinal);
-        Assert.Contains("$legacyReady = $legacyProbe.Success", launcher, StringComparison.Ordinal);
+        Assert.Contains("$legacy = Invoke-HealthProbe", launcher, StringComparison.Ordinal);
         Assert.Contains("-AllowLegacyRollback", installer, StringComparison.Ordinal);
         Assert.Contains("-AllowLegacyRollback", update, StringComparison.Ordinal);
         Assert.Contains("legacy-runtime.marker", launcher, StringComparison.OrdinalIgnoreCase);
@@ -338,6 +342,8 @@ public sealed class LanHostingScriptTests
         Assert.Contains("Set-QlhvProductionWriteFlags", update, StringComparison.Ordinal);
         Assert.Contains("[IO.File]::Replace", update, StringComparison.Ordinal);
         Assert.Contains("Assert-ConfigurationUnchanged", update, StringComparison.Ordinal);
+        Assert.Contains("Restore-QlhvProductionConfigurationBackup", update, StringComparison.Ordinal);
+        Assert.Contains(@"Join-Path $directory 'backups'", update, StringComparison.Ordinal);
         Assert.Contains("/health/live", update, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("/health/ready", update, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("No SQL patch was run", update, StringComparison.OrdinalIgnoreCase);
@@ -350,7 +356,8 @@ public sealed class LanHostingScriptTests
     [Theory]
     [InlineData("Install-QLHV-App.ps1")]
     [InlineData("Update-QLHV-App.ps1")]
-    public void Production_flag_normalizer_changes_only_two_flags_and_does_not_emit_config_values(string scriptName)
+    public void Production_normalizer_sets_safe_runtime_defaults_idempotently_without_emitting_config_values(
+        string scriptName)
     {
         var temporaryDirectory = Path.Combine(Path.GetTempPath(), "qlhv-flags-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(temporaryDirectory);
@@ -384,14 +391,281 @@ public sealed class LanHostingScriptTests
             Assert.Equal(321, root.GetProperty("Sync").GetProperty("BatchSize").GetInt32());
             Assert.True(root.GetProperty("SyncExecution").GetProperty("EnableTargetWrites").GetBoolean());
             Assert.True(root.GetProperty("SyncExecution").GetProperty("RequireManualConfirmation").GetBoolean());
+            Assert.True(root.GetProperty("QlhvAutoSync").GetProperty("Enabled").GetBoolean());
+            Assert.True(root.GetProperty("QlhvAutoSync").GetProperty("RunOnServerStartup").GetBoolean());
+            Assert.True(root.GetProperty("QlhvAutoSync").GetProperty("RefreshBackupBeforeSync").GetBoolean());
+            Assert.Equal(
+                ["OTO", "MOTO"],
+                root.GetProperty("QlhvAutoSync").GetProperty("SourceOrder")
+                    .EnumerateArray()
+                    .Select(item => item.GetString())
+                    .ToArray());
+            Assert.False(root.GetProperty("PhotoProcessing").GetProperty("Enabled").GetBoolean());
+            Assert.Equal(
+                @"D:\IM_GPLX",
+                root.GetProperty("PhotoProcessing").GetProperty("SourceRoot").GetString());
+            Assert.Equal(
+                @"D:\QLHV_APP\IM_GPLX",
+                root.GetProperty("PhotoProcessing").GetProperty("OutputRoot").GetString());
+            Assert.False(root.GetProperty("PhotoProcessing").GetProperty("AutoProcessAfterSync").GetBoolean());
+            Assert.Equal(
+                @"D:\QLHV_APP_RUNTIME\models\person-segmentation.license.json",
+                root.GetProperty("PhotoProcessing").GetProperty("ModelLicenseManifestPath").GetString());
+            Assert.Equal(
+                string.Empty,
+                root.GetProperty("PhotoProcessing").GetProperty("ModelLicenseManifestSha256").GetString());
             Assert.Equal(sentinel, root.GetProperty("ConnectionStrings").GetProperty("QLHV_APP").GetString());
             Assert.Equal(sentinel, root.GetProperty("CustomLocal").GetProperty("Sentinel").GetString());
             Assert.True(root.GetProperty("CustomLocal").GetProperty("Enabled").GetBoolean());
+
+            var backups = Directory.GetFiles(
+                Path.Combine(temporaryDirectory, "backups"),
+                "appsettings.Production.Local.*.json.bak");
+            Assert.Single(backups);
+            using var backupDocument = JsonDocument.Parse(File.ReadAllText(backups[0]));
+            Assert.True(backupDocument.RootElement.GetProperty("Sync").GetProperty("DryRun").GetBoolean());
+            Assert.Equal(
+                sentinel,
+                backupDocument.RootElement.GetProperty("CustomLocal").GetProperty("Sentinel").GetString());
         }
         finally
         {
             Directory.Delete(temporaryDirectory, recursive: true);
         }
+    }
+
+    [Fact]
+    public void Deployment_preserves_durable_config_and_shortcut_backups_until_success_or_rollback()
+    {
+        var installer = Read("Install-QLHV-App.ps1");
+        var updater = Read("Update-QLHV-App.ps1");
+
+        foreach (var script in new[] { installer, updater })
+        {
+            Assert.Contains("appsettings.Production.Local.", script, StringComparison.Ordinal);
+            Assert.Contains(".json.bak", script, StringComparison.Ordinal);
+            Assert.Contains("Restore-QlhvProductionConfigurationBackup", script, StringComparison.Ordinal);
+            Assert.Contains("$ShortcutBackup", script, StringComparison.Ordinal);
+            Assert.Contains("Copy-Item -LiteralPath $ShortcutBackup -Destination $ShortcutPath -Force", script, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("Protect-ProductionConfigurationTree", updater, StringComparison.Ordinal);
+        Assert.Contains("SetAccessRuleProtection($true, $false)", updater, StringComparison.Ordinal);
+        Assert.Contains("Set-RestrictedConfigurationFileAcl", updater, StringComparison.Ordinal);
+        var protectBeforeNormalize = updater.LastIndexOf(
+            "Protect-ProductionConfigurationTree",
+            updater.LastIndexOf(
+                "[void](Set-QlhvProductionWriteFlags -Path $ProductionConfig)",
+                StringComparison.Ordinal),
+            StringComparison.Ordinal);
+        var normalize = updater.LastIndexOf(
+            "[void](Set-QlhvProductionWriteFlags -Path $ProductionConfig)",
+            StringComparison.Ordinal);
+        Assert.True(protectBeforeNormalize >= 0 && protectBeforeNormalize < normalize);
+    }
+
+    [Theory]
+    [InlineData("Install-QLHV-App.ps1")]
+    [InlineData("Update-QLHV-App.ps1")]
+    public void Production_normalizer_disables_photo_processing_when_ready_evidence_is_missing(
+        string scriptName)
+    {
+        var temporaryDirectory = Path.Combine(Path.GetTempPath(), "qlhv-photo-safe-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temporaryDirectory);
+        var configurationPath = Path.Combine(temporaryDirectory, "appsettings.Production.Local.json");
+        try
+        {
+            File.WriteAllText(configurationPath, """
+                {
+                  "ConnectionStrings": { "QLHV_APP": "fixture" },
+                  "Sync": { "DryRun": false },
+                  "SyncExecution": { "EnableTargetWrites": true },
+                  "PhotoProcessing": {
+                    "Enabled": true,
+                    "AutoProcessAfterSync": true,
+                    "ModelPath": "D:\\missing\\model.onnx",
+                    "ModelSha256": "",
+                    "ModelLicense": "",
+                    "ModelLicenseManifestPath": "D:\\missing\\license.json",
+                    "ModelLicenseManifestSha256": ""
+                  }
+                }
+                """);
+
+            _ = InvokeProductionFlagNormalizer(scriptName, configurationPath);
+
+            using var document = JsonDocument.Parse(File.ReadAllText(configurationPath));
+            var photo = document.RootElement.GetProperty("PhotoProcessing");
+            Assert.False(photo.GetProperty("Enabled").GetBoolean());
+            Assert.False(photo.GetProperty("AutoProcessAfterSync").GetBoolean());
+        }
+        finally
+        {
+            Directory.Delete(temporaryDirectory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("Install-QLHV-App.ps1")]
+    [InlineData("Update-QLHV-App.ps1")]
+    public void Production_normalizer_preserves_explicit_flags_and_paths_but_enforces_safe_order_and_photo_disablement(
+        string scriptName)
+    {
+        var temporaryDirectory = Path.Combine(Path.GetTempPath(), "qlhv-runtime-settings-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temporaryDirectory);
+        var configurationPath = Path.Combine(temporaryDirectory, "appsettings.Production.Local.json");
+        try
+        {
+            File.WriteAllText(configurationPath, """
+                {
+                  "ConnectionStrings": { "QLHV_APP": "fixture" },
+                  "Sync": { "DryRun": false },
+                  "SyncExecution": { "EnableTargetWrites": true },
+                  "QlhvAutoSync": {
+                    "Enabled": false,
+                    "RunOnServerStartup": false,
+                    "RefreshBackupBeforeSync": false,
+                    "SourceOrder": [ "MOTO", "OTO" ]
+                  },
+                  "PhotoProcessing": {
+                    "Enabled": false,
+                    "SourceRoot": "E:\\read-only",
+                    "OutputRoot": "E:\\derived",
+                    "ModelPath": "E:\\models\\custom.onnx",
+                    "ModelSha256": "fixture-checksum",
+                    "ModelLicense": "fixture-license",
+                    "BackgroundColor": "#123456",
+                    "AutoProcessAfterSync": true,
+                    "MinimumAutoApprovalConfidence": 0.97
+                  }
+                }
+                """);
+
+            _ = InvokeProductionFlagNormalizer(scriptName, configurationPath);
+
+            using var document = JsonDocument.Parse(File.ReadAllText(configurationPath));
+            var root = document.RootElement;
+            Assert.False(root.GetProperty("QlhvAutoSync").GetProperty("Enabled").GetBoolean());
+            Assert.False(root.GetProperty("QlhvAutoSync").GetProperty("RunOnServerStartup").GetBoolean());
+            Assert.Equal(
+                ["OTO", "MOTO"],
+                root.GetProperty("QlhvAutoSync").GetProperty("SourceOrder")
+                    .EnumerateArray()
+                    .Select(item => item.GetString())
+                    .ToArray());
+            Assert.False(root.GetProperty("PhotoProcessing").GetProperty("Enabled").GetBoolean());
+            Assert.False(
+                root.GetProperty("PhotoProcessing").GetProperty("AutoProcessAfterSync").GetBoolean());
+            Assert.Equal(
+                @"E:\models\custom.onnx",
+                root.GetProperty("PhotoProcessing").GetProperty("ModelPath").GetString());
+            Assert.Equal(
+                0.97,
+                root.GetProperty("PhotoProcessing").GetProperty("MinimumAutoApprovalConfidence").GetDouble());
+        }
+        finally
+        {
+            Directory.Delete(temporaryDirectory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("Install-QLHV-App.ps1")]
+    [InlineData("Update-QLHV-App.ps1")]
+    public void Production_normalizer_repairs_invalid_auto_sync_types_and_source_order(
+        string scriptName)
+    {
+        var temporaryDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "qlhv-auto-sync-invalid-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temporaryDirectory);
+        var configurationPath = Path.Combine(
+            temporaryDirectory,
+            "appsettings.Production.Local.json");
+        try
+        {
+            File.WriteAllText(configurationPath, """
+                {
+                  "ConnectionStrings": { "QLHV_APP": "fixture" },
+                  "Sync": { "DryRun": false },
+                  "SyncExecution": { "EnableTargetWrites": true },
+                  "QlhvAutoSync": {
+                    "Enabled": "true",
+                    "RunOnServerStartup": null,
+                    "RefreshBackupBeforeSync": 1,
+                    "SourceOrder": [ "MOTO", "OTO" ]
+                  }
+                }
+                """);
+
+            _ = InvokeProductionFlagNormalizer(scriptName, configurationPath);
+
+            using var document = JsonDocument.Parse(File.ReadAllText(configurationPath));
+            var autoSync = document.RootElement.GetProperty("QlhvAutoSync");
+            Assert.True(autoSync.GetProperty("Enabled").GetBoolean());
+            Assert.True(autoSync.GetProperty("RunOnServerStartup").GetBoolean());
+            Assert.True(autoSync.GetProperty("RefreshBackupBeforeSync").GetBoolean());
+            Assert.Equal(
+                ["OTO", "MOTO"],
+                autoSync.GetProperty("SourceOrder")
+                    .EnumerateArray()
+                    .Select(item => item.GetString())
+                    .ToArray());
+        }
+        finally
+        {
+            Directory.Delete(temporaryDirectory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("Install-QLHV-App.ps1")]
+    [InlineData("Update-QLHV-App.ps1")]
+    public void Production_normalizer_rejects_non_boolean_photo_enablement_and_disables_auto_processing(
+        string scriptName)
+    {
+        var temporaryDirectory = Path.Combine(Path.GetTempPath(), "qlhv-photo-invalid-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temporaryDirectory);
+        var configurationPath = Path.Combine(temporaryDirectory, "appsettings.Production.Local.json");
+        try
+        {
+            File.WriteAllText(configurationPath, """
+                {
+                  "ConnectionStrings": { "QLHV_APP": "fixture" },
+                  "Sync": { "DryRun": false },
+                  "SyncExecution": { "EnableTargetWrites": true },
+                  "PhotoProcessing": {
+                    "Enabled": "true",
+                    "AutoProcessAfterSync": true
+                  }
+                }
+                """);
+
+            _ = InvokeProductionFlagNormalizer(scriptName, configurationPath);
+
+            using var document = JsonDocument.Parse(File.ReadAllText(configurationPath));
+            var photo = document.RootElement.GetProperty("PhotoProcessing");
+            Assert.False(photo.GetProperty("Enabled").GetBoolean());
+            Assert.False(photo.GetProperty("AutoProcessAfterSync").GetBoolean());
+        }
+        finally
+        {
+            Directory.Delete(temporaryDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Installer_and_updater_disable_auto_sync_during_elevated_read_only_smoke()
+    {
+        var installer = Read("Install-QLHV-App.ps1");
+        var updater = Read("Update-QLHV-App.ps1");
+        var launcher = Read("Start-QLHV-App.ps1");
+
+        Assert.Contains("'-DisableAutoSync'", installer, StringComparison.Ordinal);
+        Assert.Contains("'-DisableAutoSync'", updater, StringComparison.Ordinal);
+        Assert.Contains("[switch]$DisableAutoSync", launcher, StringComparison.Ordinal);
+        Assert.Contains("QlhvAutoSync__Enabled", launcher, StringComparison.Ordinal);
+        Assert.Contains("$env:QlhvAutoSync__Enabled = 'false'", launcher, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -512,12 +786,165 @@ public sealed class LanHostingScriptTests
     }
 
     [Fact]
+    public void Desktop_launcher_keeps_existing_server_and_starts_or_joins_one_local_data_session()
+    {
+        var launcher = Read("Start-QLHV-App.ps1");
+        var mainStart = launcher.LastIndexOf(
+            "# Main launcher lifecycle:",
+            StringComparison.Ordinal);
+        Assert.True(mainStart >= 0);
+        var main = launcher[mainStart..];
+
+        Assert.Contains("/operations/session-start-sync", launcher, StringComparison.Ordinal);
+        Assert.Contains("/operations/session-start-sync/status", launcher, StringComparison.Ordinal);
+        Assert.Contains("X-QLHV-Local-Launcher", launcher, StringComparison.Ordinal);
+        Assert.Contains("serverStartedByLauncher", launcher, StringComparison.Ordinal);
+        Assert.Contains("needSync", main, StringComparison.Ordinal);
+        Assert.Contains("Get-SessionStartStatus", main, StringComparison.Ordinal);
+        Assert.Contains("Invoke-SessionStartSync", main, StringComparison.Ordinal);
+        Assert.Contains("Wait-ForSessionSync", main, StringComparison.Ordinal);
+        Assert.Contains("Initialize-LauncherProgress", main, StringComparison.Ordinal);
+        Assert.Contains("Dang lam moi du lieu O to", launcher, StringComparison.Ordinal);
+        Assert.Contains("Dang dong bo du lieu Mo to", launcher, StringComparison.Ordinal);
+        Assert.Contains("Dang tai du lieu moi", launcher, StringComparison.Ordinal);
+        Assert.Contains("sessionStartRunId", main, StringComparison.Ordinal);
+        Assert.Contains("/qlhv-import", main, StringComparison.Ordinal);
+        Assert.Contains("No process was stopped or started", main, StringComparison.Ordinal);
+        Assert.DoesNotContain("Stop-QlhvProcessById -ProcessId", main, StringComparison.Ordinal);
+        Assert.DoesNotContain("/operations/refresh-backup", launcher, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("/import-execute", launcher, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("operationActive", main, StringComparison.Ordinal);
+        Assert.Contains("activeRunId", main, StringComparison.Ordinal);
+        Assert.Contains("Du lieu da la ban moi nhat", main, StringComparison.Ordinal);
+        Assert.Contains("AddSeconds($SyncTimeoutSeconds)", main, StringComparison.Ordinal);
+        Assert.DoesNotContain("AddSeconds(60)", main, StringComparison.Ordinal);
+        Assert.Contains("$serverReadyProperty", main, StringComparison.Ordinal);
+        Assert.Contains("thieu field bat buoc", main, StringComparison.Ordinal);
+
+        var getStatus = main.IndexOf("$sessionStatus = Get-SessionStartStatus", StringComparison.Ordinal);
+        var releaseLauncherLock = main.IndexOf("Exit-LauncherCoordinationLocks", StringComparison.Ordinal);
+        var needSync = main.IndexOf("if ([bool]$needSyncProperty.Value)", getStatus, StringComparison.Ordinal);
+        var post = main.IndexOf("$sessionRunId = Invoke-SessionStartSync", needSync, StringComparison.Ordinal);
+        var wait = main.IndexOf("Wait-ForSessionSync", post, StringComparison.Ordinal);
+        var browser = main.IndexOf("Start-Process $browserUrl", wait, StringComparison.Ordinal);
+        Assert.True(
+            releaseLauncherLock >= 0 &&
+            getStatus > releaseLauncherLock &&
+            needSync > getStatus &&
+            post > needSync &&
+            wait > post &&
+            browser > wait,
+            "Desktop flow must be GET status -> NeedSync -> POST when needed -> wait -> browser.");
+    }
+
+    [Fact]
+    public void Launcher_reconciles_an_ambiguous_post_with_get_and_never_blind_reposts()
+    {
+        var launcher = Read("Start-QLHV-App.ps1");
+        var postFunctionStart = launcher.IndexOf("function Invoke-SessionStartSync", StringComparison.Ordinal);
+        var getFunctionStart = launcher.IndexOf("function Get-SessionStartStatus", postFunctionStart, StringComparison.Ordinal);
+        Assert.True(postFunctionStart >= 0 && getFunctionStart > postFunctionStart);
+        var postFunction = launcher[postFunctionStart..getFunctionStart];
+
+        Assert.Single(
+            Regex.Matches(postFunction, @"-Method\s+Post", RegexOptions.IgnoreCase).Cast<Match>());
+        Assert.Contains("Get-SessionStartStatus", postFunction, StringComparison.Ordinal);
+        Assert.Contains("operationActive", postFunction, StringComparison.Ordinal);
+        Assert.Contains("activeRunId", postFunction, StringComparison.Ordinal);
+        Assert.Contains("$attempt -ge 10", postFunction, StringComparison.Ordinal);
+        Assert.Contains("never reposts", postFunction, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("$waitingForManualOperation", postFunction, StringComparison.Ordinal);
+        Assert.Contains("AddSeconds($TimeoutSeconds)", postFunction, StringComparison.Ordinal);
+        Assert.Contains("Get-ProcessRecord -ProcessId $ProcessId", postFunction, StringComparison.Ordinal);
+        Assert.Contains("Dang cho thao tac cap nhat hien tai ket thuc", postFunction, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Launcher_retries_transient_exact_run_status_until_overall_deadline()
+    {
+        var launcher = Read("Start-QLHV-App.ps1");
+        var waitStart = launcher.IndexOf("function Wait-ForSessionSync", StringComparison.Ordinal);
+        var nextFunction = launcher.IndexOf("\nfunction ", waitStart + 1, StringComparison.Ordinal);
+        Assert.True(waitStart >= 0 && nextFunction > waitStart);
+        var waitFunction = launcher[waitStart..nextFunction];
+
+        Assert.Contains("AddSeconds($TimeoutSeconds)", waitFunction, StringComparison.Ordinal);
+        Assert.Contains("Get-ProcessRecord -ProcessId $ProcessId", waitFunction, StringComparison.Ordinal);
+        Assert.Contains("try {", waitFunction, StringComparison.Ordinal);
+        Assert.Contains("catch {", waitFunction, StringComparison.Ordinal);
+        Assert.Contains("Tam thoi chua doc duoc trang thai", waitFunction, StringComparison.Ordinal);
+        Assert.Contains("continue", waitFunction, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Launcher_allows_slow_read_only_need_sync_snapshots_but_keeps_exact_poll_bounded()
+    {
+        var launcher = Read("Start-QLHV-App.ps1");
+        var statusStart = launcher.IndexOf(
+            "function Get-SessionStartStatus",
+            StringComparison.Ordinal);
+        var nextFunction = launcher.IndexOf("\nfunction ", statusStart + 1, StringComparison.Ordinal);
+        Assert.True(statusStart >= 0 && nextFunction > statusStart);
+        var statusFunction = launcher[statusStart..nextFunction];
+
+        Assert.Contains(
+            "$NeedSyncRequestTimeoutSeconds = 120",
+            launcher,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "$NeedSyncRequestTimeoutSeconds",
+            statusFunction,
+            StringComparison.Ordinal);
+        Assert.Contains("-TimeoutSec $requestTimeoutSeconds", statusFunction, StringComparison.Ordinal);
+
+        var postStart = launcher.IndexOf("function Invoke-SessionStartSync", StringComparison.Ordinal);
+        var postEnd = launcher.IndexOf("\nfunction ", postStart + 1, StringComparison.Ordinal);
+        Assert.True(postStart >= 0 && postEnd > postStart);
+        var postFunction = launcher[postStart..postEnd];
+        Assert.Contains(
+            "-TimeoutSec $NeedSyncRequestTimeoutSeconds",
+            postFunction,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Installer_and_updater_deploy_and_migrate_the_desktop_to_a_stable_runtime_launcher()
+    {
+        var installer = Read("Install-QLHV-App.ps1");
+        var updater = Read("Update-QLHV-App.ps1");
+
+        foreach (var script in new[] { installer, updater })
+        {
+            Assert.Contains(
+                @"Join-Path $RuntimeRoot 'launcher'",
+                script,
+                StringComparison.Ordinal);
+            Assert.Contains("$StageLauncher", script, StringComparison.Ordinal);
+            Assert.Contains("Start-QLHV-App.cmd", script, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("$shortcut.TargetPath = $Launcher", script, StringComparison.Ordinal);
+            Assert.Contains("$shortcut.WorkingDirectory = $LauncherDirectory", script, StringComparison.Ordinal);
+            Assert.Contains("activate-launcher", script, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("LauncherBackup", installer, StringComparison.Ordinal);
+        Assert.Contains("RollbackLauncher", updater, StringComparison.Ordinal);
+        Assert.Contains("Install-DesktopShortcut", updater, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Deployment_scripts_never_run_sql_backup_restore_refresh_or_sync_operations()
     {
         var scripts = Directory.GetFiles(FindScriptsDirectory(), "*.ps1")
             .Concat(Directory.GetFiles(FindScriptsDirectory(), "*.cmd"))
             .ToArray();
-        var executableSource = string.Join('\n', scripts.Select(File.ReadAllText));
+        var deploymentScripts = scripts
+            .Where(path => !string.Equals(
+                Path.GetFileName(path),
+                "Start-QLHV-App.ps1",
+                StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        var executableSource = string.Join('\n', deploymentScripts.Select(File.ReadAllText));
+        var launcher = Read("Start-QLHV-App.ps1");
 
         Assert.DoesNotMatch(new Regex(@"\bsqlcmd(?:\.exe)?\b", RegexOptions.IgnoreCase), executableSource);
         Assert.DoesNotMatch(new Regex(@"\bInvoke-Sqlcmd\b", RegexOptions.IgnoreCase), executableSource);
@@ -525,6 +952,11 @@ public sealed class LanHostingScriptTests
         Assert.DoesNotContain("import-execute", executableSource, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotMatch(new Regex(@"Invoke-(RestMethod|WebRequest)[^\r\n]*-Method\s+Post", RegexOptions.IgnoreCase), executableSource);
         Assert.DoesNotMatch(new Regex(@"\b(BACKUP|RESTORE)\s+DATABASE\b", RegexOptions.IgnoreCase), executableSource);
+        Assert.DoesNotMatch(new Regex(@"\bsqlcmd(?:\.exe)?\b", RegexOptions.IgnoreCase), launcher);
+        Assert.DoesNotMatch(new Regex(@"\bInvoke-Sqlcmd\b", RegexOptions.IgnoreCase), launcher);
+        Assert.DoesNotContain("refresh-backup", launcher, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("import-execute", launcher, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("/operations/session-start-sync", launcher, StringComparison.Ordinal);
     }
 
     [Fact]

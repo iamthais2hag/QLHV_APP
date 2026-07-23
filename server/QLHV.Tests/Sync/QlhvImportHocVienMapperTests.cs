@@ -35,22 +35,38 @@ public sealed class QlhvImportHocVienMapperTests
         Assert.Equal("66029K01/66029-001.jp2", result.Model!.AnhRelativePath);
     }
 
+    [Fact]
+    public void Unsafe_photo_path_warns_without_blocking_student_sync()
+    {
+        var result = QlhvImportHocVienMapper.MapAndValidate(
+            Source(duongDanAnh: @"D:\OTHER\66029K01\66029-001.jp2"),
+            OtoIdentity);
+
+        Assert.False(result.ShouldSkip);
+        Assert.False(result.HasBlockers);
+        Assert.NotNull(result.Model);
+        Assert.Null(result.Model!.AnhRelativePath);
+        Assert.True(result.Model.SourcePhotoPathInvalid);
+        var warning = Assert.Single(result.Warnings);
+        Assert.Equal(QlhvImportHocVienMapper.UnsafePhotoPathCode, warning.Code);
+    }
+
     [Theory]
-    [InlineData(@"D:\OTHER\66029K01\66029-001.jp2")]
-    [InlineData(@"D:\IM_GPLX\OTHER-KHOA\66029-001.jp2")]
-    [InlineData(@"D:\IM_GPLX\66029K01\OTHER-MADK.jp2")]
-    [InlineData(@"D:\IM_GPLX\nested\66029K01\66029-001.jp2")]
-    public void Unsafe_or_mismatched_photo_path_returns_a_named_blocker(string sourcePath)
+    [InlineData(@"D:\IM_GPLX\OTHER-KHOA\66029-001.jp2", "OTHER-KHOA/66029-001.jp2")]
+    [InlineData(@"D:\IM_GPLX\66029K01\OTHER-MADK.jp2", "66029K01/OTHER-MADK.jp2")]
+    [InlineData(@"D:\IM_GPLX\nested\66029K01\66029-001.jp2", "nested/66029K01/66029-001.jp2")]
+    public void Safe_legacy_photo_path_is_preserved_for_secure_resolver_fallback(
+        string sourcePath,
+        string expected)
     {
         var result = QlhvImportHocVienMapper.MapAndValidate(
             Source(duongDanAnh: sourcePath),
             OtoIdentity);
 
-        Assert.False(result.ShouldSkip);
-        Assert.True(result.HasBlockers);
-        Assert.Null(result.Model);
-        var blocker = Assert.Single(result.Blockers);
-        Assert.Contains(QlhvImportHocVienMapper.PhotoPathMapping, blocker, StringComparison.Ordinal);
+        Assert.False(result.HasBlockers);
+        Assert.NotNull(result.Model);
+        Assert.Equal(expected, result.Model!.AnhRelativePath);
+        Assert.False(result.Model.SourcePhotoPathInvalid);
     }
 
     [Fact]

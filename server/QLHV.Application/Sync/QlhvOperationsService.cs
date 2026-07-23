@@ -177,7 +177,8 @@ public sealed class QlhvOperationsService : IQlhvOperationsService
                     QlhvOperationTypes.RefreshBackup,
                     QlhvOperationTypes.Queued,
                     now,
-                    null),
+                    null,
+                    QlhvOperationActors.NormalizeInternal(request.Actor)),
                 cancellationToken);
         }
         catch (QlhvOperationsStoreUnavailableException ex)

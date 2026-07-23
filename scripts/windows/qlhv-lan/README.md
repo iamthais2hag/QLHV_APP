@@ -60,12 +60,33 @@ Bấm shortcut Desktop **QLHV Thành Công**. Launcher:
 
 1. kiểm tra runtime, JSON Production local và `ConnectionStrings:QLHV_APP` mà không in giá trị;
 2. lấy mutex cùng file lock cross-session, rồi kiểm tra process/PID và port 8088;
-3. nếu QLHV đang ready, chỉ mở trình duyệt;
-4. nếu đúng QLHV bị treo hoặc là runtime cũ, dừng đúng PID đã xác minh rồi khởi động lại — không dùng `taskkill` và không dừng toàn bộ `dotnet`;
-5. chờ `GET /health/live`, sau đó `GET /health/ready`;
-6. chỉ mở trình duyệt khi cả hai đạt.
+3. nếu server chưa chạy, khởi động đúng một process; nếu server đã chạy thì giữ nguyên PID, không restart và không dừng `dotnet.exe`;
+4. chờ `GET /health/live`, sau đó `GET /health/ready`;
+5. gọi `GET /api/dong-bo-v2/qlhv/operations/session-start-sync/status` để backend
+   quyết định `NeedSync`;
+6. chỉ khi `NeedSync=true` mới gọi
+   `POST /api/dong-bo-v2/qlhv/operations/session-start-sync`;
+7. tạo hoặc tham gia một phiên đồng bộ tuần tự OTO rồi MOTO, theo dõi đúng `runId`
+   đến khi operation kết thúc;
+8. sau khi chờ xong mới mở `/qlhv-import`; trang này tải dữ liệu đã commit mới nhất
+   và hiển thị rõ lỗi nếu operation không thành công.
 
-Nếu port 8088 thuộc process khác, launcher báo rõ PID và không khởi động QLHV. Nếu cấu hình/readiness lỗi, process vừa tạo bị dừng, trình duyệt không mở, và thông báo chỉ ra file cần kiểm tra:
+Nếu backend trả `NeedSync=false`, launcher không POST lần nữa mà tham gia/chờ
+operation đang chạy hoặc operation startup vừa hoàn tất.
+
+Cầu nối session-start không dùng cookie Admin và không dùng Operations key. Nó chỉ
+chấp nhận kết nối loopback kèm marker riêng của launcher; máy trạm trong LAN không
+thể gọi endpoint này. Actor được ghi là `SYSTEM_SESSION_START`. Nếu startup Auto
+Sync hoặc một launcher khác đang chạy, lần bấm icon hiện tại tham gia operation đó,
+không tạo operation thứ hai.
+
+Nếu session sync thất bại, server và ứng dụng vẫn chạy bằng dữ liệu commit gần
+nhất. Trang Đồng bộ dữ liệu CSĐT hiển thị nguồn lỗi và thời điểm sync thành công
+gần nhất; nó không thông báo nhầm rằng dữ liệu cũ vừa được cập nhật.
+
+Nếu port 8088 thuộc process khác, launcher báo rõ PID và không khởi động QLHV.
+Nếu đã có process QLHV nhưng readiness chưa đạt, launcher không restart hoặc dừng
+process đó; nó báo lỗi để người vận hành kiểm tra. Thông báo chỉ ra file cần kiểm tra:
 
 ```text
 D:\QLHV_APP_RUNTIME\config\appsettings.Production.Local.json
@@ -119,4 +140,44 @@ Gỡ cài đặt (có xác nhận `UNINSTALL`) sẽ xóa runtime, config local, 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\QLHV_APP\scripts\windows\qlhv-lan\Uninstall-QLHV-App.ps1
 ```
 
-Các thao tác refresh BAK và full sync chỉ xảy ra khi Admin đăng nhập và chủ động thao tác trong ứng dụng; không script nào ở đây gọi các endpoint ghi đó.
+## Runtime launcher and local configuration hardening
+
+The installed Desktop shortcut does not depend on the source checkout. Its target is:
+
+```text
+D:\QLHV_APP_RUNTIME\launcher\Start-QLHV-App.cmd
+```
+
+The installer stages both launcher files before activation. The updater stages and
+replaces the runtime launcher together with the application, migrates the Public
+Desktop shortcut to the runtime path, and restores the previous launcher if
+activation or read-only smoke checks fail. The shortcut working directory is the
+runtime launcher directory, not `D:\QLHV_APP`.
+
+Before an existing `appsettings.Production.Local.json` is normalized, its prior
+content is retained under the protected directory:
+
+```text
+D:\QLHV_APP_RUNTIME\config\backups
+```
+
+The backup keeps the protected config ACL. A failed deployment restores the prior
+configuration while retaining a separate failed-version backup for diagnosis. The
+normalizer preserves all unrelated local values and secrets. Missing operational
+values default to full guarded synchronization (`DryRun=false`, target writes
+enabled, startup Auto Sync enabled, refresh before sync, source order OTO then MOTO).
+Photo processing defaults to disabled, including automatic post-sync processing.
+It is forced back to disabled unless the configured model, SHA-256, accepted SPDX
+license, license manifest, and manifest SHA-256 all validate. Production Local files,
+their backups, models, and real photos remain outside Git.
+
+The daily launcher uses bounded GET retries. It joins `activeRunId` when an operation
+is already active. If `NeedSync=false` and no run is active, it opens the application
+without requiring a `runId`. It sends the session-start POST at most once. If that
+POST times out or returns an ambiguous response, the launcher reconciles via GET and
+joins the run found by the backend; it never blindly resends the POST.
+
+Refresh BAK và full sync có thể được Admin chủ động chạy trong ứng dụng, hoặc được
+orchestrator Auto Sync gọi theo guard hiện có. Launcher không gọi trực tiếp endpoint
+`refresh-backup` hay `import-execute`; nó chỉ gọi cầu nối localhost session-start,
+để backend áp dụng cùng lock, snapshot token, transaction và duplicate guards.

@@ -159,6 +159,15 @@ app.UseRouting();
 app.Use(async (context, next) =>
 {
     context.Response.Headers["X-Correlation-ID"] = context.TraceIdentifier;
+    if (HttpMethods.IsGet(context.Request.Method) &&
+        context.Request.Path.StartsWithSegments("/api"))
+    {
+        // Business data is versioned in QLHV_APP and must be re-read after a
+        // successful sync. Never let a browser/proxy serve a stale API snapshot.
+        context.Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
+        context.Response.Headers.Pragma = "no-cache";
+        context.Response.Headers.Expires = "0";
+    }
     await next();
 });
 app.UseCors(FrontendCors);

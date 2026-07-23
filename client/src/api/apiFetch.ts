@@ -6,6 +6,7 @@ export async function apiFetch(
 ): Promise<Response> {
   const response = await fetch(input, {
     ...init,
+    cache: init.cache ?? 'no-store',
     credentials: 'include',
   });
 

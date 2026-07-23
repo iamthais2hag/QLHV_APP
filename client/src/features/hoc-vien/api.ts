@@ -74,8 +74,25 @@ export async function exportHocVienExcel(
   };
 }
 
-export function getHocVienPhotoPreviewUrl(hocVienId: number): string {
-  return `${API_BASE}/hoc-vien/${hocVienId}/photo/preview`;
+export function getHocVienPhotoPreviewUrl(
+  hocVienId: number,
+  cacheVersion?: string | number | null,
+): string {
+  const baseUrl = `${API_BASE}/hoc-vien/${hocVienId}/photo/preview`;
+  return cacheVersion === undefined || cacheVersion === null
+    ? baseUrl
+    : `${baseUrl}?v=${encodeURIComponent(String(cacheVersion))}`;
+}
+
+export function getHocVienPhotoCacheVersion(
+  hocVienVersion?: string | number | null,
+  photoVersion?: string | number | null,
+): string | null {
+  if ((hocVienVersion === undefined || hocVienVersion === null)
+      && (photoVersion === undefined || photoVersion === null)) {
+    return null;
+  }
+  return `${hocVienVersion ?? ''}:${photoVersion ?? ''}`;
 }
 
 export function getHocVienCardLogoUrl(): string {

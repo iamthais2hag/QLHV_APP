@@ -5,6 +5,7 @@ using QLHV.Application.CsdtConnections;
 using QLHV.Application.HocVien;
 using QLHV.Application.HocVien.Printing;
 using QLHV.Application.Sync;
+using QLHV.Application.SystemData;
 
 namespace QLHV.Application;
 
@@ -24,6 +25,11 @@ public static class DependencyInjection
         services.AddScoped<IHocVienSyncService, HocVienSyncService>();
         services.AddScoped<IQlhvImportService, QlhvImportService>();
         services.AddScoped<IQlhvOperationsService, QlhvOperationsService>();
+        services.AddScoped<IQlhvAutoSyncService, QlhvAutoSyncService>();
+        services.AddScoped<IQlhvAutoSyncSourceRunner, QlhvAutoSyncSourceRunner>();
+        services.AddScoped<IQlhvSyncFreshnessService, QlhvSyncFreshnessService>();
+        services.AddScoped<QlhvAutoSyncCoordinator>();
+        services.AddScoped<ISystemDataVersionService, SystemDataVersionService>();
         services.AddScoped<IMotoSyncService, MotoSyncService>();
         return services;
     }

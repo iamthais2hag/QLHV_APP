@@ -4,6 +4,7 @@ import {
   auditHocVienPhotos,
   exportHocVienExcel,
   getHocVienHangHocLookups,
+  getHocVienPhotoCacheVersion,
   getHocVienPhotoPreviewUrl,
   getHocVienKhoaLookups,
   searchHocVien,
@@ -21,6 +22,7 @@ import {
   formatNgaySinh,
 } from './utils';
 import CopyButton from './CopyButton';
+import { useDataVersionRefresh } from '../data-version/useDataVersionRefresh';
 
 const PAGE_SIZE = 20;
 
@@ -45,19 +47,21 @@ function formatPhotoStatus(status: string): string {
 
 function HocVienPhoto({
   hocVienId,
+  photoCacheVersion,
   title,
   onPreview,
 }: {
   hocVienId: number;
+  photoCacheVersion?: string | number | null;
   title: string;
   onPreview: (url: string, title: string) => void;
 }) {
   const [failed, setFailed] = useState(false);
-  const url = getHocVienPhotoPreviewUrl(hocVienId);
+  const url = getHocVienPhotoPreviewUrl(hocVienId, photoCacheVersion);
 
   useEffect(() => {
     setFailed(false);
-  }, [hocVienId]);
+  }, [hocVienId, photoCacheVersion]);
 
   if (!failed) {
     return (
@@ -144,8 +148,9 @@ export default function HocVienPage() {
         setTotalItems(result.totalItems);
         setTotalPages(result.totalPages);
         setStatus('success');
+        return true;
       } catch (err) {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted) return false;
         setRows([]);
         setTotalItems(0);
         setTotalPages(0);
@@ -153,6 +158,7 @@ export default function HocVienPage() {
           err instanceof Error ? err.message : 'Không thể tải dữ liệu. Vui lòng thử lại.',
         );
         setStatus('error');
+        return false;
       }
     },
     [],
@@ -189,12 +195,14 @@ export default function HocVienPage() {
         setAuditOnlyMissing(nextOnlyMissing);
         setAuditOnlyInvalid(nextOnlyInvalid);
         setPhotoAuditStatus('success');
+        return true;
       } catch (err) {
         setPhotoAudit(null);
         setPhotoAuditErrorMessage(
           err instanceof Error ? err.message : 'Khong the doi soat anh hoc vien.',
         );
         setPhotoAuditStatus('error');
+        return false;
       }
     },
     [
@@ -205,6 +213,18 @@ export default function HocVienPage() {
       currentFilters,
     ],
   );
+
+  const dataVersion = useDataVersionRefresh({
+    resources: ['hocVienVersion', 'photoVersion'],
+    onVersionChanged: async () => {
+      const refreshed = showPhotoAudit
+        ? await loadPhotoAudit({ page: 1 })
+        : await load({ ...currentFilters(), page, pageSize: PAGE_SIZE });
+      if (!refreshed) {
+        throw new Error('Không thể tải lại dữ liệu học viên theo phiên bản mới.');
+      }
+    },
+  });
 
   useEffect(() => {
     load({ ...currentFilters(), page, pageSize: PAGE_SIZE });
@@ -536,6 +556,15 @@ export default function HocVienPage() {
           </div>
 
           <div className="toolbar__actions">
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={() => void dataVersion.reload()}
+              disabled={dataVersion.checking}
+              title="Đọc phiên bản mới nhất và tải lại danh sách"
+            >
+              {dataVersion.checking ? 'Đang tải lại...' : 'Tải lại dữ liệu'}
+            </button>
             <button type="button" className="btn btn--primary" onClick={handleSearch}>
               Tìm kiếm
             </button>
@@ -580,6 +609,7 @@ export default function HocVienPage() {
             </Link>
           </div>
         </div>
+        {dataVersion.error && <div className="toolbar__error">{dataVersion.error}</div>}
         {exportErrorMessage && <div className="toolbar__error">{exportErrorMessage}</div>}
       </div>
 
@@ -789,6 +819,10 @@ export default function HocVienPage() {
                     <td>
                       <HocVienPhoto
                         hocVienId={row.hocVienId}
+                        photoCacheVersion={getHocVienPhotoCacheVersion(
+                          dataVersion.version?.hocVienVersion,
+                          dataVersion.version?.photoVersion,
+                        )}
                         title={row.hoVaTen}
                         onPreview={(url, title) =>
                           setPhotoPreview({ url, title })

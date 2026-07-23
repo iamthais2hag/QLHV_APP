@@ -10,7 +10,9 @@ using QLHV.Application.Sync.Mapping;
 
 namespace QLHV.Infrastructure.Sync;
 
-public sealed class QlhvImportReadRepository : IQlhvImportReadRepository
+public sealed class QlhvImportReadRepository :
+    IQlhvImportReadRepository,
+    IQlhvFreshnessSourceRepository
 {
     private const string AuthModeSqlLogin = "SqlLogin";
 
@@ -31,11 +33,26 @@ public sealed class QlhvImportReadRepository : IQlhvImportReadRepository
         _options = options.Value;
     }
 
-    public async Task<QlhvImportSourceSnapshot> ReadSourceAsync(
+    public Task<QlhvImportSourceSnapshot> ReadSourceAsync(
         QlhvImportRequest request,
         CancellationToken cancellationToken = default)
+        => ReadBackupSourceAsync(request, cancellationToken);
+
+    public Task<QlhvImportSourceSnapshot> ReadBackupSourceAsync(
+        QlhvImportRequest request,
+        CancellationToken cancellationToken = default)
+        => ReadSourceCoreAsync(request, ResolveSourceBinding(request.SourceProfileCode), cancellationToken);
+
+    public Task<QlhvImportSourceSnapshot> ReadLiveSourceAsync(
+        QlhvImportRequest request,
+        CancellationToken cancellationToken = default)
+        => ReadSourceCoreAsync(request, ResolveLiveSourceBinding(request.SourceProfileCode), cancellationToken);
+
+    private async Task<QlhvImportSourceSnapshot> ReadSourceCoreAsync(
+        QlhvImportRequest request,
+        SourceBinding binding,
+        CancellationToken cancellationToken)
     {
-        var binding = ResolveSourceBinding(request.SourceProfileCode);
         var connectionString = await ResolveSourceProfileAsync(binding.ConnectionProfileCode, cancellationToken);
         return await SyncRetryPolicyFactory.CreateDefault(_options.MaxRetryAttempts).ExecuteAsync(async ct =>
         {
@@ -354,6 +371,19 @@ public sealed class QlhvImportReadRepository : IQlhvImportReadRepository
                 "CSDL_MOTO_BAK"),
             _ => throw new QlhvImportReadException(
                 $"SourceProfileCode {sourceProfileCode} khong co binding database BAK an toan."),
+        };
+
+    private static SourceBinding ResolveLiveSourceBinding(string sourceProfileCode)
+        => sourceProfileCode switch
+        {
+            CsdtConnectionProfileCodes.CsdtOto => new SourceBinding(
+                CsdtConnectionProfileCodes.CsdtOto,
+                "CSDL_OTO"),
+            CsdtConnectionProfileCodes.CsdtMoto => new SourceBinding(
+                CsdtConnectionProfileCodes.CsdtMoto,
+                "CSDL_MOTO"),
+            _ => throw new QlhvImportReadException(
+                $"SourceProfileCode {sourceProfileCode} khong co binding database live an toan."),
         };
 
     private async Task<string> ResolveTargetAsync(CancellationToken cancellationToken)

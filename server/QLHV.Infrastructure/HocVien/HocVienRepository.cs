@@ -190,6 +190,7 @@ public sealed class HocVienRepository : IHocVienRepository
     private static HocVienListItemDto ToDto(HocVienReadRow row) => new()
     {
         HocVienId = row.HocVienId,
+        SourceProfileCode = row.SourceProfileCode,
         MaDangKy = row.MaDangKy,
         HoVaTen = row.HoVaTen ?? string.Empty,
         NgaySinh = row.NgaySinh.HasValue ? DateOnly.FromDateTime(row.NgaySinh.Value) : null,
@@ -229,6 +230,7 @@ public sealed class HocVienRepository : IHocVienRepository
     private sealed class HocVienReadRow
     {
         public int HocVienId { get; init; }
+        public string? SourceProfileCode { get; init; }
         public string MaDangKy { get; init; } = string.Empty;
         public string? HoVaTen { get; init; }
         public DateTime? NgaySinh { get; init; }

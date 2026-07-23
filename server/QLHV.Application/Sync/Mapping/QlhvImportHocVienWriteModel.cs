@@ -25,6 +25,11 @@ public sealed class QlhvImportHocVienWriteModel
     public string? HangGPLXDaCo { get; init; }
     public string? NguoiNhanHoSo { get; init; }
     public string? AnhRelativePath { get; init; }
+    /// <summary>
+    /// Import-only signal for the post-commit photo queue. It is never persisted as a path and
+    /// deliberately does not block the database transaction.
+    /// </summary>
+    public bool SourcePhotoPathInvalid { get; init; }
     public int? ChatLuongAnh { get; init; }
     public DateTime? NgayThuNhanAnh { get; init; }
     public string? NguoiThuNhanAnh { get; init; }

@@ -289,10 +289,22 @@ public sealed class HocVienService : IHocVienService
     }
 
     private static bool IsMissingForPrint(HocVienPhotoInspectionDto photo)
-        => photo.PhotoStatus is "Missing" or "UnsafePath";
+        => photo.PhotoStatus is
+            "Missing" or
+            "UnsafePath" or
+            "ReviewRequired" or
+            "ProcessingFailed" or
+            "Processing" or
+            "DerivedMissing";
 
     private static bool IsInvalidPhotoStatus(string status)
-        => status is "Invalid" or "Unsupported" or "UnsafePath";
+        => status is
+            "Invalid" or
+            "Unsupported" or
+            "UnsafePath" or
+            "ReviewRequired" or
+            "ProcessingFailed" or
+            "DerivedMissing";
 
     private static bool MatchesAuditStatusFilters(
         HocVienPhotoAuditItemDto item,
