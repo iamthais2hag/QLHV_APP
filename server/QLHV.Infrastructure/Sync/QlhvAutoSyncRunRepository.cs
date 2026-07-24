@@ -89,6 +89,17 @@ public sealed class QlhvAutoSyncRunRepository : IQlhvAutoSyncRunRepository
         CancellationToken cancellationToken = default)
         => GetSingleAsync(LatestSql, null, cancellationToken);
 
+    public Task<QlhvAutoSyncRunRecord?> GetLatestByTriggerAsync(
+        string triggerType,
+        CancellationToken cancellationToken = default)
+    {
+        var trigger = QlhvAutoSyncConstants.NormalizeTrigger(triggerType);
+        return GetSingleAsync(
+            LatestByTriggerSql,
+            new { TriggerType = trigger },
+            cancellationToken);
+    }
+
     public Task<bool> MarkRunningAsync(
         Guid runId,
         DateTime startedAtUtc,
@@ -344,7 +355,7 @@ WHERE ActiveSlot = 1
    (
        @DedupeNotBeforeUtc IS NOT NULL
        AND TriggerType = @TriggerType
-       AND CreatedAtUtc >= @DedupeNotBeforeUtc
+       AND COALESCE(CompletedAtUtc, CreatedAtUtc) >= @DedupeNotBeforeUtc
    );";
 
     private const string InsertSql = @"
@@ -371,6 +382,11 @@ ORDER BY CreatedAtUtc, Id;";
 
     private const string LatestSql = "SELECT TOP (1) " + Projection + @"
 FROM dbo.App_QlhvAutoSyncRun
+ORDER BY CreatedAtUtc DESC, Id DESC;";
+
+    private const string LatestByTriggerSql = "SELECT TOP (1) " + Projection + @"
+FROM dbo.App_QlhvAutoSyncRun
+WHERE TriggerType = @TriggerType
 ORDER BY CreatedAtUtc DESC, Id DESC;";
 
     private const string MarkRunningSql = @"

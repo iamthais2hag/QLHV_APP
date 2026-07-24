@@ -20,6 +20,8 @@ public sealed class AuthSessionDto
     public string Role { get; init; } = string.Empty;
 
     public IReadOnlyList<string> Roles { get; init; } = Array.Empty<string>();
+
+    public bool MustChangePassword { get; init; }
 }
 
 public sealed class AuthLoginResult
@@ -27,6 +29,9 @@ public sealed class AuthLoginResult
     public bool Succeeded { get; init; }
 
     public AuthSessionDto? Session { get; init; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Guid SecurityStamp { get; init; }
 
     public string FailureCode { get; init; } = string.Empty;
 
@@ -51,15 +56,28 @@ public sealed class AppUserCredential
 
     public string PasswordHash { get; init; } = string.Empty;
 
+    public Guid SecurityStamp { get; init; }
+
     public bool IsActive { get; init; }
 
     public bool IsDeleted { get; init; }
 
     public int FailedLoginCount { get; init; }
 
+    public DateTime? LastFailedLoginAtUtc { get; init; }
+
     public DateTime? UpdatedAtUtc { get; init; }
 
     public IReadOnlyList<string> Roles { get; init; } = Array.Empty<string>();
+
+    public bool MustChangePassword { get; init; }
+}
+
+public sealed class ChangeOwnPasswordRequestDto
+{
+    public string CurrentPassword { get; set; } = string.Empty;
+
+    public string NewPassword { get; set; } = string.Empty;
 }
 
 public sealed class FirstAdminSeedRequest

@@ -4,18 +4,32 @@ public static class AppRoles
 {
     public const string Admin = "Admin";
 
+    public const string Employee = "Employee";
+
     public const string Viewer = "Viewer";
 
     public static bool IsKnown(string? role) =>
         string.Equals(role, Admin, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(role, Employee, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(role, Viewer, StringComparison.OrdinalIgnoreCase);
 
     public static string Normalize(string role) =>
         string.Equals(role, Admin, StringComparison.OrdinalIgnoreCase)
             ? Admin
+            : string.Equals(role, Employee, StringComparison.OrdinalIgnoreCase)
+                ? Employee
             : string.Equals(role, Viewer, StringComparison.OrdinalIgnoreCase)
                 ? Viewer
                 : throw new ArgumentException("Role is not supported.", nameof(role));
+
+    public static int Priority(string role) =>
+        Normalize(role) switch
+        {
+            Admin => 0,
+            Employee => 1,
+            Viewer => 2,
+            _ => int.MaxValue,
+        };
 
     public static string? SelectPrimary(IEnumerable<string> roles)
     {
@@ -27,6 +41,8 @@ public static class AppRoles
 
         return normalized.Contains(Admin, StringComparer.Ordinal)
             ? Admin
+            : normalized.Contains(Employee, StringComparer.Ordinal)
+                ? Employee
             : normalized.Contains(Viewer, StringComparer.Ordinal)
                 ? Viewer
                 : null;

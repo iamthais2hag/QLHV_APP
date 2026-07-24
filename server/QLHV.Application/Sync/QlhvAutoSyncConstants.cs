@@ -5,6 +5,7 @@ public static class QlhvAutoSyncConstants
     public const string StartupTrigger = "STARTUP";
     public const string ManualTrigger = "MANUAL";
     public const string SessionStartTrigger = "SESSION_START";
+    public const string AppOpenTrigger = "APP_OPEN";
 
     public const string Queued = "QUEUED";
     public const string Running = "RUNNING";
@@ -12,6 +13,13 @@ public static class QlhvAutoSyncConstants
     public const string PartialSuccess = "PARTIAL_SUCCESS";
     public const string PartialFailed = "PARTIAL_FAILED";
     public const string Failed = "FAILED";
+
+    public const string NoSyncNeededDecision = "NO_SYNC_NEEDED";
+    public const string ActiveOperationDecision = "ACTIVE_OPERATION";
+    public const string CooldownDecision = "COOLDOWN";
+    public const string StartedDecision = "STARTED";
+    public const string NotReadyDecision = "NOT_READY";
+    public const string FailedToQueueDecision = "FAILED_TO_QUEUE";
 
     public const string ConnectingStage = "CONNECTING";
     public const string RefreshOtoStage = "REFRESH_OTO";
@@ -45,6 +53,7 @@ public static class QlhvAutoSyncConstants
             StartupTrigger => StartupTrigger,
             ManualTrigger => ManualTrigger,
             SessionStartTrigger => SessionStartTrigger,
+            AppOpenTrigger => AppOpenTrigger,
             _ => throw new ArgumentException("Auto Sync trigger khong hop le.", nameof(triggerType)),
         };
 

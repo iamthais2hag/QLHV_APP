@@ -8,7 +8,7 @@ using QLHV.Application.Sync.Dtos;
 namespace QLHV.Api.Controllers;
 
 [ApiController]
-[Authorize(Policy = AuthPolicies.Read)]
+[Authorize(Policy = AuthPolicies.CanViewBusinessData)]
 [Route("api/dong-bo-v2/qlhv")]
 [Produces("application/json")]
 public sealed class QlhvImportController : ControllerBase
@@ -57,7 +57,7 @@ public sealed class QlhvImportController : ControllerBase
     /// Guarded import from one configured CSDT profile into QLHV_APP.dbo.App_HocVien.
     /// </summary>
     [HttpPost("import-execute")]
-    [Authorize(Policy = AuthPolicies.Admin)]
+    [Authorize(Policy = AuthPolicies.CanSynchronizeCSDT)]
     [ProducesResponseType(typeof(QlhvImportExecuteResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(QlhvImportExecuteResultDto), StatusCodes.Status409Conflict)]
     public async Task<ActionResult<QlhvImportExecuteResultDto>> ImportExecute(
@@ -95,7 +95,7 @@ public sealed class QlhvImportController : ControllerBase
 
     /// <summary>Queues a guarded live-to-BAK database refresh.</summary>
     [HttpPost("operations/refresh-backup")]
-    [Authorize(Policy = AuthPolicies.Admin)]
+    [Authorize(Policy = AuthPolicies.CanSynchronizeCSDT)]
     [ProducesResponseType(typeof(QlhvRefreshBackupResultDto), StatusCodes.Status202Accepted)]
     [ProducesResponseType(typeof(QlhvRefreshBackupResultDto), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(QlhvRefreshBackupResultDto), StatusCodes.Status409Conflict)]
@@ -170,9 +170,44 @@ public sealed class QlhvImportController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Checks freshness after an authorized user opens the application and queues
+    /// at most one system Auto Sync run. The caller cannot select a source, force
+    /// execution, or bypass the server-side cooldown.
+    /// </summary>
+    [HttpPost("operations/ensure-fresh")]
+    [Authorize(Policy = AuthPolicies.CanEditBusinessData)]
+    [ProducesResponseType(typeof(QlhvAutoSyncQueueResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(QlhvAutoSyncQueueResultDto), StatusCodes.Status202Accepted)]
+    [ProducesResponseType(typeof(QlhvAutoSyncQueueResultDto), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(QlhvAutoSyncQueueResultDto), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(QlhvAutoSyncQueueResultDto), StatusCodes.Status503ServiceUnavailable)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<QlhvAutoSyncQueueResultDto>> EnsureFresh(
+        CancellationToken cancellationToken)
+    {
+        var result = await _autoSyncService.QueueEnsureFreshAsync(cancellationToken);
+        if (result.Accepted)
+        {
+            return IsActiveAutoSyncStatus(result.Status)
+                ? Accepted(result)
+                : Ok(result);
+        }
+
+        if (result.IsConflict)
+        {
+            return Conflict(result);
+        }
+
+        return result.IsUnavailable
+            ? StatusCode(StatusCodes.Status503ServiceUnavailable, result)
+            : BadRequest(result);
+    }
+
     /// <summary>Queues one Admin-triggered OTO then MOTO Auto Sync run.</summary>
     [HttpPost("operations/auto-sync")]
-    [Authorize(Policy = AuthPolicies.Admin)]
+    [Authorize(Policy = AuthPolicies.CanSynchronizeCSDT)]
     [ProducesResponseType(typeof(QlhvAutoSyncQueueResultDto), StatusCodes.Status202Accepted)]
     [ProducesResponseType(typeof(QlhvAutoSyncQueueResultDto), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(QlhvAutoSyncQueueResultDto), StatusCodes.Status409Conflict)]
@@ -198,4 +233,7 @@ public sealed class QlhvImportController : ControllerBase
             : BadRequest(result);
     }
 
+    private static bool IsActiveAutoSyncStatus(string status)
+        => string.Equals(status, QlhvAutoSyncConstants.Queued, StringComparison.Ordinal) ||
+           string.Equals(status, QlhvAutoSyncConstants.Running, StringComparison.Ordinal);
 }

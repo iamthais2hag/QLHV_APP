@@ -3711,3 +3711,166 @@
     flex-direction: column;
   }
 }
+
+.sidebar__section {
+  margin: 18px 14px 6px;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.is-sidebar-collapsed .sidebar__section {
+  height: 1px;
+  margin: 12px 14px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.18);
+  color: transparent;
+}
+
+.account-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  overflow-y: auto;
+  background: rgba(15, 32, 52, 0.62);
+}
+
+.account-modal__dialog,
+.change-password-card {
+  width: min(100%, 620px);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+}
+
+.account-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+  font-size: 1.08rem;
+}
+
+.change-password-card {
+  text-align: left;
+}
+
+.change-password-actions,
+.admin-user-form__actions,
+.admin-users-toolbar__actions,
+.admin-users-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.admin-users-page {
+  display: grid;
+  gap: 16px;
+}
+
+.admin-users-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.admin-users-toolbar p,
+.admin-user-form p {
+  margin: 6px 0 0;
+  color: var(--tc-text-muted);
+}
+
+.admin-users-message {
+  padding: 12px 14px;
+  border: 1px solid;
+  border-radius: 8px;
+}
+
+.admin-users-message.is-error {
+  border-color: #efb0b0;
+  color: #8b1f1f;
+  background: #fff0f0;
+}
+
+.admin-users-message.is-success {
+  border-color: #9bd5b6;
+  color: #12623b;
+  background: #ecf9f1;
+}
+
+.admin-users-table td {
+  vertical-align: top;
+}
+
+.admin-users-self-label,
+.admin-users-must-change {
+  display: block;
+  margin-top: 4px;
+  color: var(--tc-text-muted);
+  white-space: nowrap;
+}
+
+.admin-user-status {
+  display: inline-flex;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.admin-user-status.is-active {
+  color: #12623b;
+  background: #e7f7ef;
+}
+
+.admin-user-status.is-locked {
+  color: #8b1f1f;
+  background: #fff0f0;
+}
+
+.admin-user-form {
+  display: grid;
+  gap: 14px;
+}
+
+.admin-user-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: var(--tc-text);
+}
+
+.admin-user-check input {
+  margin-top: 3px;
+}
+
+@media (max-width: 760px) {
+  .admin-users-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .admin-users-toolbar__actions {
+    justify-content: flex-start;
+  }
+
+  .account-modal {
+    align-items: start;
+    padding: 12px;
+  }
+
+  .account-modal__dialog,
+  .change-password-card {
+    max-height: none;
+  }
+}

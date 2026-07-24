@@ -11,7 +11,7 @@ namespace QLHV.Api.Controllers;
 /// Phase A exposes dry-run only. It does not write SQL Server data or return secrets.
 /// </summary>
 [ApiController]
-[Authorize(Policy = AuthPolicies.Admin)]
+[Authorize(Policy = AuthPolicies.CanSynchronizeCSDT)]
 [Route("api/dong-bo-v2")]
 [Produces("application/json")]
 public sealed class DongBoV2Controller : ControllerBase

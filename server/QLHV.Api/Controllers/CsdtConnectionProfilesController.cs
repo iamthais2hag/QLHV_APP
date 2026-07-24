@@ -11,7 +11,7 @@ namespace QLHV.Api.Controllers;
 /// Responses never include plaintext passwords or encrypted password bytes.
 /// </summary>
 [ApiController]
-[Authorize(Policy = AuthPolicies.Admin)]
+[Authorize(Policy = AuthPolicies.RequireAdmin)]
 [Route("api/csdt-connection-profiles")]
 [Produces("application/json")]
 public sealed class CsdtConnectionProfilesController : ControllerBase

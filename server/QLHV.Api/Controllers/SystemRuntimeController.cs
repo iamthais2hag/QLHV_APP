@@ -33,7 +33,7 @@ public sealed class SystemRuntimeController : ControllerBase
         return Ok(status);
     }
 
-    [Authorize(Policy = AuthPolicies.Read)]
+    [Authorize(Policy = AuthPolicies.CanViewBusinessData)]
     [HttpGet("data-version")]
     [ProducesResponseType(typeof(SystemDataVersionDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]

@@ -29,6 +29,7 @@ public sealed class AuthServiceTests
         Assert.Equal("Administrator", session.DisplayName);
         Assert.Equal(AppRoles.Admin, session.Role);
         Assert.Contains(AppRoles.Admin, session.Roles);
+        Assert.Equal(repository.User!.SecurityStamp, result.SecurityStamp);
         Assert.Equal("admin", repository.LastLookupUsername);
         Assert.Equal(1, repository.SuccessfulLoginCalls);
         Assert.Equal(0, repository.FailedLoginCalls);
@@ -132,6 +133,91 @@ public sealed class AuthServiceTests
         Assert.Equal(1, hasher.VerifyCalls);
     }
 
+    [Fact]
+    public async Task Rehash_compare_and_swap_failure_rejects_racing_login()
+    {
+        var oldHash = new PasswordHasher<AppUserCredential>().HashPassword(
+            new AppUserCredential(),
+            "legacy-password");
+        var repository = new FakeAppUserRepository
+        {
+            User = new AppUserCredential
+            {
+                Id = 42,
+                Username = "admin",
+                DisplayName = "Administrator",
+                PasswordHash = oldHash,
+                SecurityStamp = Guid.NewGuid(),
+                IsActive = true,
+                Roles = [AppRoles.Admin],
+            },
+            RehashUpdateResult = false,
+        };
+        var service = new AuthService(repository, new RehashNeededPasswordHasher());
+
+        var result = await service.AuthenticateAsync(new LoginRequestDto
+        {
+            Username = "admin",
+            Password = ValidPassword,
+        });
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("INVALID_CREDENTIALS", result.FailureCode);
+        Assert.Equal(1, repository.RehashUpdateCalls);
+        Assert.Equal(oldHash, repository.LastExpectedPasswordHash);
+        Assert.Equal(0, repository.SuccessfulLoginCalls);
+    }
+
+    [Fact]
+    public async Task Successful_login_compare_and_swap_failure_rejects_racing_account_change()
+    {
+        var hasher = new PasswordHasher<AppUserCredential>();
+        var repository = new FakeAppUserRepository
+        {
+            User = CreateUser(hasher, ValidPassword, roles: [AppRoles.Admin]),
+            LoginRecordResult = false,
+        };
+        var service = new AuthService(repository, hasher);
+
+        var result = await service.AuthenticateAsync(new LoginRequestDto
+        {
+            Username = "admin",
+            Password = ValidPassword,
+        });
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("INVALID_CREDENTIALS", result.FailureCode);
+        Assert.Equal(1, repository.SuccessfulLoginCalls);
+        Assert.Equal(repository.User!.PasswordHash, repository.LastLoginExpectedPasswordHash);
+        Assert.Equal(repository.User.SecurityStamp, repository.LastLoginExpectedSecurityStamp);
+    }
+
+    [Fact]
+    public void Password_hash_format_accepts_identity_hash_and_rejects_malformed_credentials()
+    {
+        var hasher = new PasswordHasher<AppUserCredential>();
+        var user = new AppUserCredential { Username = "admin" };
+        var validHash = hasher.HashPassword(user, ValidPassword);
+        var identityV2Payload = new byte[49];
+        identityV2Payload[0] = 0x00;
+        var unsupportedPrfPayload = Convert.FromBase64String(validHash);
+        unsupportedPrfPayload[1] = 0x00;
+        unsupportedPrfPayload[2] = 0x00;
+        unsupportedPrfPayload[3] = 0x00;
+        unsupportedPrfPayload[4] = 0x03;
+
+        Assert.True(AppPasswordHashFormat.IsSupported(validHash));
+        Assert.True(AppPasswordHashFormat.IsSupported(
+            Convert.ToBase64String(identityV2Payload)));
+        Assert.False(AppPasswordHashFormat.IsSupported(null));
+        Assert.False(AppPasswordHashFormat.IsSupported("not-base64"));
+        Assert.False(AppPasswordHashFormat.IsSupported(Convert.ToBase64String([0x7f, 0x00])));
+        Assert.False(AppPasswordHashFormat.IsSupported(
+            Convert.ToBase64String([0x01, 0x00, 0x00, 0x00])));
+        Assert.False(AppPasswordHashFormat.IsSupported(
+            Convert.ToBase64String(unsupportedPrfPayload)));
+    }
+
     [Theory]
     [InlineData(101, 20)]
     [InlineData(10, 513)]
@@ -221,6 +307,7 @@ public sealed class AuthServiceTests
             Username = "admin",
             DisplayName = "Administrator",
             IsActive = isActive,
+            SecurityStamp = Guid.NewGuid(),
             Roles = roles ?? [AppRoles.Viewer],
         };
         return new AppUserCredential
@@ -229,6 +316,7 @@ public sealed class AuthServiceTests
             Username = user.Username,
             DisplayName = user.DisplayName,
             PasswordHash = hasher.HashPassword(user, password),
+            SecurityStamp = user.SecurityStamp,
             IsActive = user.IsActive,
             IsDeleted = user.IsDeleted,
             FailedLoginCount = failedLoginCount,
@@ -256,6 +344,17 @@ public sealed class AuthServiceTests
         }
     }
 
+    private sealed class RehashNeededPasswordHasher : IPasswordHasher<AppUserCredential>
+    {
+        public string HashPassword(AppUserCredential user, string password) => "refreshed-hash";
+
+        public PasswordVerificationResult VerifyHashedPassword(
+            AppUserCredential user,
+            string hashedPassword,
+            string providedPassword) =>
+            PasswordVerificationResult.SuccessRehashNeeded;
+    }
+
     private sealed class FakeAppUserRepository : IAppUserRepository
     {
         public AppUserCredential? User { get; init; }
@@ -272,6 +371,18 @@ public sealed class AuthServiceTests
 
         public string? CreatedPasswordHash { get; private set; }
 
+        public bool RehashUpdateResult { get; init; } = true;
+
+        public int RehashUpdateCalls { get; private set; }
+
+        public string? LastExpectedPasswordHash { get; private set; }
+
+        public bool LoginRecordResult { get; init; } = true;
+
+        public string? LastLoginExpectedPasswordHash { get; private set; }
+
+        public Guid? LastLoginExpectedSecurityStamp { get; private set; }
+
         public Task<AppUserCredential?> FindByUsernameAsync(
             string username,
             CancellationToken cancellationToken = default)
@@ -285,12 +396,16 @@ public sealed class AuthServiceTests
             CancellationToken cancellationToken = default) =>
             Task.FromResult(User?.Id == userId ? User : null);
 
-        public Task RecordSuccessfulLoginAsync(
+        public Task<bool> TryRecordSuccessfulLoginAsync(
             long userId,
+            string expectedPasswordHash,
+            Guid expectedSecurityStamp,
             CancellationToken cancellationToken = default)
         {
             SuccessfulLoginCalls++;
-            return Task.CompletedTask;
+            LastLoginExpectedPasswordHash = expectedPasswordHash;
+            LastLoginExpectedSecurityStamp = expectedSecurityStamp;
+            return Task.FromResult(LoginRecordResult);
         }
 
         public Task RecordFailedLoginAsync(
@@ -305,10 +420,16 @@ public sealed class AuthServiceTests
             return Task.CompletedTask;
         }
 
-        public Task UpdatePasswordHashAsync(
+        public Task<bool> TryUpdatePasswordHashAsync(
             long userId,
+            string expectedPasswordHash,
             string passwordHash,
-            CancellationToken cancellationToken = default) => Task.CompletedTask;
+            CancellationToken cancellationToken = default)
+        {
+            RehashUpdateCalls++;
+            LastExpectedPasswordHash = expectedPasswordHash;
+            return Task.FromResult(RehashUpdateResult);
+        }
 
         public Task<FirstAdminCreateResult> TryCreateFirstAdminAsync(
             string username,

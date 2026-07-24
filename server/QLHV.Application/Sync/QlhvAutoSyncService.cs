@@ -67,6 +67,13 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
             serverStartedByLauncher,
             cancellationToken);
 
+    public Task<QlhvAutoSyncQueueResultDto> QueueEnsureFreshAsync(
+        CancellationToken cancellationToken = default)
+        => QueueIfNeededAsync(
+            QlhvAutoSyncConstants.AppOpenTrigger,
+            serverStartedByLauncher: false,
+            cancellationToken);
+
     private async Task<QlhvAutoSyncQueueResultDto> QueueIfNeededAsync(
         string trigger,
         bool serverStartedByLauncher,
@@ -82,7 +89,7 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
         }
         catch (QlhvAutoSyncStoreUnavailableException ex)
         {
-            return Unavailable(ex.Message);
+            return Unavailable(ex.Message, QlhvAutoSyncConstants.NotReadyDecision);
         }
 
         if (status.OperationActive)
@@ -92,7 +99,10 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
                 var active = await _runs.GetByIdAsync(status.ActiveRunId.Value, cancellationToken);
                 if (active is not null)
                 {
-                    return Joined(active, "Dang tham gia Auto Sync da duoc mot phien khac khoi tao.");
+                    return Joined(
+                        active,
+                        "Dang tham gia Auto Sync da duoc mot phien khac khoi tao.",
+                        QlhvAutoSyncConstants.ActiveOperationDecision);
                 }
             }
 
@@ -100,6 +110,7 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
             {
                 IsConflict = true,
                 Status = "CONFLICT",
+                Decision = QlhvAutoSyncConstants.ActiveOperationDecision,
                 Message =
                     "Dang co thao tac refresh/full sync thu cong; phien launcher se cho thao tac ket thuc.",
             };
@@ -111,13 +122,16 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
             {
                 Accepted = true,
                 Status = "UP_TO_DATE",
+                Decision = QlhvAutoSyncConstants.NoSyncNeededDecision,
                 Message = "Du lieu Live, BAK va QLHV_APP da dong bo; khong tao operation moi.",
             };
         }
 
         if (!status.CanStart)
         {
-            return Rejected(status.Blockers.FirstOrDefault() ?? "Auto Sync chua du dieu kien khoi dong.");
+            return Rejected(
+                status.Blockers.FirstOrDefault() ?? "Auto Sync chua du dieu kien khoi dong.",
+                QlhvAutoSyncConstants.NotReadyDecision);
         }
 
         return await QueueCoreAsync(trigger, joinActiveRun: true, cancellationToken);
@@ -147,7 +161,10 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
                 var active = await _runs.GetActiveAsync(cancellationToken);
                 if (active is not null)
                 {
-                    return Joined(active, "Dang tham gia Auto Sync da duoc mot phien khac khoi tao.");
+                    return Joined(
+                        active,
+                        "Dang tham gia Auto Sync da duoc mot phien khac khoi tao.",
+                        QlhvAutoSyncConstants.ActiveOperationDecision);
                 }
             }
 
@@ -160,6 +177,7 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
                     {
                         IsConflict = true,
                         Status = "CONFLICT",
+                        Decision = QlhvAutoSyncConstants.ActiveOperationDecision,
                         Message =
                             $"Dang co thao tac refresh/full sync thu cong cho {source.SourceType}; khong tao Auto Sync moi.",
                     };
@@ -168,21 +186,22 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
         }
         catch (QlhvAutoSyncStoreUnavailableException ex)
         {
-            return Unavailable(ex.Message);
+            return Unavailable(ex.Message, QlhvAutoSyncConstants.NotReadyDecision);
         }
         catch (QlhvOperationsStoreUnavailableException ex)
         {
-            return Unavailable(ex.Message);
+            return Unavailable(ex.Message, QlhvAutoSyncConstants.NotReadyDecision);
         }
 
         var startBlockers = GetStartBlockers();
         if (startBlockers.Count > 0)
         {
-            return Rejected(startBlockers[0]);
+            return Rejected(startBlockers[0], QlhvAutoSyncConstants.NotReadyDecision);
         }
 
         var runId = Guid.NewGuid();
         var createdAtUtc = DateTime.UtcNow;
+        var dedupeNotBeforeUtc = GetDedupeNotBeforeUtc(trigger, createdAtUtc);
         bool created;
         try
         {
@@ -193,12 +212,12 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
                     ResolveActor(trigger),
                     sourceOrder,
                     createdAtUtc,
-                    DedupeNotBeforeUtc: null),
+                    dedupeNotBeforeUtc),
                 cancellationToken);
         }
         catch (QlhvAutoSyncStoreUnavailableException ex)
         {
-            return Unavailable(ex.Message);
+            return Unavailable(ex.Message, QlhvAutoSyncConstants.NotReadyDecision);
         }
 
         if (!created)
@@ -213,12 +232,34 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
                     {
                         return Joined(
                             existing,
-                            "Auto Sync da duoc mot process hoac phien launcher khac tiep nhan.");
+                            "Auto Sync da duoc mot process hoac phien launcher khac tiep nhan.",
+                            QlhvAutoSyncConstants.ActiveOperationDecision);
                     }
                 }
                 catch (QlhvAutoSyncStoreUnavailableException ex)
                 {
-                    return Unavailable(ex.Message);
+                    return Unavailable(ex.Message, QlhvAutoSyncConstants.NotReadyDecision);
+                }
+            }
+
+            if (dedupeNotBeforeUtc.HasValue)
+            {
+                try
+                {
+                    var recent = await _runs.GetLatestByTriggerAsync(trigger, cancellationToken);
+                    if (recent is not null &&
+                        (recent.CompletedAtUtc ?? recent.CreatedAtUtc) >=
+                            dedupeNotBeforeUtc.Value)
+                    {
+                        return Joined(
+                            recent,
+                            "Yeu cau mo ung dung nam trong thoi gian cooldown; su dung ket qua Auto Sync gan nhat.",
+                            QlhvAutoSyncConstants.CooldownDecision);
+                    }
+                }
+                catch (QlhvAutoSyncStoreUnavailableException ex)
+                {
+                    return Unavailable(ex.Message, QlhvAutoSyncConstants.NotReadyDecision);
                 }
             }
 
@@ -226,6 +267,7 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
             {
                 IsConflict = true,
                 Status = "CONFLICT",
+                Decision = QlhvAutoSyncConstants.ActiveOperationDecision,
                 Message = "Da co Auto Sync dang cho hoac dang chay tren mot tien trinh khac.",
             };
         }
@@ -247,6 +289,7 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
                 IsUnavailable = true,
                 RunId = runId,
                 Status = "UNAVAILABLE",
+                Decision = QlhvAutoSyncConstants.FailedToQueueDecision,
                 Message = "Khong the dua Auto Sync vao hang doi.",
             };
         }
@@ -256,6 +299,7 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
             Accepted = true,
             RunId = runId,
             Status = QlhvAutoSyncConstants.Queued,
+            Decision = QlhvAutoSyncConstants.StartedDecision,
             Message = "Da xep lich Auto Sync OTO roi MOTO.",
         };
     }
@@ -523,6 +567,25 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
         return Array.Empty<string>();
     }
 
+    private DateTime? GetDedupeNotBeforeUtc(string trigger, DateTime createdAtUtc)
+    {
+        if (!string.Equals(
+                trigger,
+                QlhvAutoSyncConstants.AppOpenTrigger,
+                StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var cooldownSeconds = Math.Clamp(
+            _options.SessionStartDedupeWindowSeconds,
+            0,
+            3600);
+        return cooldownSeconds == 0
+            ? null
+            : createdAtUtc.AddSeconds(-cooldownSeconds);
+    }
+
     private static IEnumerable<QlhvOperationSourceDefinition> OrderedSources()
         => QlhvOperationSourceCatalog.All.OrderBy(
             item => string.Equals(item.SourceType, "OTO", StringComparison.Ordinal) ? 0 : 1);
@@ -568,6 +631,8 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
         {
             QlhvAutoSyncConstants.SessionStartTrigger =>
                 QlhvOperationActors.SystemSessionStart,
+            QlhvAutoSyncConstants.AppOpenTrigger =>
+                QlhvOperationActors.SystemAppOpen,
             QlhvAutoSyncConstants.ManualTrigger =>
                 QlhvOperationActors.ManualAdmin,
             _ => QlhvOperationActors.SystemAutoSync,
@@ -575,26 +640,34 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
 
     private static QlhvAutoSyncQueueResultDto Joined(
         QlhvAutoSyncRunRecord run,
-        string message)
+        string message,
+        string decision = QlhvAutoSyncConstants.ActiveOperationDecision)
         => new()
         {
             Accepted = true,
             JoinedExisting = true,
             RunId = run.RunId,
             Status = run.Status,
+            Decision = decision,
             Message = message,
         };
 
-    private static QlhvAutoSyncQueueResultDto Rejected(string message) => new()
+    private static QlhvAutoSyncQueueResultDto Rejected(
+        string message,
+        string decision = QlhvAutoSyncConstants.NotReadyDecision) => new()
     {
         Status = "REJECTED",
+        Decision = decision,
         Message = message,
     };
 
-    private static QlhvAutoSyncQueueResultDto Unavailable(string message) => new()
+    private static QlhvAutoSyncQueueResultDto Unavailable(
+        string message,
+        string decision = QlhvAutoSyncConstants.FailedToQueueDecision) => new()
     {
         IsUnavailable = true,
         Status = "UNAVAILABLE",
+        Decision = decision,
         Message = message,
     };
 }

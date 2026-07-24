@@ -12,7 +12,7 @@ namespace QLHV.Api.Controllers;
 /// API tra cứu học viên (chỉ đọc). Dữ liệu gốc từ nguồn V2 là chỉ đọc.
 /// </summary>
 [ApiController]
-[Authorize(Policy = AuthPolicies.Admin)]
+[Authorize(Policy = AuthPolicies.CanViewBusinessData)]
 [Route("api/hoc-vien")]
 [Produces("application/json")]
 public sealed class HocVienController : ControllerBase
@@ -133,6 +133,7 @@ public sealed class HocVienController : ControllerBase
     /// <param name="cancellationToken">Token há»§y.</param>
     /// <returns>File Excel .xlsx chá»‰ Ä‘á»c.</returns>
     [HttpGet("export-excel")]
+    [Authorize(Policy = AuthPolicies.CanEditBusinessData)]
     [Produces("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")]
     [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -152,6 +153,7 @@ public sealed class HocVienController : ControllerBase
     }
 
     [HttpPost("the-hoc-vien/print-preview")]
+    [Authorize(Policy = AuthPolicies.CanEditBusinessData)]
     [ProducesResponseType(typeof(HocVienCardPrintPreviewDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> PrintStudentCardsPreview(
@@ -170,6 +172,7 @@ public sealed class HocVienController : ControllerBase
     }
 
     [HttpPost("the-hoc-vien/print-a4")]
+    [Authorize(Policy = AuthPolicies.CanEditBusinessData)]
     [Produces("application/pdf")]
     [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

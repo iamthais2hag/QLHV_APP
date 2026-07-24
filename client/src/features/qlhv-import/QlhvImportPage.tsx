@@ -46,7 +46,8 @@ const DATE_FORMAT = new Intl.DateTimeFormat('vi-VN', {
   timeStyle: 'medium',
 });
 const POLL_INTERVAL_MS = 2_500;
-const NO_WRITE_PERMISSION_MESSAGE = 'Bạn không có quyền thực hiện: bạn không có quyền Admin';
+const NO_WRITE_PERMISSION_MESSAGE =
+  'Chỉ tài khoản Quản trị viên được phép thực hiện đồng bộ.';
 const AUTO_SYNC_BUSY_MESSAGE = 'Auto Sync đang chạy; các thao tác ghi tạm thời bị khóa.';
 const PARTIAL_SYNC_WARNING =
   'Đợt đồng bộ này sẽ cập nhật Học viên. Khóa học/Giáo viên chưa sẵn sàng sẽ được bỏ qua và không bị xóa.';

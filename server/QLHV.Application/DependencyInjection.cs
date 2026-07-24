@@ -16,6 +16,7 @@ public static class DependencyInjection
     {
         services.AddScoped<IPasswordHasher<AppUserCredential>, PasswordHasher<AppUserCredential>>();
         services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<IAppUserManagementService, AppUserManagementService>();
         services.AddScoped<IFirstAdminSeeder, FirstAdminSeeder>();
         services.AddScoped<IHocVienService, HocVienService>();
         services.AddSingleton(HocVienCardTemplate.Default);

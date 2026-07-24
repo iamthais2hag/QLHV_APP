@@ -124,6 +124,27 @@ export async function runQlhvAutoSync(
   return payload;
 }
 
+export async function ensureQlhvFresh(): Promise<QlhvAutoSyncRunResult> {
+  const response = await fetchSafely(
+    `${API_BASE}/dong-bo-v2/qlhv/operations/ensure-fresh`,
+    {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+    },
+  );
+  const payload = await tryReadJson<unknown>(response);
+  if (!isAutoSyncRunResult(payload)) {
+    throw new Error(await getSafeErrorMessage(
+      response,
+      'Backend không trả kết quả kiểm tra dữ liệu hợp lệ.',
+    ));
+  }
+  if (!response.ok) {
+    throw new Error(payload.message || 'Không thể yêu cầu kiểm tra dữ liệu mới.');
+  }
+  return payload;
+}
+
 export async function getQlhvPhotoProcessingPage(
   query: QlhvPhotoProcessingQuery,
   signal?: AbortSignal,
@@ -486,10 +507,12 @@ function isAutoSyncSourceResult(value: unknown): value is QlhvAutoSyncSourceResu
 function isAutoSyncRunResult(value: unknown): value is QlhvAutoSyncRunResult {
   return isRecord(value)
     && typeof value.accepted === 'boolean'
+    && typeof value.joinedExisting === 'boolean'
     && typeof value.isConflict === 'boolean'
     && typeof value.isUnavailable === 'boolean'
     && isNullableString(value.runId)
     && typeof value.status === 'string'
+    && typeof value.decision === 'string'
     && typeof value.message === 'string';
 }
 
