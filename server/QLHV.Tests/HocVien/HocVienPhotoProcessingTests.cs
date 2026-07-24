@@ -823,9 +823,9 @@ public sealed class HocVienPhotoProcessingTests
             .Single()
             .Policy;
 
-        Assert.Equal(AuthPolicies.Read, controllerPolicy);
-        Assert.Equal(AuthPolicies.Admin, approvePolicy);
-        Assert.Equal(AuthPolicies.Admin, reprocessPolicy);
+        Assert.Equal(AuthPolicies.CanViewBusinessData, controllerPolicy);
+        Assert.Equal(AuthPolicies.CanImportData, approvePolicy);
+        Assert.Equal(AuthPolicies.CanImportData, reprocessPolicy);
     }
 
     [Fact]

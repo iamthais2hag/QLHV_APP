@@ -404,7 +404,10 @@ public sealed class QlhvAutoSyncSqlTests
 
         Assert.Contains("@DedupeNotBeforeUtc", repository, StringComparison.Ordinal);
         Assert.Contains("TriggerType = @TriggerType", repository, StringComparison.Ordinal);
-        Assert.Contains("CreatedAtUtc >= @DedupeNotBeforeUtc", repository, StringComparison.Ordinal);
+        Assert.Contains(
+            "COALESCE(CompletedAtUtc, CreatedAtUtc) >= @DedupeNotBeforeUtc",
+            repository,
+            StringComparison.Ordinal);
         Assert.Contains("no-store, no-cache, must-revalidate", program, StringComparison.Ordinal);
         Assert.Contains("cache: init.cache ?? 'no-store'", clientFetch, StringComparison.Ordinal);
     }

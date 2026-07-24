@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../features/auth/AuthContext';
+import ChangePasswordDialog from '../features/auth/ChangePasswordDialog';
+import { getRoleDisplayName } from '../features/auth/permissions';
 
 interface HeaderProps {
   title: string;
@@ -11,6 +13,7 @@ export default function Header({ title, subtitle, onToggleSidebar }: HeaderProps
   const { user, logout } = useAuth();
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState<string | null>(null);
+  const [showChangePassword, setShowChangePassword] = useState(false);
 
   async function handleLogout() {
     if (loggingOut) {
@@ -45,11 +48,19 @@ export default function Header({ title, subtitle, onToggleSidebar }: HeaderProps
       <div className="header__user">
         <span className="header__user-details">
           <strong>{user?.displayName || user?.username}</strong>
-          <small>{user?.role}</small>
+          <small>{getRoleDisplayName(user?.role)}</small>
         </span>
         <span className="header__avatar" aria-hidden="true">
           {getInitials(user?.displayName || user?.username || '')}
         </span>
+        <button
+          type="button"
+          className="header__logout"
+          onClick={() => setShowChangePassword(true)}
+          disabled={loggingOut}
+        >
+          Đổi mật khẩu
+        </button>
         <button
           type="button"
           className="header__logout"
@@ -60,6 +71,9 @@ export default function Header({ title, subtitle, onToggleSidebar }: HeaderProps
         </button>
         {logoutError && <span className="header__logout-error" role="alert">{logoutError}</span>}
       </div>
+      {showChangePassword && (
+        <ChangePasswordDialog onClose={() => setShowChangePassword(false)} />
+      )}
     </header>
   );
 }

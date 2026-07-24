@@ -48,7 +48,12 @@ public sealed class AuthService : IAuthService
         }
 
         var user = await _users.FindByUsernameAsync(username, cancellationToken);
-        if (user is null || !user.IsActive || user.IsDeleted || string.IsNullOrWhiteSpace(user.PasswordHash))
+        if (user is null ||
+            !user.IsActive ||
+            user.IsDeleted ||
+            string.IsNullOrWhiteSpace(user.PasswordHash) ||
+            !AppPasswordHashFormat.IsSupported(user.PasswordHash) ||
+            user.SecurityStamp == Guid.Empty)
         {
             VerifyDummyPassword(request.Password);
             return AuthLoginResult.InvalidCredentials();
@@ -56,7 +61,7 @@ public sealed class AuthService : IAuthService
 
         var now = DateTime.UtcNow;
         if (user.FailedLoginCount >= MaxFailedLoginAttempts &&
-            user.UpdatedAtUtc is { } lastFailureAtUtc &&
+            (user.LastFailedLoginAtUtc ?? user.UpdatedAtUtc) is { } lastFailureAtUtc &&
             lastFailureAtUtc > now.Subtract(LockoutDuration))
         {
             VerifyDummyPassword(request.Password);
@@ -88,7 +93,7 @@ public sealed class AuthService : IAuthService
             .Where(AppRoles.IsKnown)
             .Select(AppRoles.Normalize)
             .Distinct(StringComparer.Ordinal)
-            .OrderBy(role => string.Equals(role, AppRoles.Admin, StringComparison.Ordinal) ? 0 : 1)
+            .OrderBy(AppRoles.Priority)
             .ToArray();
         var primaryRole = AppRoles.SelectPrimary(roles);
         if (primaryRole is null)
@@ -96,17 +101,37 @@ public sealed class AuthService : IAuthService
             return AuthLoginResult.InvalidCredentials();
         }
 
+        var expectedPasswordHash = user.PasswordHash;
         if (verification == PasswordVerificationResult.SuccessRehashNeeded)
         {
             var refreshedHash = _passwordHasher.HashPassword(user, request.Password);
-            await _users.UpdatePasswordHashAsync(user.Id, refreshedHash, cancellationToken);
+            var updated = await _users.TryUpdatePasswordHashAsync(
+                user.Id,
+                user.PasswordHash,
+                refreshedHash,
+                cancellationToken);
+            if (!updated)
+            {
+                return AuthLoginResult.InvalidCredentials();
+            }
+
+            expectedPasswordHash = refreshedHash;
         }
 
-        await _users.RecordSuccessfulLoginAsync(user.Id, cancellationToken);
+        var loginRecorded = await _users.TryRecordSuccessfulLoginAsync(
+            user.Id,
+            expectedPasswordHash,
+            user.SecurityStamp,
+            cancellationToken);
+        if (!loginRecorded)
+        {
+            return AuthLoginResult.InvalidCredentials();
+        }
 
         return new AuthLoginResult
         {
             Succeeded = true,
+            SecurityStamp = user.SecurityStamp,
             Session = new AuthSessionDto
             {
                 Id = user.Id,
@@ -114,6 +139,7 @@ public sealed class AuthService : IAuthService
                 DisplayName = user.DisplayName,
                 Role = primaryRole,
                 Roles = roles,
+                MustChangePassword = user.MustChangePassword,
             },
         };
     }

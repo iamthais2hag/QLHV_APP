@@ -34,30 +34,100 @@ public sealed class ClientAuthorizationSourceTests
 
         Assert.Contains("user?.displayName", header, StringComparison.Ordinal);
         Assert.Contains("user?.username", header, StringComparison.Ordinal);
-        Assert.Contains("<small>{user?.role}</small>", header, StringComparison.Ordinal);
+        Assert.Contains("getRoleDisplayName(user?.role)", header, StringComparison.Ordinal);
+        Assert.Contains("<ChangePasswordDialog", header, StringComparison.Ordinal);
         Assert.Contains("handleLogout", header, StringComparison.Ordinal);
         Assert.Contains("logout()", header, StringComparison.Ordinal);
         Assert.DoesNotContain(">Quản trị viên<", header, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Viewer_is_limited_to_qlhv_read_page_and_write_buttons_are_locked()
+    public void Employee_and_viewer_have_explicit_business_permissions_while_admin_routes_stay_locked()
     {
         var app = ReadClientFile("App.tsx");
         var menu = ReadClientFile("navigation", "menu.ts");
+        var types = ReadClientFile("features", "auth", "types.ts");
+        var authApi = ReadClientFile("features", "auth", "api.ts");
+        var permissions = ReadClientFile("features", "auth", "permissions.ts");
+        var hocVien = ReadClientFile("features", "hoc-vien", "HocVienPage.tsx");
         var page = ReadClientFile("features", "qlhv-import", "QlhvImportPage.tsx");
         var autoSyncPanel = ReadClientFile("features", "qlhv-import", "AutoSyncPanel.tsx");
 
-        Assert.Contains("return item.path === '/qlhv-import'", menu, StringComparison.Ordinal);
-        Assert.Contains("user.role === 'Admin' ? <Dashboard /> : viewerRedirect", app, StringComparison.Ordinal);
-        Assert.Contains("Navigate to=\"/qlhv-import\"", app, StringComparison.Ordinal);
+        Assert.Contains("export type AppUserRole = 'Admin' | 'Employee' | 'Viewer'", types, StringComparison.Ordinal);
+        Assert.Contains("value.role !== 'Employee'", authApi, StringComparison.Ordinal);
+        Assert.Contains("role === 'Employee'", permissions, StringComparison.Ordinal);
+        Assert.Contains("permission === 'CanViewBusinessData' || permission === 'CanEditBusinessData'", permissions, StringComparison.Ordinal);
+        Assert.Contains("<Route index element={<Dashboard />} />", app, StringComparison.Ordinal);
+        Assert.Contains("path=\"/hoc-vien\" element={<HocVienPage />}", app, StringComparison.Ordinal);
+        Assert.Contains("canOperateBusiness ? <HocVienCardPrintPage />", app, StringComparison.Ordinal);
+        Assert.Contains("canSynchronize ? <MotoSyncPage />", app, StringComparison.Ordinal);
+        Assert.Contains("path=\"/admin/users\"", app, StringComparison.Ordinal);
+        Assert.Contains("canManageAccounts", app, StringComparison.Ordinal);
+        Assert.Contains("path: '/admin/users'", menu, StringComparison.Ordinal);
+        Assert.Contains("requiredPermission: 'CanManageUsers'", menu, StringComparison.Ordinal);
+        Assert.Contains("requiredPermission: 'CanSynchronizeCSDT'", menu, StringComparison.Ordinal);
+        Assert.Contains("requiredPermission: 'CanEditBusinessData'", menu, StringComparison.Ordinal);
+        Assert.Contains("canExportAndPrint", hocVien, StringComparison.Ordinal);
         Assert.Contains("const isAdmin = user?.role === 'Admin'", page, StringComparison.Ordinal);
-        Assert.Contains("Bạn không có quyền thực hiện", page, StringComparison.Ordinal);
+        Assert.Contains(
+            "Chỉ tài khoản Quản trị viên được phép thực hiện đồng bộ.",
+            page,
+            StringComparison.Ordinal);
         Assert.Contains("refreshReason={!isAdmin", page, StringComparison.Ordinal);
         Assert.Contains("executeReason={!isAdmin", page, StringComparison.Ordinal);
         Assert.Contains("if (!isAdmin)", page, StringComparison.Ordinal);
         Assert.Contains("if (!isAdmin) return 'Bạn không có quyền thực hiện: cần vai trò Admin.'", autoSyncPanel, StringComparison.Ordinal);
         Assert.Contains("disabled={disabledReason !== null}", autoSyncPanel, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Admin_user_management_and_password_change_do_not_expose_secrets()
+    {
+        var app = ReadClientFile("App.tsx");
+        var api = ReadClientFile("features", "admin-users", "api.ts");
+        var page = ReadClientFile("features", "admin-users", "UserManagementPage.tsx");
+        var changePassword = ReadClientFile("features", "auth", "ChangePasswordDialog.tsx");
+        var authApi = ReadClientFile("features", "auth", "api.ts");
+        var combined = string.Join('\n', api, page, changePassword, authApi);
+
+        Assert.Contains("user.mustChangePassword", app, StringComparison.Ordinal);
+        Assert.Contains("<ChangePasswordDialog required", app, StringComparison.Ordinal);
+        Assert.Contains("/admin/users", api, StringComparison.Ordinal);
+        Assert.Contains("/reset-password", api, StringComparison.Ordinal);
+        Assert.Contains("'PUT', request", api, StringComparison.Ordinal);
+        Assert.Contains("method: 'POST'", api, StringComparison.Ordinal);
+        Assert.Contains("Employee", page, StringComparison.Ordinal);
+        Assert.Contains("Viewer", page, StringComparison.Ordinal);
+        Assert.Contains("Không thể tự khóa tài khoản đang đăng nhập", page, StringComparison.Ordinal);
+        Assert.Contains("type=\"password\"", page, StringComparison.Ordinal);
+        Assert.Contains("autoComplete=\"new-password\"", page, StringComparison.Ordinal);
+        Assert.Contains("/auth/change-password", authApi, StringComparison.Ordinal);
+        Assert.Contains("type=\"password\"", changePassword, StringComparison.Ordinal);
+        Assert.DoesNotContain("localStorage", combined, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("sessionStorage", combined, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("console.log", combined, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("passwordHash", combined, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("deleteManagedUser", combined, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Authenticated_admin_or_employee_ensures_fresh_without_blocking_or_accepting_force_fields()
+    {
+        var authContext = ReadClientFile("features", "auth", "AuthContext.tsx");
+        var qlhvApi = ReadClientFile("features", "qlhv-import", "api.ts");
+        var panel = ReadClientFile("features", "qlhv-import", "AutoSyncPanel.tsx");
+        var ensureFresh = ExtractFunction(qlhvApi, "export async function ensureQlhvFresh");
+
+        Assert.Contains("user.role === 'Viewer'", authContext, StringComparison.Ordinal);
+        Assert.Contains("ensureQlhvFresh()", authContext, StringComparison.Ordinal);
+        Assert.Contains(".catch(() => undefined)", authContext, StringComparison.Ordinal);
+        Assert.Contains("ensuredFreshUserIdRef.current === user.id", authContext, StringComparison.Ordinal);
+        Assert.Contains("/operations/ensure-fresh", ensureFresh, StringComparison.Ordinal);
+        Assert.Contains("method: 'POST'", ensureFresh, StringComparison.Ordinal);
+        Assert.DoesNotContain("body:", ensureFresh, StringComparison.Ordinal);
+        Assert.DoesNotContain("force", ensureFresh, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("sourceType", ensureFresh, StringComparison.Ordinal);
+        Assert.Contains("SYSTEM_APP_OPEN", panel, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -127,6 +197,15 @@ public sealed class ClientAuthorizationSourceTests
     private static string ReadClientFile(params string[] pathParts)
         => File.ReadAllText(FindWorkspaceFile(
             new[] { "client", "src" }.Concat(pathParts).ToArray()));
+
+    private static string ExtractFunction(string source, string marker)
+    {
+        var start = source.IndexOf(marker, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Missing marker: {marker}");
+        var next = source.IndexOf("\nexport async function ", start + marker.Length, StringComparison.Ordinal);
+        var end = next < 0 ? source.Length : next;
+        return source[start..end];
+    }
 
     private static string FindWorkspaceFile(
         string[] pathParts,

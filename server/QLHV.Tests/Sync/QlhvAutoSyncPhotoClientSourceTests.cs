@@ -110,7 +110,7 @@ public sealed class QlhvAutoSyncPhotoClientSourceTests
         Assert.Contains("Thành công", panel, StringComparison.Ordinal);
         Assert.Contains("Thất bại", panel, StringComparison.Ordinal);
         Assert.Contains("Cần kiểm tra", panel, StringComparison.Ordinal);
-        Assert.Contains("Viewer chỉ được xem ảnh", panel, StringComparison.Ordinal);
+        Assert.Contains("Tài khoản hiện tại chỉ được xem ảnh", panel, StringComparison.Ordinal);
         Assert.Contains("writeBlockedReason", panel, StringComparison.Ordinal);
         Assert.Contains(
             "disabled={!isAdmin || !!writeBlockedReason || pending",

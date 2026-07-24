@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using QLHV.Api.Controllers;
+using QLHV.Application.Auth;
 using QLHV.Application.Sync;
 using QLHV.Application.Sync.Dtos;
 
@@ -11,7 +12,7 @@ namespace QLHV.Tests.Sync;
 public sealed class QlhvSessionStartControllerTests
 {
     [Fact]
-    public async Task Loopback_launcher_can_start_system_session_without_browser_cookie()
+    public async Task Authorized_loopback_launcher_marker_can_start_system_session()
     {
         var service = new FakeAutoSyncService();
         var controller = CreateController(
@@ -28,9 +29,12 @@ public sealed class QlhvSessionStartControllerTests
         Assert.True(result.Accepted);
         Assert.True(service.LastServerStartedByLauncher);
         Assert.Equal(1, service.SessionStartCalls);
-        Assert.NotNull(typeof(QlhvSessionStartController)
-            .GetCustomAttributes(typeof(AllowAnonymousAttribute), inherit: true)
-            .SingleOrDefault());
+        var authorization = Assert.Single(typeof(QlhvSessionStartController)
+            .GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true)
+            .Cast<AuthorizeAttribute>());
+        Assert.Equal(AuthPolicies.CanSynchronizeCSDT, authorization.Policy);
+        Assert.Empty(typeof(QlhvSessionStartController)
+            .GetCustomAttributes(typeof(AllowAnonymousAttribute), inherit: true));
     }
 
     [Fact]
@@ -174,6 +178,10 @@ public sealed class QlhvSessionStartControllerTests
             LastServerStartedByLauncher = serverStartedByLauncher;
             return Task.FromResult(QueueResult);
         }
+
+        public Task<QlhvAutoSyncQueueResultDto> QueueEnsureFreshAsync(
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
 
         public Task<QlhvAutoSyncQueueResultDto> QueueAsync(
             string triggerType,

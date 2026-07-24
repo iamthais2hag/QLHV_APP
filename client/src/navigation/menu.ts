@@ -1,4 +1,8 @@
 import type { AppUserRole } from '../features/auth/types';
+import {
+  hasPermission,
+  type AppPermission,
+} from '../features/auth/permissions';
 
 export interface MenuItem {
   /** Đường dẫn route */
@@ -11,6 +15,10 @@ export interface MenuItem {
   icon: string;
   /** Vai trò tối thiểu để hiển thị và mở route quản trị. */
   requiredRole?: 'Admin';
+  /** Policy giao diện tương ứng với policy backend. */
+  requiredPermission?: AppPermission;
+  /** Nhóm hiển thị trong sidebar. */
+  section?: string;
 }
 
 export const MENU_ITEMS: MenuItem[] = [
@@ -31,6 +39,7 @@ export const MENU_ITEMS: MenuItem[] = [
     label: 'In thẻ học viên',
     description: 'Chọn học viên, thiết lập tiêu đề và in thẻ theo mẫu chính thức.',
     icon: '▤',
+    requiredPermission: 'CanEditBusinessData',
   },
   {
     path: '/khoa-hoc',
@@ -79,24 +88,29 @@ export const MENU_ITEMS: MenuItem[] = [
     label: 'Chuyển khóa',
     description: 'Quản lý chuyển dữ liệu học viên giữa các khóa.',
     icon: '↪',
+    requiredPermission: 'CanEditBusinessData',
   },
   {
     path: '/xuat-word-excel',
     label: 'Xuất Word/Excel',
     description: 'Kết xuất biểu mẫu và báo cáo ra Word/Excel.',
     icon: '📄',
+    requiredPermission: 'CanEditBusinessData',
   },
   {
     path: '/the-phu-hieu',
     label: 'JP2/XML/Thẻ/Phù hiệu',
     description: 'Quản lý JP2/XML, thẻ học viên và phù hiệu giáo viên.',
     icon: '▣',
+    requiredPermission: 'CanImportData',
   },
   {
     path: '/dong-bo-v2',
     label: 'Đồng bộ dữ liệu',
     description: 'Đồng bộ dữ liệu Moto giữa CSDT_V1 và CSDT_V2.',
     icon: '🔄',
+    requiredRole: 'Admin',
+    requiredPermission: 'CanSynchronizeCSDT',
   },
   {
     path: '/qlhv-import',
@@ -119,6 +133,15 @@ export const MENU_ITEMS: MenuItem[] = [
     requiredRole: 'Admin',
   },
   {
+    path: '/admin/users',
+    label: 'Tài khoản người dùng',
+    description: 'Tạo và quản lý tài khoản Admin, Nhân viên và Chỉ xem.',
+    icon: '♙',
+    requiredRole: 'Admin',
+    requiredPermission: 'CanManageUsers',
+    section: 'Quản trị',
+  },
+  {
     path: '/tai-lieu-scan',
     label: 'Tài liệu scan/PDF',
     description: 'Quản lý tài liệu scan và tệp PDF.',
@@ -129,12 +152,14 @@ export const MENU_ITEMS: MenuItem[] = [
     label: 'Nhật ký hệ thống',
     description: 'Theo dõi nhật ký thao tác và sự kiện hệ thống.',
     icon: '📋',
+    requiredRole: 'Admin',
   },
   {
     path: '/cau-hinh',
     label: 'Cấu hình',
     description: 'Thiết lập tham số và cấu hình hệ thống.',
     icon: '⚙',
+    requiredRole: 'Admin',
   },
 ];
 
@@ -142,8 +167,5 @@ export function canAccessMenuItem(item: MenuItem, role: AppUserRole): boolean {
   if (item.requiredRole === 'Admin' && role !== 'Admin') {
     return false;
   }
-  if (role === 'Admin') {
-    return true;
-  }
-  return item.path === '/qlhv-import';
+  return hasPermission(role, item.requiredPermission ?? 'CanViewBusinessData');
 }

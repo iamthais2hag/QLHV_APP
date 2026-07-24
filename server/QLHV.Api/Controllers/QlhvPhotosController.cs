@@ -7,7 +7,7 @@ using QLHV.Application.HocVien.Photos;
 namespace QLHV.Api.Controllers;
 
 [ApiController]
-[Authorize(Policy = AuthPolicies.Read)]
+[Authorize(Policy = AuthPolicies.CanViewBusinessData)]
 [Route("api/dong-bo-v2/qlhv/photos")]
 [Produces("application/json")]
 public sealed class QlhvPhotosController : ControllerBase
@@ -84,7 +84,7 @@ public sealed class QlhvPhotosController : ControllerBase
     }
 
     [HttpPost("{id:long}/approve")]
-    [Authorize(Policy = AuthPolicies.Admin)]
+    [Authorize(Policy = AuthPolicies.CanImportData)]
     [ProducesResponseType(typeof(HocVienPhotoRecordDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<ActionResult<HocVienPhotoRecordDto>> Approve(
@@ -120,7 +120,7 @@ public sealed class QlhvPhotosController : ControllerBase
     }
 
     [HttpPost("{id:long}/reprocess")]
-    [Authorize(Policy = AuthPolicies.Admin)]
+    [Authorize(Policy = AuthPolicies.CanImportData)]
     [ProducesResponseType(typeof(HocVienPhotoRecordDto), StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]

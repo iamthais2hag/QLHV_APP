@@ -172,6 +172,105 @@ public sealed class QlhvAutoSyncTests
     }
 
     [Fact]
+    public async Task App_open_ensure_fresh_uses_system_actor_and_server_side_cooldown()
+    {
+        var runs = new FakeRunRepository();
+        var queue = new FakeAutoQueue();
+        var service = CreateService(runs, queue);
+        var before = DateTime.UtcNow.AddSeconds(-31);
+
+        var result = await service.QueueEnsureFreshAsync();
+
+        Assert.True(result.Accepted);
+        Assert.False(result.JoinedExisting);
+        Assert.Equal(QlhvAutoSyncConstants.StartedDecision, result.Decision);
+        Assert.Single(queue.Items);
+        var created = Assert.Single(runs.Created);
+        Assert.Equal(QlhvAutoSyncConstants.AppOpenTrigger, created.TriggerType);
+        Assert.Equal(QlhvOperationActors.SystemAppOpen, created.Actor);
+        Assert.NotNull(created.DedupeNotBeforeUtc);
+        Assert.True(created.DedupeNotBeforeUtc >= before);
+        Assert.True(created.DedupeNotBeforeUtc < created.CreatedAtUtc);
+    }
+
+    [Fact]
+    public async Task Concurrent_app_open_requests_create_one_run_and_join_the_other()
+    {
+        var runs = new FakeRunRepository();
+        var queue = new FakeAutoQueue();
+        var service = CreateService(runs, queue);
+
+        var results = await Task.WhenAll(
+            service.QueueEnsureFreshAsync(),
+            service.QueueEnsureFreshAsync());
+
+        Assert.All(results, result => Assert.True(result.Accepted));
+        Assert.Contains(
+            results,
+            result => result.Decision == QlhvAutoSyncConstants.StartedDecision);
+        Assert.Contains(
+            results,
+            result => result.Decision == QlhvAutoSyncConstants.ActiveOperationDecision);
+        Assert.Single(results.Where(result => !result.JoinedExisting));
+        Assert.Single(results.Where(result => result.JoinedExisting));
+        Assert.Single(runs.Created);
+        Assert.Single(queue.Items);
+    }
+
+    [Fact]
+    public async Task Repeated_app_open_within_cooldown_observes_recent_terminal_run()
+    {
+        var runs = new FakeRunRepository();
+        var queue = new FakeAutoQueue();
+        var service = CreateService(runs, queue);
+        var first = await service.QueueEnsureFreshAsync();
+        await runs.CompleteAsync(
+            first.RunId!.Value,
+            new QlhvAutoSyncOutcome(
+                QlhvAutoSyncConstants.Failed,
+                "test failure",
+                DateTime.UtcNow));
+
+        var second = await service.QueueEnsureFreshAsync();
+
+        Assert.True(second.Accepted);
+        Assert.True(second.JoinedExisting);
+        Assert.Equal(QlhvAutoSyncConstants.CooldownDecision, second.Decision);
+        Assert.Equal(first.RunId, second.RunId);
+        Assert.Equal(QlhvAutoSyncConstants.Failed, second.Status);
+        Assert.Single(runs.Created);
+        Assert.Single(queue.Items);
+    }
+
+    [Fact]
+    public async Task App_open_cooldown_starts_when_a_long_running_operation_completes()
+    {
+        var runs = new FakeRunRepository();
+        var completedRunId = Guid.NewGuid();
+        runs.SeedCompleted(new QlhvAutoSyncRunRecord
+        {
+            RunId = completedRunId,
+            TriggerType = QlhvAutoSyncConstants.AppOpenTrigger,
+            Actor = QlhvOperationActors.SystemAppOpen,
+            Status = QlhvAutoSyncConstants.Failed,
+            SourceOrder = ["OTO"],
+            CreatedAtUtc = DateTime.UtcNow.AddMinutes(-5),
+            CompletedAtUtc = DateTime.UtcNow,
+        });
+        var queue = new FakeAutoQueue();
+        var service = CreateService(runs, queue);
+
+        var result = await service.QueueEnsureFreshAsync();
+
+        Assert.True(result.Accepted);
+        Assert.True(result.JoinedExisting);
+        Assert.Equal(QlhvAutoSyncConstants.CooldownDecision, result.Decision);
+        Assert.Equal(completedRunId, result.RunId);
+        Assert.Empty(runs.Created);
+        Assert.Empty(queue.Items);
+    }
+
+    [Fact]
     public async Task Failed_session_start_is_retryable_without_waiting_for_a_time_window()
     {
         var runs = new FakeRunRepository();
@@ -314,6 +413,27 @@ public sealed class QlhvAutoSyncTests
         Assert.Null(status.RunId);
         Assert.Null(status.ActiveRunId);
         Assert.Equal("up-to-date", status.State);
+    }
+
+    [Fact]
+    public async Task Ensure_fresh_reports_no_sync_needed_without_creating_a_run()
+    {
+        var freshness = new FakeFreshnessService
+        {
+            Result = new QlhvSyncFreshnessResult { NeedSync = false },
+        };
+        var runs = new FakeRunRepository();
+        var queue = new FakeAutoQueue();
+        var service = CreateService(runs, queue, freshness: freshness);
+
+        var result = await service.QueueEnsureFreshAsync();
+
+        Assert.True(result.Accepted);
+        Assert.False(result.JoinedExisting);
+        Assert.Null(result.RunId);
+        Assert.Equal(QlhvAutoSyncConstants.NoSyncNeededDecision, result.Decision);
+        Assert.Empty(runs.Created);
+        Assert.Empty(queue.Items);
     }
 
     [Fact]
@@ -510,6 +630,7 @@ public sealed class QlhvAutoSyncTests
     [Theory]
     [InlineData(QlhvOperationActors.SystemAutoSync)]
     [InlineData(QlhvOperationActors.SystemSessionStart)]
+    [InlineData(QlhvOperationActors.SystemAppOpen)]
     public async Task Successful_source_run_attributes_refresh_and_full_sync_to_system_actor(
         string actor)
     {
@@ -1112,7 +1233,8 @@ public sealed class QlhvAutoSyncTests
                          _latest.TriggerType,
                          entry.TriggerType,
                          StringComparison.Ordinal) &&
-                     _latest.CreatedAtUtc >= entry.DedupeNotBeforeUtc.Value))
+                     (_latest.CompletedAtUtc ?? _latest.CreatedAtUtc) >=
+                        entry.DedupeNotBeforeUtc.Value))
                 {
                     return Task.FromResult(false);
                 }
@@ -1180,6 +1302,33 @@ public sealed class QlhvAutoSyncTests
         public Task<QlhvAutoSyncRunRecord?> GetLatestAsync(
             CancellationToken cancellationToken = default)
             => Task.FromResult(_latest);
+
+        public Task<QlhvAutoSyncRunRecord?> GetLatestByTriggerAsync(
+            string triggerType,
+            CancellationToken cancellationToken = default)
+        {
+            lock (_gate)
+            {
+                var latest = _records.Values
+                    .Where(record => string.Equals(
+                        record.TriggerType,
+                        triggerType,
+                        StringComparison.Ordinal))
+                    .OrderByDescending(record => record.CreatedAtUtc)
+                    .FirstOrDefault();
+                return Task.FromResult(latest);
+            }
+        }
+
+        public void SeedCompleted(QlhvAutoSyncRunRecord record)
+        {
+            lock (_gate)
+            {
+                _records[record.RunId] = record;
+                _latest = record;
+                _active = null;
+            }
+        }
 
         public Task<bool> MarkRunningAsync(
             Guid runId,
@@ -1523,6 +1672,10 @@ public sealed class QlhvAutoSyncTests
 
         public Task<QlhvAutoSyncQueueResultDto> QueueSessionStartAsync(
             bool serverStartedByLauncher,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<QlhvAutoSyncQueueResultDto> QueueEnsureFreshAsync(
             CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
     }

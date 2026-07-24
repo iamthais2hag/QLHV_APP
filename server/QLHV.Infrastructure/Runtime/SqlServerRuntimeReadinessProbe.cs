@@ -106,6 +106,21 @@ public sealed class SqlServerRuntimeReadinessProbe : IRuntimeReadinessProbe
 
                     if (requiredSchemaReady)
                     {
+                        var accountSchemaReady = await connection.ExecuteScalarAsync<bool>(
+                            new CommandDefinition(
+                                AccountManagementSchemaReadinessSql,
+                                commandTimeout: CommandTimeoutSeconds,
+                                cancellationToken: cancellationToken));
+                        if (!accountSchemaReady)
+                        {
+                            requiredSchemaReady = false;
+                            messages.Add(
+                                "Schema quản lý tài khoản Employee chưa sẵn sàng.");
+                        }
+                    }
+
+                    if (requiredSchemaReady)
+                    {
                         var activeSlotReady = await connection.ExecuteScalarAsync<bool>(
                             new CommandDefinition(
                                 AutoSyncActiveSlotReadinessSql,
@@ -126,19 +141,31 @@ public sealed class SqlServerRuntimeReadinessProbe : IRuntimeReadinessProbe
                             new
                             {
                                 AdminRole = AppRoles.Admin,
+                                EmployeeRole = AppRoles.Employee,
                                 ViewerRole = AppRoles.Viewer,
                             },
                             commandTimeout: CommandTimeoutSeconds,
                             cancellationToken: cancellationToken));
+                        var activeAdminHashes = await connection.QueryAsync<string>(
+                            new CommandDefinition(
+                                ActiveAdminCredentialHashesSql,
+                                new { AdminRole = AppRoles.Admin },
+                                commandTimeout: CommandTimeoutSeconds,
+                                cancellationToken: cancellationToken));
+                        var activeAdminExists =
+                            activeAdminHashes.Any(AppPasswordHashFormat.IsSupported);
                         authenticationReady = auth.AdminRoleExists &&
+                            auth.EmployeeRoleExists &&
                             auth.ViewerRoleExists &&
-                            auth.ActiveAdminExists;
-                        if (!auth.AdminRoleExists || !auth.ViewerRoleExists)
+                            activeAdminExists;
+                        if (!auth.AdminRoleExists ||
+                            !auth.EmployeeRoleExists ||
+                            !auth.ViewerRoleExists)
                         {
-                            messages.Add("Thiếu role Admin hoặc Viewer.");
+                            messages.Add("Thiếu role Admin, Employee hoặc Viewer.");
                         }
 
-                        if (!auth.ActiveAdminExists)
+                        if (!activeAdminExists)
                         {
                             messages.Add("Chưa có tài khoản Admin đang hoạt động.");
                         }
@@ -358,9 +385,9 @@ public sealed class SqlServerRuntimeReadinessProbe : IRuntimeReadinessProbe
     {
         public bool AdminRoleExists { get; init; }
 
-        public bool ViewerRoleExists { get; init; }
+        public bool EmployeeRoleExists { get; init; }
 
-        public bool ActiveAdminExists { get; init; }
+        public bool ViewerRoleExists { get; init; }
     }
 
     private sealed record BackupValidationResult(
@@ -374,6 +401,44 @@ INNER JOIN sys.schemas AS schemaRow
     ON schemaRow.schema_id = tableRow.schema_id
 WHERE schemaRow.name = N'dbo'
   AND tableRow.name IN @RequiredTables;
+""";
+
+    private const string AccountManagementSchemaReadinessSql = """
+SELECT CAST
+(
+    CASE
+        WHEN COL_LENGTH(N'dbo.App_User', N'MustChangePassword') IS NOT NULL
+         AND COL_LENGTH(N'dbo.App_User', N'LastFailedLoginAt') IS NOT NULL
+         AND COL_LENGTH(N'dbo.App_User', N'SecurityStamp') IS NOT NULL
+         AND OBJECT_ID(N'dbo.App_UserManagementAudit', N'U') IS NOT NULL
+         AND EXISTS
+         (
+             SELECT 1
+             FROM sys.computed_columns AS computedColumn
+             WHERE computedColumn.object_id = OBJECT_ID(N'dbo.App_User', N'U')
+               AND computedColumn.name = N'NormalizedUserName'
+               AND computedColumn.is_persisted = 1
+         )
+         AND EXISTS
+         (
+             SELECT 1
+             FROM sys.indexes AS indexRow
+             INNER JOIN sys.index_columns AS keyColumn
+                 ON keyColumn.object_id = indexRow.object_id
+                AND keyColumn.index_id = indexRow.index_id
+                AND keyColumn.key_ordinal = 1
+             INNER JOIN sys.columns AS columnRow
+                 ON columnRow.object_id = keyColumn.object_id
+                AND columnRow.column_id = keyColumn.column_id
+             WHERE indexRow.object_id = OBJECT_ID(N'dbo.App_User', N'U')
+               AND indexRow.is_unique = 1
+               AND indexRow.is_disabled = 0
+               AND columnRow.name = N'NormalizedUserName'
+         )
+        THEN 1
+        ELSE 0
+    END AS bit
+);
 """;
 
     private const string AutoSyncActiveSlotReadinessSql = """
@@ -470,22 +535,31 @@ SELECT
     (
         SELECT 1
         FROM dbo.App_Role
-        WHERE RoleCode = @ViewerRole
+        WHERE RoleCode = @EmployeeRole
           AND IsDeleted = 0
-    ) THEN 1 ELSE 0 END AS bit) AS ViewerRoleExists,
+    ) THEN 1 ELSE 0 END AS bit) AS EmployeeRoleExists,
     CAST(CASE WHEN EXISTS
     (
         SELECT 1
-        FROM dbo.App_User AS userRow
-        INNER JOIN dbo.App_UserRole AS userRole
-            ON userRole.UserId = userRow.UserId
-        INNER JOIN dbo.App_Role AS roleRow
-            ON roleRow.RoleId = userRole.RoleId
-        WHERE userRow.IsActive = 1
-          AND userRow.IsDeleted = 0
-          AND roleRow.IsDeleted = 0
-          AND roleRow.RoleCode = @AdminRole
-    ) THEN 1 ELSE 0 END AS bit) AS ActiveAdminExists;
+        FROM dbo.App_Role
+        WHERE RoleCode = @ViewerRole
+          AND IsDeleted = 0
+    ) THEN 1 ELSE 0 END AS bit) AS ViewerRoleExists;
+""";
+
+    private const string ActiveAdminCredentialHashesSql = """
+SELECT DISTINCT userRow.PasswordHash
+FROM dbo.App_User AS userRow
+INNER JOIN dbo.App_UserRole AS userRole
+    ON userRole.UserId = userRow.UserId
+INNER JOIN dbo.App_Role AS roleRow
+    ON roleRow.RoleId = userRole.RoleId
+WHERE userRow.IsActive = 1
+  AND userRow.IsDeleted = 0
+  AND userRow.SecurityStamp <>
+        '00000000-0000-0000-0000-000000000000'
+  AND roleRow.IsDeleted = 0
+  AND roleRow.RoleCode = @AdminRole;
 """;
 
     private const string SqlDirectoryProbeSql = """

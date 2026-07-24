@@ -204,6 +204,8 @@ public sealed class SingleProcessHostingTests
         public const string SpaMarker = "qlhv-lan-spa-fixture";
         public const string Username = "lan-admin";
         public const string Password = "lan-test-password";
+        public static readonly Guid SecurityStamp =
+            Guid.Parse("8d838ff2-1c67-4c60-bf65-12df09b67839");
 
         private readonly string _webRoot = Path.Combine(
             Path.GetTempPath(),
@@ -307,6 +309,7 @@ public sealed class SingleProcessHostingTests
                 ? new AuthLoginResult
                 {
                     Succeeded = true,
+                    SecurityStamp = LanHostFactory.SecurityStamp,
                     Session = new AuthSessionDto
                     {
                         Id = 100,
@@ -332,6 +335,7 @@ public sealed class SingleProcessHostingTests
                 Username = LanHostFactory.Username,
                 DisplayName = "LAN test administrator",
                 IsActive = true,
+                SecurityStamp = LanHostFactory.SecurityStamp,
                 Roles = [AppRoles.Admin],
             };
             _user = new AppUserCredential
@@ -340,6 +344,7 @@ public sealed class SingleProcessHostingTests
                 Username = prototype.Username,
                 DisplayName = prototype.DisplayName,
                 IsActive = prototype.IsActive,
+                SecurityStamp = prototype.SecurityStamp,
                 Roles = prototype.Roles,
                 PasswordHash = new PasswordHasher<AppUserCredential>()
                     .HashPassword(prototype, LanHostFactory.Password),
@@ -357,9 +362,11 @@ public sealed class SingleProcessHostingTests
             CancellationToken cancellationToken = default) =>
             Task.FromResult<AppUserCredential?>(userId == _user.Id ? _user : null);
 
-        public Task RecordSuccessfulLoginAsync(
+        public Task<bool> TryRecordSuccessfulLoginAsync(
             long userId,
-            CancellationToken cancellationToken = default) => Task.CompletedTask;
+            string expectedPasswordHash,
+            Guid expectedSecurityStamp,
+            CancellationToken cancellationToken = default) => Task.FromResult(true);
 
         public Task RecordFailedLoginAsync(
             long userId,
@@ -367,10 +374,11 @@ public sealed class SingleProcessHostingTests
             DateTime resetCutoffUtc,
             CancellationToken cancellationToken = default) => Task.CompletedTask;
 
-        public Task UpdatePasswordHashAsync(
+        public Task<bool> TryUpdatePasswordHashAsync(
             long userId,
+            string expectedPasswordHash,
             string passwordHash,
-            CancellationToken cancellationToken = default) => Task.CompletedTask;
+            CancellationToken cancellationToken = default) => Task.FromResult(true);
 
         public Task<FirstAdminCreateResult> TryCreateFirstAdminAsync(
             string username,

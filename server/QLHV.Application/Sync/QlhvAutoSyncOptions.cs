@@ -23,7 +23,7 @@ public sealed class QlhvAutoSyncOptions
     // recent STARTUP run instead of refreshing the same databases a second time.
     public int StartupDedupeWindowSeconds { get; set; } = 300;
 
-    // Repeated desktop-icon invocations within this short window observe the
-    // same completed session instead of immediately creating a duplicate run.
+    // Repeated authenticated app-open requests within this short window observe
+    // the same completed run instead of immediately creating a duplicate run.
     public int SessionStartDedupeWindowSeconds { get; set; } = 30;
 }

@@ -75,11 +75,32 @@ builder.Services.AddAuthorization(options =>
 {
     options.FallbackPolicy = new AuthorizationPolicyBuilder()
         .RequireAuthenticatedUser()
+        .RequireClaim(AppClaimTypes.MustChangePassword, bool.FalseString.ToLowerInvariant())
         .Build();
-    options.AddPolicy(AuthPolicies.Read, policy =>
-        policy.RequireRole(AppRoles.Admin, AppRoles.Viewer));
-    options.AddPolicy(AuthPolicies.Admin, policy =>
-        policy.RequireRole(AppRoles.Admin));
+    options.AddPolicy(AuthPolicies.CanViewBusinessData, policy =>
+        policy
+            .RequireRole(AppRoles.Admin, AppRoles.Employee, AppRoles.Viewer)
+            .RequireClaim(AppClaimTypes.MustChangePassword, bool.FalseString.ToLowerInvariant()));
+    options.AddPolicy(AuthPolicies.CanEditBusinessData, policy =>
+        policy
+            .RequireRole(AppRoles.Admin, AppRoles.Employee)
+            .RequireClaim(AppClaimTypes.MustChangePassword, bool.FalseString.ToLowerInvariant()));
+    options.AddPolicy(AuthPolicies.RequireAdmin, policy =>
+        policy
+            .RequireRole(AppRoles.Admin)
+            .RequireClaim(AppClaimTypes.MustChangePassword, bool.FalseString.ToLowerInvariant()));
+    options.AddPolicy(AuthPolicies.CanManageUsers, policy =>
+        policy
+            .RequireRole(AppRoles.Admin)
+            .RequireClaim(AppClaimTypes.MustChangePassword, bool.FalseString.ToLowerInvariant()));
+    options.AddPolicy(AuthPolicies.CanSynchronizeCSDT, policy =>
+        policy
+            .RequireRole(AppRoles.Admin)
+            .RequireClaim(AppClaimTypes.MustChangePassword, bool.FalseString.ToLowerInvariant()));
+    options.AddPolicy(AuthPolicies.CanImportData, policy =>
+        policy
+            .RequireRole(AppRoles.Admin)
+            .RequireClaim(AppClaimTypes.MustChangePassword, bool.FalseString.ToLowerInvariant()));
 });
 
 // In-memory cache for lookups

@@ -298,6 +298,14 @@ export interface QlhvAutoSyncRunResult {
   isUnavailable: boolean;
   runId: string | null;
   status: string;
+  decision:
+    | 'NO_SYNC_NEEDED'
+    | 'ACTIVE_OPERATION'
+    | 'COOLDOWN'
+    | 'STARTED'
+    | 'NOT_READY'
+    | 'FAILED_TO_QUEUE'
+    | '';
   message: string;
 }
 

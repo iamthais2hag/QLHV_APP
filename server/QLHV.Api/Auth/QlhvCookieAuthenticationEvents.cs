@@ -43,16 +43,26 @@ public sealed class QlhvCookieAuthenticationEvents : CookieAuthenticationEvents
             .Where(AppRoles.IsKnown)
             .Select(AppRoles.Normalize)
             .Distinct(StringComparer.Ordinal)
-            .OrderBy(role => string.Equals(role, AppRoles.Admin, StringComparison.Ordinal) ? 0 : 1)
+            .OrderBy(AppRoles.Priority)
             .ToArray() ?? [];
 
         if (user is null ||
             !user.IsActive ||
             user.IsDeleted ||
             string.IsNullOrWhiteSpace(user.PasswordHash) ||
+            user.SecurityStamp == Guid.Empty ||
             string.IsNullOrWhiteSpace(user.Username) ||
             string.IsNullOrWhiteSpace(user.DisplayName) ||
             roles.Length == 0)
+        {
+            await RejectAsync(context);
+            return;
+        }
+
+        var currentSecurityStamp = context.Principal?.FindFirstValue(
+            AppClaimTypes.SecurityStamp);
+        if (!Guid.TryParse(currentSecurityStamp, out var parsedSecurityStamp) ||
+            parsedSecurityStamp != user.SecurityStamp)
         {
             await RejectAsync(context);
             return;
@@ -63,6 +73,12 @@ public sealed class QlhvCookieAuthenticationEvents : CookieAuthenticationEvents
             new(ClaimTypes.NameIdentifier, user.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)),
             new(ClaimTypes.Name, user.Username),
             new(ClaimTypes.GivenName, user.DisplayName),
+            new(
+                AppClaimTypes.MustChangePassword,
+                AppClaimTypes.ToClaimValue(user.MustChangePassword)),
+            new(
+                AppClaimTypes.SecurityStamp,
+                AppClaimTypes.ToClaimValue(user.SecurityStamp)),
         };
         claims.AddRange(roles.Select(role => new Claim(ClaimTypes.Role, role)));
 
@@ -109,6 +125,14 @@ public sealed class QlhvCookieAuthenticationEvents : CookieAuthenticationEvents
                Values(current, ClaimTypes.GivenName)
                    .SequenceEqual(Values(refreshed, ClaimTypes.GivenName), StringComparer.Ordinal) &&
                Values(current, ClaimTypes.Role)
-                   .SequenceEqual(Values(refreshed, ClaimTypes.Role), StringComparer.Ordinal);
+                   .SequenceEqual(Values(refreshed, ClaimTypes.Role), StringComparer.Ordinal) &&
+               Values(current, AppClaimTypes.MustChangePassword)
+                   .SequenceEqual(
+                       Values(refreshed, AppClaimTypes.MustChangePassword),
+                       StringComparer.Ordinal) &&
+               Values(current, AppClaimTypes.SecurityStamp)
+                   .SequenceEqual(
+                       Values(refreshed, AppClaimTypes.SecurityStamp),
+                       StringComparer.Ordinal);
     }
 }

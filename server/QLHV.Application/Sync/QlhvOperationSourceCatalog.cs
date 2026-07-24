@@ -85,12 +85,14 @@ public static class QlhvOperationActors
     public const string ManualAdmin = "MANUAL_ADMIN";
     public const string SystemAutoSync = "SYSTEM_AUTO_SYNC";
     public const string SystemSessionStart = "SYSTEM_SESSION_START";
+    public const string SystemAppOpen = "SYSTEM_APP_OPEN";
 
     public static string NormalizeInternal(string? actor)
         => actor?.Trim().ToUpperInvariant() switch
         {
             SystemAutoSync => SystemAutoSync,
             SystemSessionStart => SystemSessionStart,
+            SystemAppOpen => SystemAppOpen,
             _ => ManualAdmin,
         };
 }

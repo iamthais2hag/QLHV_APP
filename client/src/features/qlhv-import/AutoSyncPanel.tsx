@@ -205,8 +205,10 @@ export default function AutoSyncPanel({
       row.operationType === 'AUTO_SYNC'
       || row.actor === 'SYSTEM_AUTO_SYNC'
       || row.actor === 'SYSTEM_SESSION_START'
+      || row.actor === 'SYSTEM_APP_OPEN'
       || row.detailJson?.includes('SYSTEM_AUTO_SYNC')
       || row.detailJson?.includes('SYSTEM_SESSION_START')
+      || row.detailJson?.includes('SYSTEM_APP_OPEN')
       || row.detailJson?.includes('AUTO_SYNC')),
     [operationHistory],
   );

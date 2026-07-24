@@ -202,7 +202,7 @@ export default function PhotoProcessingPanel({
 
       {!isAdmin && (
         <div className="qlhv-import-permission-note" role="status">
-          Bạn không có quyền thực hiện. Viewer chỉ được xem ảnh và trạng thái xử lý.
+          Bạn không có quyền thực hiện. Tài khoản hiện tại chỉ được xem ảnh và trạng thái xử lý.
         </div>
       )}
       {isAdmin && writeBlockedReason && (

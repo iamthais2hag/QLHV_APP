@@ -3,18 +3,30 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
 import { AUTH_SESSION_EXPIRED_EVENT } from '../../api/apiFetch';
-import { getCurrentUser, login as loginRequest, logout as logoutRequest } from './api';
-import type { AuthenticatedUser, LoginRequest } from './types';
+import {
+  changePassword as changePasswordRequest,
+  getCurrentUser,
+  login as loginRequest,
+  logout as logoutRequest,
+} from './api';
+import type {
+  AuthenticatedUser,
+  ChangePasswordRequest,
+  LoginRequest,
+} from './types';
+import { ensureQlhvFresh } from '../qlhv-import/api';
 
 interface AuthContextValue {
   user: AuthenticatedUser | null;
   loading: boolean;
   login: (request: LoginRequest) => Promise<void>;
   logout: () => Promise<void>;
+  changePassword: (request: ChangePasswordRequest) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -22,6 +34,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthenticatedUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const ensuredFreshUserIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     const handleSessionExpired = () => setUser(null);
@@ -53,6 +66,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  useEffect(() => {
+    if (!user) {
+      ensuredFreshUserIdRef.current = null;
+      return;
+    }
+    if (user.mustChangePassword
+      || user.role === 'Viewer'
+      || ensuredFreshUserIdRef.current === user.id) {
+      return;
+    }
+
+    ensuredFreshUserIdRef.current = user.id;
+    // Best effort only: opening the app must never wait for or be blocked by Auto Sync.
+    void ensureQlhvFresh().catch(() => undefined);
+  }, [user]);
+
   const value = useMemo<AuthContextValue>(() => ({
     user,
     loading,
@@ -63,6 +92,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     logout: async () => {
       await logoutRequest();
       setUser(null);
+    },
+    changePassword: async (request) => {
+      await changePasswordRequest(request);
+      const refreshedUser = await getCurrentUser();
+      if (!refreshedUser) {
+        setUser(null);
+        throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+      }
+      setUser(refreshedUser);
     },
   }), [loading, user]);
 

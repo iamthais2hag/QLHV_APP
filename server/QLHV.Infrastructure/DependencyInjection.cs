@@ -28,7 +28,11 @@ public static class DependencyInjection
         IConfiguration configuration,
         string? contentRootPath = null)
     {
-        services.AddScoped<IAppUserRepository, AppUserRepository>();
+        services.AddScoped<AppUserRepository>();
+        services.AddScoped<IAppUserRepository>(provider =>
+            provider.GetRequiredService<AppUserRepository>());
+        services.AddScoped<IAppUserManagementRepository>(provider =>
+            provider.GetRequiredService<AppUserRepository>());
         services.AddScoped<ICsdtConnectionProfileRepository, CsdtConnectionProfileRepository>();
         services.AddScoped<IHocVienRepository, HocVienRepository>();
 

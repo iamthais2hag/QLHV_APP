@@ -16,6 +16,8 @@ public sealed class QlhvAutoSyncQueueResultDto
 
     public string Status { get; init; } = string.Empty;
 
+    public string Decision { get; init; } = string.Empty;
+
     public string Message { get; init; } = string.Empty;
 }
 

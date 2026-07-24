@@ -136,7 +136,7 @@ function buildStatusItems(status: RuntimeStatus): StatusItem[] {
       label: 'Xác thực tài khoản',
       ready: status.authenticationReady,
       detail: status.authenticationReady
-        ? 'Role Admin/Viewer và tài khoản quản trị đã sẵn sàng.'
+        ? 'Role Admin/Employee/Viewer và tài khoản quản trị đã sẵn sàng.'
         : 'Cấu hình xác thực hoặc tài khoản quản trị chưa sẵn sàng.',
     },
     {

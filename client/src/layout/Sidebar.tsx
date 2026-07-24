@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../features/auth/AuthContext';
 import { canAccessMenuItem, MENU_ITEMS } from '../navigation/menu';
@@ -33,20 +34,24 @@ export default function Sidebar({ open, collapsed, onToggleCollapsed, onNavigate
           </button>
         </div>
         <nav className="sidebar__nav">
-          {visibleItems.map((item) => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              end={item.path === '/'}
-              onClick={onNavigate}
-              title={item.label}
-              className={({ isActive }) => `sidebar__link${isActive ? ' is-active' : ''}`}
-            >
-              <span className="sidebar__icon" aria-hidden="true">
-                {item.icon}
-              </span>
-              <span className="sidebar__text">{item.label}</span>
-            </NavLink>
+          {visibleItems.map((item, index) => (
+            <Fragment key={item.path}>
+              {item.section && visibleItems[index - 1]?.section !== item.section && (
+                <div className="sidebar__section">{item.section}</div>
+              )}
+              <NavLink
+                to={item.path}
+                end={item.path === '/'}
+                onClick={onNavigate}
+                title={item.label}
+                className={({ isActive }) => `sidebar__link${isActive ? ' is-active' : ''}`}
+              >
+                <span className="sidebar__icon" aria-hidden="true">
+                  {item.icon}
+                </span>
+                <span className="sidebar__text">{item.label}</span>
+              </NavLink>
+            </Fragment>
           ))}
         </nav>
       </aside>

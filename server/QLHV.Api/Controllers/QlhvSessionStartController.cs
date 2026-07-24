@@ -1,18 +1,19 @@
 using System.Net;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using QLHV.Application.Auth;
 using QLHV.Application.Sync;
 using QLHV.Application.Sync.Dtos;
 
 namespace QLHV.Api.Controllers;
 
 /// <summary>
-/// Local machine bridge used by the installed Desktop launcher. This route is
-/// intentionally independent of the browser cookie and is never exposed as a
-/// general LAN write endpoint.
+/// Legacy local-machine session-start bridge. The Desktop launcher no longer
+/// depends on this route; callers must have an authenticated Admin cookie and
+/// must also pass the loopback/header checks below.
 /// </summary>
 [ApiController]
-[AllowAnonymous]
+[Authorize(Policy = AuthPolicies.CanSynchronizeCSDT)]
 [Route("api/dong-bo-v2/qlhv/operations/session-start-sync")]
 [Produces("application/json")]
 public sealed class QlhvSessionStartController : ControllerBase

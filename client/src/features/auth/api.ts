@@ -1,6 +1,10 @@
 import { apiFetch } from '../../api/apiFetch';
 import { API_BASE } from '../../api/apiBase';
-import type { AuthenticatedUser, LoginRequest } from './types';
+import type {
+  AuthenticatedUser,
+  ChangePasswordRequest,
+  LoginRequest,
+} from './types';
 
 export type LoginFailureKind = 'invalid-credentials' | 'locked' | 'runtime-unavailable' | 'unexpected';
 
@@ -103,13 +107,32 @@ export async function logout(): Promise<void> {
   }
 }
 
+export async function changePassword(request: ChangePasswordRequest): Promise<void> {
+  const response = await apiFetch(`${API_BASE}/auth/change-password`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    throw new Error(await getSafeErrorMessage(
+      response,
+      'Không thể đổi mật khẩu. Vui lòng kiểm tra mật khẩu hiện tại và thử lại.',
+    ));
+  }
+}
+
 function parseUser(value: unknown): AuthenticatedUser {
   if (!isRecord(value)
     || typeof value.id !== 'number'
     || !Number.isFinite(value.id)
     || typeof value.username !== 'string'
     || typeof value.displayName !== 'string'
-    || (value.role !== 'Admin' && value.role !== 'Viewer')) {
+    || (value.role !== 'Admin' && value.role !== 'Employee' && value.role !== 'Viewer')
+    || typeof value.mustChangePassword !== 'boolean') {
     throw new Error('Máy chủ trả thông tin tài khoản không hợp lệ.');
   }
 
@@ -118,6 +141,7 @@ function parseUser(value: unknown): AuthenticatedUser {
     username: value.username,
     displayName: value.displayName,
     role: value.role,
+    mustChangePassword: value.mustChangePassword,
   };
 }
 

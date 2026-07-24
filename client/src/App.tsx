@@ -9,7 +9,14 @@ import MotoSyncPage from './features/moto-sync/MotoSyncPage';
 import QlhvImportPage from './features/qlhv-import/QlhvImportPage';
 import RuntimeStatusPage from './features/runtime-status/RuntimeStatusPage';
 import LoginPage from './features/auth/LoginPage';
+import ChangePasswordDialog from './features/auth/ChangePasswordDialog';
+import UserManagementPage from './features/admin-users/UserManagementPage';
 import { useAuth } from './features/auth/AuthContext';
+import {
+  canManageUsers,
+  canOperateBusinessData,
+  canSynchronizeCsdt,
+} from './features/auth/permissions';
 import { canAccessMenuItem, MENU_ITEMS } from './navigation/menu';
 
 export default function App() {
@@ -27,16 +34,29 @@ export default function App() {
     return <LoginPage />;
   }
 
+  if (user.mustChangePassword) {
+    return <ChangePasswordDialog required />;
+  }
+
   const visibleMenuItems = MENU_ITEMS.filter((item) => canAccessMenuItem(item, user.role));
-  const viewerRedirect = <Navigate to="/qlhv-import" replace />;
+  const unauthorizedRedirect = <Navigate to="/" replace />;
+  const canOperateBusiness = canOperateBusinessData(user.role);
+  const canSynchronize = canSynchronizeCsdt(user.role);
+  const canManageAccounts = canManageUsers(user.role);
 
   return (
     <Routes>
       <Route element={<AppLayout />}>
-        <Route index element={user.role === 'Admin' ? <Dashboard /> : viewerRedirect} />
-        <Route path="/hoc-vien" element={user.role === 'Admin' ? <HocVienPage /> : viewerRedirect} />
-        <Route path="/in-the-hoc-vien" element={user.role === 'Admin' ? <HocVienCardPrintPage /> : viewerRedirect} />
-        <Route path="/dong-bo-v2" element={user.role === 'Admin' ? <MotoSyncPage /> : viewerRedirect} />
+        <Route index element={<Dashboard />} />
+        <Route path="/hoc-vien" element={<HocVienPage />} />
+        <Route
+          path="/in-the-hoc-vien"
+          element={canOperateBusiness ? <HocVienCardPrintPage /> : unauthorizedRedirect}
+        />
+        <Route
+          path="/dong-bo-v2"
+          element={canSynchronize ? <MotoSyncPage /> : unauthorizedRedirect}
+        />
         <Route path="/qlhv-import" element={<QlhvImportPage />} />
         <Route
           path="/trang-thai-he-thong"
@@ -48,7 +68,13 @@ export default function App() {
           path="/cau-hinh-ket-noi-csdt"
           element={user.role === 'Admin'
             ? <CsdtConnectionProfilesPage />
-            : <Navigate to="/qlhv-import" replace />}
+            : unauthorizedRedirect}
+        />
+        <Route
+          path="/admin/users"
+          element={canManageAccounts
+            ? <UserManagementPage />
+            : unauthorizedRedirect}
         />
         {visibleMenuItems.filter((item) =>
           ![
@@ -59,6 +85,7 @@ export default function App() {
             '/qlhv-import',
             '/trang-thai-he-thong',
             '/cau-hinh-ket-noi-csdt',
+            '/admin/users',
           ].includes(item.path),
         ).map((item) => (
           <Route
@@ -67,7 +94,7 @@ export default function App() {
             element={<ModulePage />}
           />
         ))}
-        <Route path="*" element={<Navigate to={user.role === 'Admin' ? '/' : '/qlhv-import'} replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
   );

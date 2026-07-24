@@ -10,8 +10,10 @@ public interface IAppUserRepository
         long userId,
         CancellationToken cancellationToken = default);
 
-    Task RecordSuccessfulLoginAsync(
+    Task<bool> TryRecordSuccessfulLoginAsync(
         long userId,
+        string expectedPasswordHash,
+        Guid expectedSecurityStamp,
         CancellationToken cancellationToken = default);
 
     Task RecordFailedLoginAsync(
@@ -20,8 +22,9 @@ public interface IAppUserRepository
         DateTime resetCutoffUtc,
         CancellationToken cancellationToken = default);
 
-    Task UpdatePasswordHashAsync(
+    Task<bool> TryUpdatePasswordHashAsync(
         long userId,
+        string expectedPasswordHash,
         string passwordHash,
         CancellationToken cancellationToken = default);
 

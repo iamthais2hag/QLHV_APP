@@ -23,6 +23,8 @@ import {
 } from './utils';
 import CopyButton from './CopyButton';
 import { useDataVersionRefresh } from '../data-version/useDataVersionRefresh';
+import { useAuth } from '../auth/AuthContext';
+import { canOperateBusinessData } from '../auth/permissions';
 
 const PAGE_SIZE = 20;
 
@@ -86,6 +88,8 @@ function HocVienPhoto({
 }
 
 export default function HocVienPage() {
+  const { user } = useAuth();
+  const canExportAndPrint = !!user && canOperateBusinessData(user.role);
   const [keyword, setKeyword] = useState('');
   const [khoaInput, setKhoaInput] = useState('');
   const [selectedKhoa, setSelectedKhoa] = useState<HocVienKhoaLookup | null>(null);
@@ -571,14 +575,16 @@ export default function HocVienPage() {
             <button type="button" className="btn btn--ghost" onClick={handleReset}>
               Làm mới
             </button>
-            <button
-              type="button"
-              className="btn btn--ghost"
-              onClick={handleExport}
-              disabled={totalItems === 0 || isExporting}
-            >
-              {isExporting ? 'Đang xuất...' : 'Xuất Excel'}
-            </button>
+            {canExportAndPrint && (
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={handleExport}
+                disabled={totalItems === 0 || isExporting}
+              >
+                {isExporting ? 'Đang xuất...' : 'Xuất Excel'}
+              </button>
+            )}
             <button
               type="button"
               className="btn btn--ghost"
@@ -604,9 +610,11 @@ export default function HocVienPage() {
                 Kiem tra decode anh
               </button>
             )}
-            <Link className="btn btn--ghost" to="/in-the-hoc-vien">
-              Sang màn In thẻ học viên
-            </Link>
+            {canExportAndPrint && (
+              <Link className="btn btn--ghost" to="/in-the-hoc-vien">
+                Sang màn In thẻ học viên
+              </Link>
+            )}
           </div>
         </div>
         {dataVersion.error && <div className="toolbar__error">{dataVersion.error}</div>}

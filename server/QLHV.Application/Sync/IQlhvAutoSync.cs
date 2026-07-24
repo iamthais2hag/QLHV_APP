@@ -12,6 +12,9 @@ public interface IQlhvAutoSyncService
         bool serverStartedByLauncher,
         CancellationToken cancellationToken = default);
 
+    Task<QlhvAutoSyncQueueResultDto> QueueEnsureFreshAsync(
+        CancellationToken cancellationToken = default);
+
     Task<QlhvSessionStartStatusDto> GetSessionStartStatusAsync(
         bool serverStartedByLauncher,
         Guid? runId = null,
@@ -36,6 +39,10 @@ public interface IQlhvAutoSyncRunRepository
         CancellationToken cancellationToken = default);
 
     Task<QlhvAutoSyncRunRecord?> GetLatestAsync(
+        CancellationToken cancellationToken = default);
+
+    Task<QlhvAutoSyncRunRecord?> GetLatestByTriggerAsync(
+        string triggerType,
         CancellationToken cancellationToken = default);
 
     Task<bool> MarkRunningAsync(
