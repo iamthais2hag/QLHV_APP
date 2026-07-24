@@ -18,12 +18,14 @@ export interface PhotoProcessingPanelProps {
   isAdmin: boolean;
   photoVersion?: string | number | null;
   reloadToken: number;
+  writeBlockedReason?: string | null;
 }
 
 export default function PhotoProcessingPanel({
   isAdmin,
   photoVersion,
   reloadToken,
+  writeBlockedReason = null,
 }: PhotoProcessingPanelProps) {
   const [sourceProfileCode, setSourceProfileCode] = useState<
     QlhvImportSourceProfileCode | ''
@@ -80,7 +82,7 @@ export default function PhotoProcessingPanel({
     item: QlhvPhotoProcessingItem,
     action: 'approve' | 'reprocess',
   ) {
-    if (!isAdmin || !data?.engineReady || pendingIdsRef.current.has(item.id)) {
+    if (!isAdmin || writeBlockedReason || !data?.engineReady || pendingIdsRef.current.has(item.id)) {
       return;
     }
     pendingIdsRef.current.add(item.id);
@@ -203,6 +205,11 @@ export default function PhotoProcessingPanel({
           Bạn không có quyền thực hiện. Viewer chỉ được xem ảnh và trạng thái xử lý.
         </div>
       )}
+      {isAdmin && writeBlockedReason && (
+        <div className="qlhv-import-permission-note" role="status">
+          {writeBlockedReason}
+        </div>
+      )}
       {notice && <div className="qlhv-import-success" role="status">{notice}</div>}
       {error && <div className="qlhv-import-error" role="alert">{error}</div>}
       {loading && !data && <div className="qlhv-import-empty">Đang tải ảnh...</div>}
@@ -252,9 +259,11 @@ export default function PhotoProcessingPanel({
                     type="button"
                     className="btn btn--primary btn--sm"
                     onClick={() => void handleAction(item, 'approve')}
-                    disabled={!isAdmin || pending || !data.engineReady || !canApprove(item)}
+                    disabled={!isAdmin || !!writeBlockedReason || pending || !data.engineReady || !canApprove(item)}
                     title={!isAdmin
                       ? 'Bạn không có quyền thực hiện'
+                      : writeBlockedReason
+                        ? writeBlockedReason
                       : !data.engineReady
                         ? data.readinessMessage ?? 'Engine ảnh chưa sẵn sàng'
                         : undefined}
@@ -266,9 +275,11 @@ export default function PhotoProcessingPanel({
                     type="button"
                     className="btn btn--ghost btn--sm"
                     onClick={() => void handleAction(item, 'reprocess')}
-                    disabled={!isAdmin || pending || !data.engineReady}
+                    disabled={!isAdmin || !!writeBlockedReason || pending || !data.engineReady}
                     title={!isAdmin
                       ? 'Bạn không có quyền thực hiện'
+                      : writeBlockedReason
+                        ? writeBlockedReason
                       : !data.engineReady
                         ? data.readinessMessage ?? 'Engine ảnh chưa sẵn sàng'
                         : undefined}

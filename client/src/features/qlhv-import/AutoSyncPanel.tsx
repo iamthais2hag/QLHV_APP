@@ -10,6 +10,7 @@ import type {
 } from './types';
 
 const POLL_INTERVAL_MS = 2_500;
+const IDLE_POLL_INTERVAL_MS = 10_000;
 
 export interface AutoSyncPanelProps {
   isAdmin: boolean;
@@ -17,6 +18,7 @@ export interface AutoSyncPanelProps {
   operationHistory: QlhvOperationHistoryItem[];
   reloadToken: number;
   onAccepted: () => void | Promise<void>;
+  onBusyChange?: (busy: boolean) => void;
   sessionStartRunId?: string | null;
   sessionStartRequestFailed?: boolean;
 }
@@ -27,6 +29,7 @@ export default function AutoSyncPanel({
   operationHistory,
   reloadToken,
   onAccepted,
+  onBusyChange,
   sessionStartRunId = null,
   sessionStartRequestFailed = false,
 }: AutoSyncPanelProps) {
@@ -38,79 +41,109 @@ export default function AutoSyncPanel({
   const [completedSessionRunId, setCompletedSessionRunId] = useState<string | null>(null);
   const [sessionTerminalStatus, setSessionTerminalStatus] =
     useState<QlhvAutoSyncStatus | null>(null);
+  const [manualRunId, setManualRunId] = useState<string | null>(null);
+  const [statusQueryRunId, setStatusQueryRunId] = useState<string | null>(null);
   const wasRunningRef = useRef(false);
   const startingRef = useRef(false);
-  const loadInFlightRef = useRef(false);
+  const loadRequestIdRef = useRef(0);
   const notifiedTerminalRunRef = useRef<string | null>(null);
   const trackedSessionRunId = completedSessionRunId === sessionStartRunId
     ? null
     : sessionStartRunId;
+  const trackedRunId = manualRunId ?? trackedSessionRunId;
 
   const load = useCallback(async () => {
-    if (loadInFlightRef.current) {
-      return;
-    }
-    loadInFlightRef.current = true;
+    const requestedRunId = trackedRunId;
+    const requestId = ++loadRequestIdRef.current;
     setLoading(true);
     try {
-      setStatus(await getQlhvAutoSyncStatus(trackedSessionRunId));
+      const next = await getQlhvAutoSyncStatus(requestedRunId);
+      if (requestId !== loadRequestIdRef.current) {
+        return;
+      }
+      setStatus(next);
+      setStatusQueryRunId(requestedRunId);
       setError(null);
     } catch (reason) {
+      if (requestId !== loadRequestIdRef.current) {
+        return;
+      }
       setError(reason instanceof Error
         ? reason.message
         : 'Không thể tải trạng thái Auto Sync.');
     } finally {
-      loadInFlightRef.current = false;
-      setLoading(false);
+      if (requestId === loadRequestIdRef.current) {
+        setLoading(false);
+      }
     }
-  }, [trackedSessionRunId]);
+  }, [trackedRunId]);
 
   useEffect(() => {
     void load();
   }, [load, reloadToken]);
 
-  const running = status?.state === 'queued' || status?.state === 'running';
+  // A response is authoritative only for the runId used by that exact GET.
+  // This prevents an old not-found/terminal response from completing a newly
+  // accepted manual run before its first exact-run status arrives.
+  const trackedStatus = statusQueryRunId === trackedRunId ? status : null;
+  const running = trackedStatus?.state === 'queued' || trackedStatus?.state === 'running';
 
   useEffect(() => {
-    if (wasRunningRef.current && !running) {
-      if (trackedSessionRunId && status?.runId === trackedSessionRunId) {
-        notifiedTerminalRunRef.current = trackedSessionRunId;
-        setSessionTerminalStatus(status);
+    if (!trackedRunId && wasRunningRef.current && !running) {
+      void onAccepted();
+    }
+    wasRunningRef.current = running;
+  }, [onAccepted, running, trackedRunId]);
+
+  useEffect(() => {
+    if (!trackedRunId || !trackedStatus ||
+        trackedStatus.state === 'queued' ||
+        trackedStatus.state === 'running' ||
+        notifiedTerminalRunRef.current === trackedRunId) {
+      return;
+    }
+    if (trackedStatus.found && trackedStatus.runId !== trackedRunId) {
+      return;
+    }
+    if (!trackedStatus.found || trackedStatus.runId === trackedRunId) {
+      notifiedTerminalRunRef.current = trackedRunId;
+      if (manualRunId === trackedRunId) {
+        setManualRunId(null);
+      }
+      if (trackedSessionRunId === trackedRunId) {
+        setSessionTerminalStatus(trackedStatus);
         setCompletedSessionRunId(trackedSessionRunId);
       }
       void onAccepted();
     }
-    wasRunningRef.current = running;
-  }, [onAccepted, running, status?.runId, trackedSessionRunId]);
+  }, [
+    manualRunId,
+    onAccepted,
+    trackedStatus,
+    trackedRunId,
+    trackedSessionRunId,
+  ]);
+
+  const waitingForTrackedRun = !!trackedRunId
+    && trackedStatus?.found !== false
+    && (!trackedStatus || trackedStatus.runId !== trackedRunId);
+  const shouldPoll = running || waitingForTrackedRun;
+  const busy = starting || running || waitingForTrackedRun;
 
   useEffect(() => {
-    if (!trackedSessionRunId || !status ||
-        status.state === 'queued' ||
-        status.state === 'running' ||
-        notifiedTerminalRunRef.current === trackedSessionRunId) {
-      return;
-    }
-    if (status.found && status.runId !== trackedSessionRunId) {
-      return;
-    }
-    if (!status.found || status.runId === trackedSessionRunId) {
-      notifiedTerminalRunRef.current = trackedSessionRunId;
-      setSessionTerminalStatus(status);
-      setCompletedSessionRunId(trackedSessionRunId);
-      void onAccepted();
-    }
-  }, [onAccepted, status, trackedSessionRunId]);
+    onBusyChange?.(busy);
+  }, [busy, onBusyChange]);
 
-  const waitingForExpectedSession = !!trackedSessionRunId
-    && status?.found !== false
-    && (!status || status.runId !== trackedSessionRunId);
-  const shouldPoll = running || waitingForExpectedSession;
+  useEffect(
+    () => () => onBusyChange?.(false),
+    [onBusyChange],
+  );
 
   useEffect(() => {
-    if (!shouldPoll) {
-      return undefined;
-    }
-    const timer = window.setInterval(() => void load(), POLL_INTERVAL_MS);
+    const timer = window.setInterval(
+      () => void load(),
+      shouldPoll ? POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS,
+    );
     return () => window.clearInterval(timer);
   }, [load, shouldPoll]);
 
@@ -133,7 +166,7 @@ export default function AutoSyncPanel({
 
   const disabledReason = getAutoSyncDisabledReason(
     isAdmin,
-    status,
+    trackedStatus,
     operationBlocker,
     loading,
     starting,
@@ -154,7 +187,11 @@ export default function AutoSyncPanel({
     try {
       const result = await runQlhvAutoSync();
       setNotice(result.message || 'Đã tiếp nhận yêu cầu Auto Sync.');
-      await Promise.all([load(), onAccepted()]);
+      if (result.runId) {
+        setManualRunId(result.runId);
+      } else {
+        await Promise.all([load(), onAccepted()]);
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Không thể chạy Auto Sync.');
     } finally {
@@ -173,8 +210,8 @@ export default function AutoSyncPanel({
       || row.detailJson?.includes('AUTO_SYNC')),
     [operationHistory],
   );
-  const displayedSessionStatus = trackedSessionRunId
-    ? status
+  const displayedSessionStatus = trackedSessionRunId && !manualRunId
+    ? trackedStatus
     : sessionTerminalStatus;
 
   return (
@@ -184,7 +221,7 @@ export default function AutoSyncPanel({
         <span>Chạy tuần tự OTO rồi MOTO trên máy chủ</span>
       </div>
 
-      {loading && !status && <div className="qlhv-import-empty">Đang tải trạng thái Auto Sync...</div>}
+      {loading && !trackedStatus && <div className="qlhv-import-empty">Đang tải trạng thái Auto Sync...</div>}
       {sessionStartRequestFailed && (
         <div className="qlhv-session-sync-status is-failed" role="alert">
           Không thể tiếp nhận phiên cập nhật từ icon Desktop. Ứng dụng vẫn mở với dữ liệu
@@ -197,26 +234,26 @@ export default function AutoSyncPanel({
           status={displayedSessionStatus}
         />
       )}
-      {status && (
+      {trackedStatus && (
         <>
           <div className="qlhv-auto-sync__summary">
             <AutoSyncFact
               label="Tự chạy khi server khởi động"
-              value={status.enabled && status.runOnServerStartup ? 'Đang bật' : 'Đang tắt'}
-              tone={status.enabled && status.runOnServerStartup ? 'ok' : 'warning'}
+              value={trackedStatus.enabled && trackedStatus.runOnServerStartup ? 'Đang bật' : 'Đang tắt'}
+              tone={trackedStatus.enabled && trackedStatus.runOnServerStartup ? 'ok' : 'warning'}
             />
-            <AutoSyncFact label="Trạng thái" value={formatAutoSyncState(status.state)} tone={running ? 'busy' : status.state === 'failed' || status.state === 'partial-failed' ? 'failed' : 'ok'} />
-            <AutoSyncFact label="Nguồn đang xử lý" value={status.currentSourceType ?? 'Không có'} />
-            <AutoSyncFact label="Bước hiện tại" value={formatAutoSyncStage(status.currentStage)} tone={running ? 'busy' : 'default'} />
-            <AutoSyncFact label="Actor" value={status.actor ?? 'Chưa có'} />
-            <AutoSyncFact label="Lần chạy gần nhất" value={formatDate(status.startedAtUtc)} />
-            <AutoSyncFact label="Sync thành công gần nhất" value={formatDate(status.lastSuccessfulSyncUtc)} />
+            <AutoSyncFact label="Trạng thái" value={formatAutoSyncState(trackedStatus.state)} tone={running ? 'busy' : trackedStatus.state === 'failed' || trackedStatus.state === 'partial-failed' ? 'failed' : 'ok'} />
+            <AutoSyncFact label="Nguồn đang xử lý" value={trackedStatus.currentSourceType ?? 'Không có'} />
+            <AutoSyncFact label="Bước hiện tại" value={formatAutoSyncStage(trackedStatus.currentStage)} tone={running ? 'busy' : 'default'} />
+            <AutoSyncFact label="Actor" value={trackedStatus.actor ?? 'Chưa có'} />
+            <AutoSyncFact label="Lần chạy gần nhất" value={formatDate(trackedStatus.startedAtUtc)} />
+            <AutoSyncFact label="Sync thành công gần nhất" value={formatDate(trackedStatus.lastSuccessfulSyncUtc)} />
           </div>
           <div className="qlhv-auto-sync__sources">
-            <AutoSyncSourceCard title="Ô tô" result={status.oto} />
-            <AutoSyncSourceCard title="Mô tô" result={status.moto} />
+            <AutoSyncSourceCard title="Ô tô" result={trackedStatus.oto} />
+            <AutoSyncSourceCard title="Mô tô" result={trackedStatus.moto} />
           </div>
-          {status.lastError && <div className="qlhv-import-error" role="alert">{status.lastError}</div>}
+          {trackedStatus.lastError && <div className="qlhv-import-error" role="alert">{trackedStatus.lastError}</div>}
         </>
       )}
 

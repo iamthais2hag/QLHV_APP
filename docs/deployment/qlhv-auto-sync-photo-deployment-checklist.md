@@ -55,15 +55,16 @@ apply SQL patches.
 
 10. **Open the Desktop icon.** Start one user session from the installed icon.
     Do not manually restart ASP.NET Core. Record whether the launcher reused
-    or started the server and the observed PID.
+    or started the server and the observed PID. Confirm the browser opens after
+    bounded liveness/readiness without waiting for a data operation.
 
-11. **Observe the launcher sequence.** Confirm it first performs
-    `GET session-start-sync/status`, evaluates `NeedSync`, joins an existing
-    compatible run or starts one session operation only when required, then
-    displays OTO refresh/sync followed by MOTO refresh/sync, waits for the
-    exact run to reach a terminal state, and finally opens/focuses the browser.
-    A failed operation must still open the app and display the failing source,
-    error, and last successful data time.
+11. **Observe the non-blocking launcher sequence.** Confirm it settles exactly
+    one localhost runtime, preserves an already-running PID, and opens/focuses
+    `/qlhv-import`. It must not require `NeedSync` or a `runId`, call a
+    session-start POST, or wait for Auto Sync. Simulate an unavailable operation
+    status endpoint and confirm the browser is not held in an unbounded retry
+    loop. Auto Sync startup and the Admin manual action remain independent
+    backend operations; their failure must not block app/login availability.
 
 12. **Check DataVersion.** Confirm version values increase only after the
     corresponding database transaction commits. Verify the browser refetches

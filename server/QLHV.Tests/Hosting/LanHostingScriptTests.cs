@@ -786,7 +786,7 @@ public sealed class LanHostingScriptTests
     }
 
     [Fact]
-    public void Desktop_launcher_keeps_existing_server_and_starts_or_joins_one_local_data_session()
+    public void Desktop_launcher_keeps_existing_server_and_opens_application_without_data_session()
     {
         var launcher = Read("Start-QLHV-App.ps1");
         var mainStart = launcher.LastIndexOf(
@@ -795,116 +795,99 @@ public sealed class LanHostingScriptTests
         Assert.True(mainStart >= 0);
         var main = launcher[mainStart..];
 
-        Assert.Contains("/operations/session-start-sync", launcher, StringComparison.Ordinal);
-        Assert.Contains("/operations/session-start-sync/status", launcher, StringComparison.Ordinal);
-        Assert.Contains("X-QLHV-Local-Launcher", launcher, StringComparison.Ordinal);
-        Assert.Contains("serverStartedByLauncher", launcher, StringComparison.Ordinal);
-        Assert.Contains("needSync", main, StringComparison.Ordinal);
-        Assert.Contains("Get-SessionStartStatus", main, StringComparison.Ordinal);
-        Assert.Contains("Invoke-SessionStartSync", main, StringComparison.Ordinal);
-        Assert.Contains("Wait-ForSessionSync", main, StringComparison.Ordinal);
         Assert.Contains("Initialize-LauncherProgress", main, StringComparison.Ordinal);
-        Assert.Contains("Dang lam moi du lieu O to", launcher, StringComparison.Ordinal);
-        Assert.Contains("Dang dong bo du lieu Mo to", launcher, StringComparison.Ordinal);
-        Assert.Contains("Dang tai du lieu moi", launcher, StringComparison.Ordinal);
-        Assert.Contains("sessionStartRunId", main, StringComparison.Ordinal);
         Assert.Contains("/qlhv-import", main, StringComparison.Ordinal);
+        Assert.Contains("May chu da san sang. Dang mo ung dung", main, StringComparison.Ordinal);
         Assert.Contains("No process was stopped or started", main, StringComparison.Ordinal);
         Assert.DoesNotContain("Stop-QlhvProcessById -ProcessId", main, StringComparison.Ordinal);
         Assert.DoesNotContain("/operations/refresh-backup", launcher, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("/import-execute", launcher, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("operationActive", main, StringComparison.Ordinal);
-        Assert.Contains("activeRunId", main, StringComparison.Ordinal);
-        Assert.Contains("Du lieu da la ban moi nhat", main, StringComparison.Ordinal);
-        Assert.Contains("AddSeconds($SyncTimeoutSeconds)", main, StringComparison.Ordinal);
-        Assert.DoesNotContain("AddSeconds(60)", main, StringComparison.Ordinal);
-        Assert.Contains("$serverReadyProperty", main, StringComparison.Ordinal);
-        Assert.Contains("thieu field bat buoc", main, StringComparison.Ordinal);
+        Assert.DoesNotContain("/operations/session-start-sync", launcher, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("X-QLHV-Local-Launcher", launcher, StringComparison.Ordinal);
+        Assert.DoesNotContain("Invoke-SessionStartSync", launcher, StringComparison.Ordinal);
+        Assert.DoesNotContain("Wait-ForSessionSync", launcher, StringComparison.Ordinal);
+        Assert.DoesNotContain("sessionStartRunId", launcher, StringComparison.Ordinal);
 
-        var getStatus = main.IndexOf("$sessionStatus = Get-SessionStartStatus", StringComparison.Ordinal);
-        var releaseLauncherLock = main.IndexOf("Exit-LauncherCoordinationLocks", StringComparison.Ordinal);
-        var needSync = main.IndexOf("if ([bool]$needSyncProperty.Value)", getStatus, StringComparison.Ordinal);
-        var post = main.IndexOf("$sessionRunId = Invoke-SessionStartSync", needSync, StringComparison.Ordinal);
-        var wait = main.IndexOf("Wait-ForSessionSync", post, StringComparison.Ordinal);
-        var browser = main.IndexOf("Start-Process $browserUrl", wait, StringComparison.Ordinal);
-        Assert.True(
-            releaseLauncherLock >= 0 &&
-            getStatus > releaseLauncherLock &&
-            needSync > getStatus &&
-            post > needSync &&
-            wait > post &&
-            browser > wait,
-            "Desktop flow must be GET status -> NeedSync -> POST when needed -> wait -> browser.");
+        var existingServer = main.IndexOf("$existingId = $qlhvOwners[0]", StringComparison.Ordinal);
+        var existingServerWait = main.IndexOf(
+            "Wait-ForEndpoint -ProcessId $existingId -Url $ReadyUrl",
+            existingServer,
+            StringComparison.Ordinal);
+        var releaseLauncherLock = main.IndexOf(
+            "Exit-LauncherCoordinationLocks",
+            existingServerWait,
+            StringComparison.Ordinal);
+        var browser = main.IndexOf("Start-Process $browserUrl", releaseLauncherLock, StringComparison.Ordinal);
+        Assert.True(existingServer >= 0 && existingServerWait > existingServer &&
+                    releaseLauncherLock > existingServerWait && browser > releaseLauncherLock,
+            "An existing server must keep its PID, pass bounded readiness, release launcher locks, then open the app.");
     }
 
     [Fact]
-    public void Launcher_reconciles_an_ambiguous_post_with_get_and_never_blind_reposts()
+    public void Desktop_launcher_starts_one_missing_server_then_opens_application()
     {
         var launcher = Read("Start-QLHV-App.ps1");
-        var postFunctionStart = launcher.IndexOf("function Invoke-SessionStartSync", StringComparison.Ordinal);
-        var getFunctionStart = launcher.IndexOf("function Get-SessionStartStatus", postFunctionStart, StringComparison.Ordinal);
-        Assert.True(postFunctionStart >= 0 && getFunctionStart > postFunctionStart);
-        var postFunction = launcher[postFunctionStart..getFunctionStart];
+        var mainStart = launcher.LastIndexOf("# Main launcher lifecycle:", StringComparison.Ordinal);
+        var main = launcher[mainStart..];
 
+        Assert.Contains("if ($null -eq $script:StartedProcessId)", main, StringComparison.Ordinal);
+        Assert.Contains("Start-QlhvRuntime", main, StringComparison.Ordinal);
+        Assert.Contains("Wait-ForEndpoint -ProcessId $script:StartedProcessId -Url $LiveUrl", main, StringComparison.Ordinal);
+        Assert.Contains("Wait-ForEndpoint -ProcessId $script:StartedProcessId -Url $ReadyUrl", main, StringComparison.Ordinal);
+
+        var start = main.LastIndexOf("Start-QlhvRuntime", StringComparison.Ordinal);
+        var ready = main.LastIndexOf(
+            "Wait-ForEndpoint -ProcessId $script:StartedProcessId -Url $ReadyUrl",
+            StringComparison.Ordinal);
+        var browser = main.IndexOf("Start-Process $browserUrl", ready, StringComparison.Ordinal);
         Assert.Single(
-            Regex.Matches(postFunction, @"-Method\s+Post", RegexOptions.IgnoreCase).Cast<Match>());
-        Assert.Contains("Get-SessionStartStatus", postFunction, StringComparison.Ordinal);
-        Assert.Contains("operationActive", postFunction, StringComparison.Ordinal);
-        Assert.Contains("activeRunId", postFunction, StringComparison.Ordinal);
-        Assert.Contains("$attempt -ge 10", postFunction, StringComparison.Ordinal);
-        Assert.Contains("never reposts", postFunction, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("$waitingForManualOperation", postFunction, StringComparison.Ordinal);
-        Assert.Contains("AddSeconds($TimeoutSeconds)", postFunction, StringComparison.Ordinal);
-        Assert.Contains("Get-ProcessRecord -ProcessId $ProcessId", postFunction, StringComparison.Ordinal);
-        Assert.Contains("Dang cho thao tac cap nhat hien tai ket thuc", postFunction, StringComparison.Ordinal);
+            Regex.Matches(
+                main,
+                @"(?m)^\s*Start-QlhvRuntime\s*$",
+                RegexOptions.CultureInvariant).Cast<Match>());
+        Assert.True(start >= 0 && ready > start && browser > ready,
+            "A missing server must be started once and pass readiness before the app opens.");
     }
 
     [Fact]
-    public void Launcher_retries_transient_exact_run_status_until_overall_deadline()
+    public void Desktop_launcher_does_not_block_on_status_need_sync_or_run_id()
     {
         var launcher = Read("Start-QLHV-App.ps1");
-        var waitStart = launcher.IndexOf("function Wait-ForSessionSync", StringComparison.Ordinal);
-        var nextFunction = launcher.IndexOf("\nfunction ", waitStart + 1, StringComparison.Ordinal);
-        Assert.True(waitStart >= 0 && nextFunction > waitStart);
-        var waitFunction = launcher[waitStart..nextFunction];
+        var mainStart = launcher.LastIndexOf("# Main launcher lifecycle:", StringComparison.Ordinal);
+        Assert.True(mainStart >= 0);
 
-        Assert.Contains("AddSeconds($TimeoutSeconds)", waitFunction, StringComparison.Ordinal);
-        Assert.Contains("Get-ProcessRecord -ProcessId $ProcessId", waitFunction, StringComparison.Ordinal);
-        Assert.Contains("try {", waitFunction, StringComparison.Ordinal);
-        Assert.Contains("catch {", waitFunction, StringComparison.Ordinal);
-        Assert.Contains("Tam thoi chua doc duoc trang thai", waitFunction, StringComparison.Ordinal);
-        Assert.Contains("continue", waitFunction, StringComparison.Ordinal);
-    }
+        Assert.DoesNotContain("/operations/session-start-sync/status", launcher, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("/operations/session-start-sync", launcher, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("PSObject.Properties['needSync']", launcher, StringComparison.Ordinal);
+        Assert.DoesNotContain("PSObject.Properties['runId']", launcher, StringComparison.Ordinal);
+        Assert.DoesNotContain("Invoke-RestMethod", launcher, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotMatch(new Regex(@"-Method\s+Post", RegexOptions.IgnoreCase), launcher);
+        Assert.Contains("[int]$HealthTimeoutSeconds = 90", launcher, StringComparison.Ordinal);
+        Assert.DoesNotContain("SyncTimeoutSeconds", launcher, StringComparison.Ordinal);
+        Assert.Contains("Start-Process $browserUrl", launcher, StringComparison.Ordinal);
 
-    [Fact]
-    public void Launcher_allows_slow_read_only_need_sync_snapshots_but_keeps_exact_poll_bounded()
-    {
-        var launcher = Read("Start-QLHV-App.ps1");
-        var statusStart = launcher.IndexOf(
-            "function Get-SessionStartStatus",
+        var existingPid = launcher.IndexOf(
+            "$script:StartedProcessId = $existingId",
             StringComparison.Ordinal);
-        var nextFunction = launcher.IndexOf("\nfunction ", statusStart + 1, StringComparison.Ordinal);
-        Assert.True(statusStart >= 0 && nextFunction > statusStart);
-        var statusFunction = launcher[statusStart..nextFunction];
+        var configurationValidation = launcher.IndexOf(
+            "Assert-ProductionConfiguration",
+            mainStart,
+            StringComparison.Ordinal);
+        Assert.True(
+            existingPid >= 0 && configurationValidation > existingPid,
+            "An already-running server must be identified before configuration needed only for a new process is validated.");
 
-        Assert.Contains(
-            "$NeedSyncRequestTimeoutSeconds = 120",
-            launcher,
+        var catchStart = launcher.LastIndexOf("catch {", StringComparison.Ordinal);
+        var catchBody = launcher[catchStart..];
+        var boundedLiveProbe = catchBody.IndexOf(
+            "Invoke-HealthProbe -Url $LiveUrl -TimeoutSeconds 4",
             StringComparison.Ordinal);
-        Assert.Contains(
-            "$NeedSyncRequestTimeoutSeconds",
-            statusFunction,
+        var fallbackBrowser = catchBody.IndexOf(
+            "Start-Process \"$ApplicationUrl/qlhv-import\"",
             StringComparison.Ordinal);
-        Assert.Contains("-TimeoutSec $requestTimeoutSeconds", statusFunction, StringComparison.Ordinal);
-
-        var postStart = launcher.IndexOf("function Invoke-SessionStartSync", StringComparison.Ordinal);
-        var postEnd = launcher.IndexOf("\nfunction ", postStart + 1, StringComparison.Ordinal);
-        Assert.True(postStart >= 0 && postEnd > postStart);
-        var postFunction = launcher[postStart..postEnd];
-        Assert.Contains(
-            "-TimeoutSec $NeedSyncRequestTimeoutSeconds",
-            postFunction,
-            StringComparison.Ordinal);
+        Assert.True(
+            boundedLiveProbe >= 0 && fallbackBrowser > boundedLiveProbe,
+            "A bounded readiness failure must still open a server that remains live.");
     }
 
     [Fact]
@@ -956,7 +939,8 @@ public sealed class LanHostingScriptTests
         Assert.DoesNotMatch(new Regex(@"\bInvoke-Sqlcmd\b", RegexOptions.IgnoreCase), launcher);
         Assert.DoesNotContain("refresh-backup", launcher, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("import-execute", launcher, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("/operations/session-start-sync", launcher, StringComparison.Ordinal);
+        Assert.DoesNotContain("/operations/session-start-sync", launcher, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotMatch(new Regex(@"-Method\s+Post", RegexOptions.IgnoreCase), launcher);
     }
 
     [Fact]

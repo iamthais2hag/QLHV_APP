@@ -780,6 +780,35 @@ public sealed class QlhvAutoSyncTests
         Assert.Equal(QlhvAutoSyncConstants.StartupTrigger, autoSync.LastTrigger);
     }
 
+    [Fact]
+    public async Task Startup_service_queue_failure_is_isolated_from_the_host()
+    {
+        var autoSync = new FakeAutoSyncService
+        {
+            QueueException = new InvalidOperationException("test startup queue failure"),
+        };
+        using var provider = new ServiceCollection()
+            .AddScoped<IRuntimeReadinessService>(_ => new ReadyReadinessService())
+            .AddScoped<IQlhvAutoSyncService>(_ => autoSync)
+            .BuildServiceProvider();
+        var service = new QlhvAutoSyncStartupService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new TestHostEnvironment(Environments.Production),
+            Options.Create(new QlhvAutoSyncOptions
+            {
+                Enabled = true,
+                RunOnServerStartup = true,
+                ReadinessPollSeconds = 1,
+            }));
+
+        await service.StartAsync(CancellationToken.None);
+        await autoSync.Queued.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await service.StopAsync(CancellationToken.None);
+
+        Assert.Equal(1, autoSync.QueueCalls);
+        Assert.Equal(QlhvAutoSyncConstants.StartupTrigger, autoSync.LastTrigger);
+    }
+
     [Theory]
     [InlineData("Development")]
     [InlineData("Staging")]
@@ -1275,6 +1304,7 @@ public sealed class QlhvAutoSyncTests
 
         public int QueueCalls { get; private set; }
         public string? LastTrigger { get; private set; }
+        public Exception? QueueException { get; init; }
 
         public Task<QlhvAutoSyncQueueResultDto> QueueAsync(
             string triggerType,
@@ -1283,6 +1313,11 @@ public sealed class QlhvAutoSyncTests
             QueueCalls++;
             LastTrigger = triggerType;
             Queued.TrySetResult(true);
+            if (QueueException is not null)
+            {
+                throw QueueException;
+            }
+
             return Task.FromResult(new QlhvAutoSyncQueueResultDto { Accepted = true });
         }
 

@@ -37,9 +37,13 @@ public sealed class AuthApiIntegrationTests : IClassFixture<AuthApiFactory>
         var refresh = await client.PostAsJsonAsync(
             "/api/dong-bo-v2/qlhv/operations/refresh-backup",
             new QlhvRefreshBackupRequest { SourceType = "OTO" });
+        var autoSync = await client.PostAsync(
+            "/api/dong-bo-v2/qlhv/operations/auto-sync",
+            null);
 
         Assert.Equal(HttpStatusCode.Unauthorized, import.StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, refresh.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, autoSync.StatusCode);
     }
 
     [Fact]
@@ -60,11 +64,15 @@ public sealed class AuthApiIntegrationTests : IClassFixture<AuthApiFactory>
         var testProfile = await client.PostAsJsonAsync(
             "/api/csdt-connection-profiles/CSDT_OTO/test",
             new { });
+        var autoSync = await client.PostAsync(
+            "/api/dong-bo-v2/qlhv/operations/auto-sync",
+            null);
 
         Assert.Equal(HttpStatusCode.Forbidden, import.StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, refresh.StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, saveProfile.StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, testProfile.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, autoSync.StatusCode);
     }
 
     [Fact]
@@ -121,6 +129,97 @@ public sealed class AuthApiIntegrationTests : IClassFixture<AuthApiFactory>
         Assert.False(viewer.CanSync);
         Assert.Contains("Bạn không có quyền Admin.", viewer.RefreshBlockers);
         Assert.Contains("Bạn không có quyền Admin.", viewer.SyncBlockers);
+    }
+
+    [Fact]
+    public async Task Admin_with_enabled_runtime_write_flags_can_refresh_when_idle()
+    {
+        using var factory = _factory.WithWebHostBuilder(builder =>
+            builder.ConfigureAppConfiguration((_, configuration) =>
+                configuration.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Sync:DryRun"] = "false",
+                    ["SyncExecution:EnableTargetWrites"] = "true",
+                })));
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false,
+            HandleCookies = true,
+        });
+        await LoginAsync(client, "admin", AuthApiFactory.AdminPassword);
+
+        var status = await client.GetFromJsonAsync<QlhvOperationsStatusDto>(
+            "/api/dong-bo-v2/qlhv/operations/status?sourceType=OTO");
+
+        Assert.NotNull(status);
+        Assert.Equal(AppRoles.Admin, status.CurrentUserRole);
+        Assert.True(status.WriteAuthorized);
+        Assert.False(status.DryRun);
+        Assert.True(status.TargetWritesEnabled);
+        Assert.True(status.CanRefresh);
+        Assert.True(status.CanSync);
+        Assert.Empty(status.RefreshBlockers);
+        Assert.Empty(status.SyncBlockers);
+    }
+
+    [Fact]
+    public async Task Failed_auto_sync_status_does_not_block_login_or_application_shell()
+    {
+        var webRoot = Path.Combine(
+            Path.GetTempPath(),
+            $"qlhv-auth-auto-sync-failure-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(webRoot);
+        File.WriteAllText(
+            Path.Combine(webRoot, "index.html"),
+            "<!doctype html><html><body><div id=\"auto-sync-failure-shell\"></div></body></html>");
+        try
+        {
+            using var factory = _factory.WithWebHostBuilder(builder =>
+            {
+                builder.UseWebRoot(webRoot);
+                builder.ConfigureServices(services =>
+                {
+                    services.RemoveAll<IQlhvAutoSyncService>();
+                    services.AddSingleton<IQlhvAutoSyncService, FailedAutoSyncService>();
+                });
+            });
+            using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+            {
+                AllowAutoRedirect = false,
+                HandleCookies = true,
+            });
+
+            await LoginAsync(client, "admin", AuthApiFactory.AdminPassword);
+            var me = await client.GetAsync("/api/auth/me");
+            var autoSync = await client.GetFromJsonAsync<QlhvAutoSyncStatusDto>(
+                "/api/dong-bo-v2/qlhv/operations/auto-sync/status");
+            var application = await client.GetAsync("/qlhv-import");
+
+            Assert.Equal(HttpStatusCode.OK, me.StatusCode);
+            Assert.NotNull(autoSync);
+            Assert.Equal("failed", autoSync.State);
+            Assert.Equal("Auto Sync test failure.", autoSync.LastError);
+            Assert.Equal(HttpStatusCode.OK, application.StatusCode);
+            Assert.Contains(
+                "auto-sync-failure-shell",
+                await application.Content.ReadAsStringAsync(),
+                StringComparison.Ordinal);
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(webRoot, recursive: true);
+            }
+            catch (IOException)
+            {
+                // TestServer can release static-file handles just after disposal.
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Best-effort cleanup of the unique OS temp fixture.
+            }
+        }
     }
 
     [Fact]
@@ -281,6 +380,50 @@ public sealed class AuthApiIntegrationTests : IClassFixture<AuthApiFactory>
         MaCSDT = "66029",
         ExpectedSnapshotToken = "test-snapshot",
     };
+
+    private sealed class FailedAutoSyncService : IQlhvAutoSyncService
+    {
+        public Task<QlhvAutoSyncQueueResultDto> QueueAsync(
+            string triggerType,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new QlhvAutoSyncQueueResultDto
+            {
+                Status = QlhvAutoSyncConstants.Failed,
+                Message = "Auto Sync test failure.",
+            });
+
+        public Task<QlhvAutoSyncQueueResultDto> QueueSessionStartAsync(
+            bool serverStartedByLauncher,
+            CancellationToken cancellationToken = default) =>
+            QueueAsync(QlhvAutoSyncConstants.SessionStartTrigger, cancellationToken);
+
+        public Task<QlhvSessionStartStatusDto> GetSessionStartStatusAsync(
+            bool serverStartedByLauncher,
+            Guid? runId = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new QlhvSessionStartStatusDto
+            {
+                Found = true,
+                ServerReady = true,
+                State = "failed",
+                IsTerminal = true,
+                LastError = "Auto Sync test failure.",
+                Message = "Auto Sync test failure.",
+            });
+
+        public Task<QlhvAutoSyncStatusDto> GetStatusAsync(
+            Guid? runId = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new QlhvAutoSyncStatusDto
+            {
+                Found = true,
+                Enabled = true,
+                RunOnServerStartup = true,
+                RefreshBackupBeforeSync = true,
+                State = "failed",
+                LastError = "Auto Sync test failure.",
+            });
+    }
 }
 
 public sealed class AuthApiFactory : WebApplicationFactory<Program>
