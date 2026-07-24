@@ -91,6 +91,13 @@ public sealed class QlhvCourseTeacherFullSnapshotSyncSqlTests
             "database", "patches", "20260723_add_qlhv_course_teacher_full_sync.sql"));
 
         Assert.Contains("USE [QLHV_APP];", patch, StringComparison.Ordinal);
+        Assert.Contains("SET ANSI_NULLS ON;", patch, StringComparison.Ordinal);
+        Assert.Contains("SET QUOTED_IDENTIFIER ON;", patch, StringComparison.Ordinal);
+        Assert.Contains("SET ANSI_PADDING ON;", patch, StringComparison.Ordinal);
+        Assert.Contains("SET ANSI_WARNINGS ON;", patch, StringComparison.Ordinal);
+        Assert.Contains("SET ARITHABORT ON;", patch, StringComparison.Ordinal);
+        Assert.Contains("SET CONCAT_NULL_YIELDS_NULL ON;", patch, StringComparison.Ordinal);
+        Assert.Contains("SET NUMERIC_ROUNDABORT OFF;", patch, StringComparison.Ordinal);
         Assert.Contains("SET XACT_ABORT ON;", patch, StringComparison.Ordinal);
         Assert.Contains("BEGIN TRY", patch, StringComparison.Ordinal);
         Assert.Contains("BEGIN TRANSACTION;", patch, StringComparison.Ordinal);
@@ -105,15 +112,58 @@ public sealed class QlhvCourseTeacherFullSnapshotSyncSqlTests
         Assert.Contains("UX_App_GiaoVien_SourceIdentity", patch, StringComparison.Ordinal);
         Assert.Contains("UX_App_KhoaHoc_GiaoVien_SourceIdentity", patch, StringComparison.Ordinal);
         Assert.Contains("ALTER COLUMN HangGPLX NVARCHAR(100) NULL", patch, StringComparison.Ordinal);
+        Assert.Contains("max_length <> -1", patch, StringComparison.Ordinal);
         Assert.Contains("IsKhoaHocGiaoVien", patch, StringComparison.Ordinal);
-        Assert.Contains("ALTER INDEX UX_App_KhoaHoc_SourceIdentity ON dbo.App_KhoaHoc REBUILD", patch, StringComparison.Ordinal);
-        Assert.Contains("ALTER INDEX UX_App_GiaoVien_SourceIdentity ON dbo.App_GiaoVien REBUILD", patch, StringComparison.Ordinal);
-        Assert.Contains("ALTER INDEX UX_App_KhoaHoc_GiaoVien_SourceIdentity ON dbo.App_KhoaHoc_GiaoVien REBUILD", patch, StringComparison.Ordinal);
+        Assert.Contains("EXEC sys.sp_executesql N'ALTER TABLE dbo.App_KhoaHoc WITH CHECK CHECK CONSTRAINT", patch, StringComparison.Ordinal);
+        Assert.Contains("EXEC sys.sp_executesql N'ALTER TABLE dbo.App_GiaoVien WITH CHECK CHECK CONSTRAINT", patch, StringComparison.Ordinal);
+        Assert.Contains("EXEC sys.sp_executesql N'ALTER TABLE dbo.App_KhoaHoc_GiaoVien WITH CHECK CHECK CONSTRAINT", patch, StringComparison.Ordinal);
+        Assert.Contains("EXEC sys.sp_executesql N'ALTER INDEX UX_App_KhoaHoc_SourceIdentity ON dbo.App_KhoaHoc REBUILD", patch, StringComparison.Ordinal);
+        Assert.Contains("EXEC sys.sp_executesql N'ALTER INDEX UX_App_GiaoVien_SourceIdentity ON dbo.App_GiaoVien REBUILD", patch, StringComparison.Ordinal);
+        Assert.Contains("EXEC sys.sp_executesql N'ALTER INDEX UX_App_KhoaHoc_GiaoVien_SourceIdentity ON dbo.App_KhoaHoc_GiaoVien REBUILD", patch, StringComparison.Ordinal);
+        Assert.Contains("sourceprofilecodeisnotnullandsourcemakhoahocisnotnull", patch, StringComparison.Ordinal);
+        Assert.Contains("sourceprofilecodeisnotnullandsourcemagvisnotnull", patch, StringComparison.Ordinal);
+        Assert.Contains("sourceprofilecodeisnotnullandsourcemalichlvisnotnull", patch, StringComparison.Ordinal);
+        Assert.Contains("targetColumn.is_computed <> 0", patch, StringComparison.Ordinal);
+        Assert.Contains("targetConstraint.is_not_trusted <> 0", patch, StringComparison.Ordinal);
         Assert.Contains("sai dinh nghia hoac khong hoat dong", patch, StringComparison.Ordinal);
 
         Assert.DoesNotContain("DELETE FROM", patch, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("UPDATE dbo.App_", patch, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("INSERT INTO dbo.App_", patch, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Patch_compiles_post_add_constraints_and_filtered_indexes_in_dynamic_batches()
+    {
+        var patch = File.ReadAllText(FindWorkspaceFile(
+                "database", "patches", "20260723_add_qlhv_course_teacher_full_sync.sql"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        foreach (var tableName in new[]
+                 {
+                     "App_KhoaHoc",
+                     "App_GiaoVien",
+                     "App_KhoaHoc_GiaoVien",
+                 })
+        {
+            Assert.Contains(
+                $"EXEC sys.sp_executesql N'\n        ALTER TABLE dbo.{tableName} WITH CHECK",
+                patch,
+                StringComparison.Ordinal);
+            Assert.Contains(
+                $"EXEC sys.sp_executesql N'\n            CREATE UNIQUE NONCLUSTERED INDEX UX_{tableName}_SourceIdentity",
+                patch,
+                StringComparison.Ordinal);
+        }
+
+        Assert.DoesNotContain(
+            "\n        ALTER TABLE dbo.App_KhoaHoc WITH CHECK ADD CONSTRAINT",
+            patch,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "\n        CREATE UNIQUE NONCLUSTERED INDEX UX_App_KhoaHoc_SourceIdentity",
+            patch,
+            StringComparison.Ordinal);
     }
 
     [Fact]
