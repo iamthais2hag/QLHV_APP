@@ -38,6 +38,8 @@ public sealed class QlhvOperationsService : IQlhvOperationsService
         QlhvOperationHistoryDto? active = null;
         QlhvOperationHistoryDto? latestRefresh = null;
         QlhvOperationHistoryDto? latestSync = null;
+        QlhvOperationHistoryDto? latestSuccessfulRefresh = null;
+        QlhvOperationHistoryDto? latestSuccessfulSync = null;
         try
         {
             active = await _history.GetActiveAsync(source.SourceType, cancellationToken);
@@ -46,6 +48,14 @@ public sealed class QlhvOperationsService : IQlhvOperationsService
                 QlhvOperationTypes.RefreshBackup,
                 cancellationToken);
             latestSync = await _history.GetLatestCompletedAsync(
+                source.SourceType,
+                QlhvOperationTypes.FullSync,
+                cancellationToken);
+            latestSuccessfulRefresh = await _history.GetLatestSuccessfulAsync(
+                source.SourceType,
+                QlhvOperationTypes.RefreshBackup,
+                cancellationToken);
+            latestSuccessfulSync = await _history.GetLatestSuccessfulAsync(
                 source.SourceType,
                 QlhvOperationTypes.FullSync,
                 cancellationToken);
@@ -119,16 +129,12 @@ public sealed class QlhvOperationsService : IQlhvOperationsService
             SourceProfileCode = source.SourceProfileCode,
             State = active is null ? ToIdleState(latest) : ToActiveState(active),
             ActiveOperationId = active?.OperationId,
-            BackupLastRefreshTimeUtc = latestRefresh is { Status: QlhvOperationTypes.Succeeded }
-                ? latestRefresh.CompletedAtUtc
-                : null,
+            BackupLastRefreshTimeUtc = latestSuccessfulRefresh?.CompletedAtUtc,
             BackupSnapshotToken = token,
             LiveRows = data.LiveRows,
             BackupRows = data.BackupRows,
             TargetActiveRows = data.TargetActiveRows,
-            LastSyncTimeUtc = latestSync is { Status: QlhvOperationTypes.Succeeded }
-                ? latestSync.CompletedAtUtc
-                : null,
+            LastSyncTimeUtc = latestSuccessfulSync?.CompletedAtUtc,
             LastError = statusError ?? (latest is { Status: QlhvOperationTypes.Failed }
                 ? latest.ErrorMessage
                 : null),
@@ -294,6 +300,7 @@ public sealed class QlhvOperationsService : IQlhvOperationsService
         => latest?.Status switch
         {
             QlhvOperationTypes.Succeeded => "succeeded",
+            QlhvOperationTypes.PartialSuccess => "partial-success",
             QlhvOperationTypes.Failed => "failed",
             _ => "idle",
         };

@@ -264,7 +264,15 @@ public sealed class QlhvAutoSyncSqlTests
             repository,
             StringComparison.Ordinal);
         Assert.Contains(
+            "QlhvAutoSyncConstants.PartialSuccess",
+            repository,
+            StringComparison.Ordinal);
+        Assert.Contains(
             "QlhvAutoSyncConstants.PartialFailed",
+            repository,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "WHEN @Status IN (N'SUCCEEDED', N'PARTIAL_SUCCESS') THEN N'COMPLETED'",
             repository,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -301,7 +309,7 @@ public sealed class QlhvAutoSyncSqlTests
     }
 
     [Fact]
-    public void Version_increment_is_after_all_merges_and_before_transaction_commit()
+    public void Domain_version_and_partition_state_updates_are_inside_their_own_transactions()
     {
         var source = File.ReadAllText(FindWorkspaceFile(
             "server",
@@ -309,21 +317,44 @@ public sealed class QlhvAutoSyncSqlTests
             "Sync",
             "QlhvHocVienTargetRepository.cs"));
 
-        var course = source.IndexOf("MergeKhoaHoc", StringComparison.Ordinal);
-        var teacher = source.IndexOf("MergeGiaoVien", StringComparison.Ordinal);
-        var relation = source.IndexOf("MergeRelation", StringComparison.Ordinal);
-        var student = source.IndexOf("QlhvFullSnapshotSyncSql.Merge", StringComparison.Ordinal);
-        var version = source.IndexOf(
-            "QlhvDataVersionSql.IncrementAfterSuccessfulFullSync",
-            StringComparison.Ordinal);
-        var commit = source.IndexOf("CommitAsync", version, StringComparison.Ordinal);
+        Assert.Contains("QlhvDataVersionSql.IncrementAfterKhoaHocCommit", source, StringComparison.Ordinal);
+        Assert.Contains("QlhvDataVersionSql.IncrementAfterGiaoVienCommit", source, StringComparison.Ordinal);
+        Assert.Contains("QlhvDataVersionSql.IncrementAfterRelationCommit", source, StringComparison.Ordinal);
 
-        Assert.True(course >= 0 && course < teacher);
-        Assert.True(teacher < relation);
-        Assert.True(relation < student);
-        Assert.True(student < version);
-        Assert.True(version < commit);
-        Assert.Contains("transaction: transaction", source[version..commit], StringComparison.Ordinal);
+        var entityStart = source.IndexOf(
+            "private async Task<DomainTransactionResult> FullSyncEntityDomainCoreAsync",
+            StringComparison.Ordinal);
+        var hocVienStart = source.IndexOf(
+            "private async Task<DomainTransactionResult> FullSyncHocVienDomainCoreAsync",
+            StringComparison.Ordinal);
+        var upsertStart = source.IndexOf(
+            "private async Task<UpsertCounts> UpsertBatchCoreAsync",
+            StringComparison.Ordinal);
+        Assert.True(entityStart >= 0 && hocVienStart > entityStart && upsertStart > hocVienStart);
+
+        var entityCore = source[entityStart..hocVienStart];
+        var entityVersion = entityCore.LastIndexOf("incrementVersionSql", StringComparison.Ordinal);
+        var entityCommit = entityCore.IndexOf("CommitAsync", entityVersion, StringComparison.Ordinal);
+        Assert.True(entityVersion >= 0 && entityVersion < entityCommit);
+        Assert.Contains(
+            "transaction: transaction",
+            entityCore[entityVersion..entityCommit],
+            StringComparison.Ordinal);
+
+        var hocVienCore = source[hocVienStart..upsertStart];
+        var partitionState = hocVienCore.IndexOf(
+            "UpsertPartitionStateAfterSuccessfulFullSync",
+            StringComparison.Ordinal);
+        var hocVienVersion = hocVienCore.IndexOf(
+            "IncrementAfterHocVienCommit",
+            StringComparison.Ordinal);
+        var hocVienCommit = hocVienCore.IndexOf("CommitAsync", hocVienVersion, StringComparison.Ordinal);
+        Assert.True(partitionState >= 0 && partitionState < hocVienVersion);
+        Assert.True(hocVienVersion < hocVienCommit);
+        Assert.Contains(
+            "transaction: transaction",
+            hocVienCore[partitionState..hocVienCommit],
+            StringComparison.Ordinal);
     }
 
     [Fact]

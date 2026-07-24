@@ -3,6 +3,9 @@ import type {
   QlhvAutoSyncSourceResult,
   QlhvAutoSyncStatus,
   QlhvImportDiagnostics,
+  QlhvImportDomain,
+  QlhvImportDomainResult,
+  QlhvImportDomainStatus,
   QlhvImportEntityCounts,
   QlhvImportExecuteOutcome,
   QlhvImportExecuteRequest,
@@ -497,6 +500,7 @@ function isAutoSyncState(value: unknown): value is QlhvAutoSyncStatus['state'] {
     || value === 'queued'
     || value === 'running'
     || value === 'succeeded'
+    || value === 'partial-success'
     || value === 'partial-failed'
     || value === 'failed';
 }
@@ -559,7 +563,7 @@ function isExecuteResult(value: unknown): value is QlhvImportExecuteResult {
     return false;
   }
 
-  const entityCountsAreValid = ['hocVien', 'khoaHoc', 'giaoVien']
+  const entityCountsAreValid = ['hocVien', 'khoaHoc', 'giaoVien', 'khoaHocGiaoVien']
     .every((key) => value[key] === undefined || isImportEntityCounts(value[key]));
 
   return typeof value.executed === 'boolean'
@@ -567,6 +571,8 @@ function isExecuteResult(value: unknown): value is QlhvImportExecuteResult {
     && typeof value.message === 'string'
     && isImportPlan(value.plan)
     && entityCountsAreValid
+    && Array.isArray(value.domainResults)
+    && value.domainResults.every(isImportDomainResult)
     && (value.photo === undefined || isImportPhotoCounts(value.photo))
     && hasFiniteNumbers(value, [
       'insertedHocVienRows',
@@ -586,13 +592,25 @@ function isImportPlan(value: unknown): value is QlhvImportPlan {
     && typeof value.backupSnapshotToken === 'string'
     && typeof value.generatedAtUtc === 'string'
     && typeof value.executable === 'boolean'
+    && isImportDomainStatus(value.hocVienStatus)
+    && isImportDomainStatus(value.khoaHocStatus)
+    && isImportDomainStatus(value.giaoVienStatus)
+    && isImportDomainStatus(value.relationStatus)
     && typeof value.sourceProfileConstraintExists === 'boolean'
     && typeof value.sourceProfileAllowedByConstraint === 'boolean'
     && isStringArray(value.blockers)
     && isStringArray(value.warnings)
+    && isStringArray(value.hocVienBlockers)
+    && isStringArray(value.khoaHocBlockers)
+    && isStringArray(value.giaoVienBlockers)
+    && isStringArray(value.relationBlockers)
+    && isStringArray(value.optionalWarnings)
+    && isImportDomainArray(value.executableDomains)
+    && isImportDomainArray(value.skippedDomains)
     && isImportEntityCounts(value.hocVien)
     && isImportEntityCounts(value.khoaHoc)
     && isImportEntityCounts(value.giaoVien)
+    && isImportEntityCounts(value.khoaHocGiaoVien)
     && (value.photo === undefined || isImportPhotoCounts(value.photo))
     && isFiniteNumber(value.duplicateSourceKeys)
     && isFiniteNumber(value.relationConflicts)
@@ -624,13 +642,25 @@ function isImportDiagnostics(value: unknown): value is QlhvImportDiagnostics {
 
   return typeof value.isReadOnly === 'boolean'
     && typeof value.executable === 'boolean'
+    && isImportDomainStatus(value.hocVienStatus)
+    && isImportDomainStatus(value.khoaHocStatus)
+    && isImportDomainStatus(value.giaoVienStatus)
+    && isImportDomainStatus(value.relationStatus)
     && typeof value.sourceProfileConstraintExists === 'boolean'
     && typeof value.sourceProfileAllowedByConstraint === 'boolean'
     && isStringArray(value.blockers)
     && isStringArray(value.warnings)
+    && isStringArray(value.hocVienBlockers)
+    && isStringArray(value.khoaHocBlockers)
+    && isStringArray(value.giaoVienBlockers)
+    && isStringArray(value.relationBlockers)
+    && isStringArray(value.optionalWarnings)
+    && isImportDomainArray(value.executableDomains)
+    && isImportDomainArray(value.skippedDomains)
     && isImportEntityCounts(value.hocVien)
     && isImportEntityCounts(value.khoaHoc)
     && isImportEntityCounts(value.giaoVien)
+    && isImportEntityCounts(value.khoaHocGiaoVien)
     && (value.photo === undefined || isImportPhotoCounts(value.photo))
     && isFiniteNumber(value.duplicateSourceKeys)
     && isFiniteNumber(value.relationConflicts)
@@ -663,6 +693,36 @@ function isImportEntityCounts(value: unknown): value is QlhvImportEntityCounts {
       'skip',
       'duplicateSourceKeys',
     ]);
+}
+
+function isImportDomainResult(value: unknown): value is QlhvImportDomainResult {
+  return isRecord(value)
+    && isImportDomain(value.domain)
+    && typeof value.status === 'string'
+    && isNullableString(value.message)
+    && isImportEntityCounts(value.counts);
+}
+
+function isImportDomainArray(value: unknown): value is QlhvImportDomain[] {
+  return Array.isArray(value) && value.every(isImportDomain);
+}
+
+function isImportDomain(value: unknown): value is QlhvImportDomain {
+  return value === 'HOC_VIEN'
+    || value === 'KHOA_HOC'
+    || value === 'GIAO_VIEN'
+    || value === 'KHOA_HOC_GIAO_VIEN';
+}
+
+function isImportDomainStatus(value: unknown): value is QlhvImportDomainStatus {
+  return value === 'EXECUTABLE'
+    || value === 'BLOCKED'
+    || value === 'SKIPPED_SCHEMA_NOT_READY'
+    || value === 'SKIPPED_SOURCE_NOT_READY'
+    || value === 'SKIPPED_DEPENDENCY_NOT_READY'
+    || value === 'SUCCESS'
+    || value === 'FAILED'
+    || value === 'NO_OP';
 }
 
 function isImportPhotoCounts(value: unknown): value is QlhvImportPhotoCounts {
@@ -712,6 +772,7 @@ function isOperationState(value: unknown): value is QlhvOperationsStatus['state'
     || value === 'refreshing'
     || value === 'syncing'
     || value === 'succeeded'
+    || value === 'partial-success'
     || value === 'failed';
 }
 

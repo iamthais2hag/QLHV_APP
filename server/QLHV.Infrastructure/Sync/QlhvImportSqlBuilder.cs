@@ -9,45 +9,106 @@ internal static class QlhvImportSqlBuilder
         QlhvImportRequest request,
         bool hasKhoaHocMaCsdt)
     {
+        var reads = BuildSourceReads(
+            request,
+            new QlhvImportSourceReadCapabilities(
+                KhoaHocExists: true,
+                KhoaHocStudentJoinReady: true,
+                GiaoVienExists: true,
+                RelationExists: true,
+                DmHangDtExists: true,
+                DmHangDtJoinReady: true,
+                DmDvhcExists: true,
+                DmDvhcJoinReady: true,
+                KhoaHocHasMaCsdt: hasKhoaHocMaCsdt,
+                HasDuongDanAnh: true,
+                HasChatLuongAnh: true,
+                HasNgayThuNhanAnh: true,
+                HasNguoiThuNhanAnh: true));
+
+        return (
+            string.Join(
+                Environment.NewLine,
+                new[] { reads.HocVienSql, reads.KhoaHocSql, reads.GiaoVienSql, reads.RelationSql }
+                    .Where(sql => !string.IsNullOrWhiteSpace(sql))),
+            reads.Parameters);
+    }
+
+    public static QlhvImportSourceReadSql BuildSourceReads(
+        QlhvImportRequest request,
+        QlhvImportSourceReadCapabilities capabilities)
+    {
         var parameters = BuildParameters(request);
-        var hocVienCenterFilter = hasKhoaHocMaCsdt
+        var hocVienCenterFilter =
+            capabilities.KhoaHocStudentJoinReady && capabilities.KhoaHocHasMaCsdt
             ? "(LTRIM(RTRIM(nlx.MaDK)) LIKE @MaDkPrefix OR LTRIM(RTRIM(kh.MaCSDT)) = @MaCSDT)"
             : "LTRIM(RTRIM(nlx.MaDK)) LIKE @MaDkPrefix";
-        var khoaHocCenterFilter = hasKhoaHocMaCsdt
+        var khoaHocCenterFilter = capabilities.KhoaHocHasMaCsdt
             ? "LTRIM(RTRIM(kh.MaCSDT)) = @MaCSDT"
             : "LTRIM(RTRIM(kh.MaKH)) LIKE @MaDkPrefix";
+        var khoaHocJoin = capabilities.KhoaHocStudentJoinReady
+            ? "LEFT JOIN dbo.KhoaHoc AS kh ON kh.MaKH = hs.MaKhoaHoc"
+            : string.Empty;
+        var hangDtJoin = capabilities.DmHangDtJoinReady
+            ? "LEFT JOIN dbo.DM_HangDT AS hdt ON hdt.MaHangDT = hs.HangDaoTao"
+            : string.Empty;
+        var dvhcJoin = capabilities.DmDvhcJoinReady
+            ? @"LEFT JOIN dbo.DM_DVHC AS dvhc ON dvhc.MaDV =
+    LTRIM(RTRIM(nlx.NoiTT_MaDVQL)) + LTRIM(RTRIM(nlx.NoiTT_MaDVHC))"
+            : string.Empty;
+        var tenKhoa = capabilities.KhoaHocStudentJoinReady
+            ? "kh.TenKH"
+            : "CAST(NULL AS nvarchar(255))";
+        var tenHangDt = capabilities.DmHangDtJoinReady
+            ? "hdt.TenHangDT"
+            : "CAST(NULL AS nvarchar(255))";
+        var noiTtTenDayDu = capabilities.DmDvhcJoinReady
+            ? "dvhc.TenDayDu"
+            : "CAST(NULL AS nvarchar(500))";
+        var duongDanAnh = capabilities.HasDuongDanAnh
+            ? "hs.DuongDanAnh"
+            : "CAST(NULL AS nvarchar(500))";
+        var chatLuongAnh = capabilities.HasChatLuongAnh
+            ? "hs.ChatLuongAnh"
+            : "CAST(NULL AS int)";
+        var ngayThuNhanAnh = capabilities.HasNgayThuNhanAnh
+            ? "hs.NgayThuNhanAnh"
+            : "CAST(NULL AS datetime2)";
+        var nguoiThuNhanAnh = capabilities.HasNguoiThuNhanAnh
+            ? "hs.NguoiThuNhanAnh"
+            : "CAST(NULL AS nvarchar(100))";
 
-        var sql = $@"
+        var hocVienSql = $@"
 SELECT
     nlx.MaDK                              AS MaDK,
     hs.MaKhoaHoc                          AS MaKhoaHoc,
-    kh.TenKH                              AS TenKH,
+    {tenKhoa}                             AS TenKH,
     hs.HangDaoTao                         AS HangDaoTao,
-    hdt.TenHangDT                         AS TenHangDT,
+    {tenHangDt}                           AS TenHangDT,
     nlx.HoVaTen                           AS HoVaTen,
     TRY_CONVERT(date, nlx.NgaySinh, 112)  AS NgaySinh,
     nlx.SoCMT                             AS SoCMT,
     nlx.GioiTinh                          AS GioiTinh,
     nlx.NoiTT                             AS NoiTT,
-    dvhc.TenDayDu                         AS NoiTTTenDayDu,
+    {noiTtTenDayDu}                       AS NoiTTTenDayDu,
     hs.SoGPLXDaCo                         AS SoGPLXDaCo,
     hs.HangGPLXDaCo                       AS HangGPLXDaCo,
     hs.NguoiNhanHSo                       AS NguoiNhanHoSo,
-    hs.DuongDanAnh                        AS DuongDanAnh,
-    hs.ChatLuongAnh                       AS ChatLuongAnh,
-    hs.NgayThuNhanAnh                     AS NgayThuNhanAnh,
-    hs.NguoiThuNhanAnh                    AS NguoiThuNhanAnh
+    {duongDanAnh}                          AS DuongDanAnh,
+    {chatLuongAnh}                        AS ChatLuongAnh,
+    {ngayThuNhanAnh}                      AS NgayThuNhanAnh,
+    {nguoiThuNhanAnh}                     AS NguoiThuNhanAnh
 FROM dbo.NguoiLX AS nlx
 INNER JOIN dbo.NguoiLX_HoSo AS hs ON hs.MaDK = nlx.MaDK
-LEFT JOIN dbo.KhoaHoc AS kh ON kh.MaKH = hs.MaKhoaHoc
-LEFT JOIN dbo.DM_HangDT AS hdt ON hdt.MaHangDT = hs.HangDaoTao
-LEFT JOIN dbo.DM_DVHC AS dvhc ON dvhc.MaDV =
-    LTRIM(RTRIM(nlx.NoiTT_MaDVQL)) + LTRIM(RTRIM(nlx.NoiTT_MaDVHC))
+{khoaHocJoin}
+{hangDtJoin}
+{dvhcJoin}
 WHERE {hocVienCenterFilter}
   AND (@MaKhoaHoc IS NULL OR LTRIM(RTRIM(hs.MaKhoaHoc)) = @MaKhoaHoc)
-ORDER BY hs.MaKhoaHoc, nlx.HoVaTen, nlx.MaDK;
+ORDER BY hs.MaKhoaHoc, nlx.HoVaTen, nlx.MaDK;";
 
-SELECT
+        var khoaHocSql = capabilities.KhoaHocExists
+            ? $@"SELECT
     kh.MaKH,
     kh.MaCSDT,
     kh.MaSoGTVT,
@@ -76,9 +137,11 @@ SELECT
 FROM dbo.KhoaHoc AS kh
 WHERE {khoaHocCenterFilter}
   AND (@MaKhoaHoc IS NULL OR LTRIM(RTRIM(kh.MaKH)) = @MaKhoaHoc)
-ORDER BY kh.MaKH;
+ORDER BY kh.MaKH;"
+            : null;
 
-SELECT
+        var giaoVienSql = capabilities.GiaoVienExists
+            ? @"SELECT
     gv.MaGV,
     gv.MaSoGTVT,
     gv.MaCSDT,
@@ -119,9 +182,11 @@ SELECT
     gv.CacHangDaCo
 FROM dbo.GiaoVien AS gv
 WHERE LTRIM(RTRIM(gv.MaCSDT)) = @MaCSDT
-ORDER BY gv.MaGV;
+ORDER BY gv.MaGV;"
+            : null;
 
-SELECT
+        var relationSql = capabilities.RelationExists && capabilities.KhoaHocExists
+            ? $@"SELECT
     relation.MaLichLV,
     relation.MaKH,
     relation.MaGV,
@@ -142,9 +207,15 @@ FROM dbo.KhoaHoc_GiaoVien AS relation
 INNER JOIN dbo.KhoaHoc AS kh ON kh.MaKH = relation.MaKH
 WHERE {khoaHocCenterFilter}
   AND (@MaKhoaHoc IS NULL OR LTRIM(RTRIM(relation.MaKH)) = @MaKhoaHoc)
-ORDER BY relation.MaLichLV;";
+ORDER BY relation.MaLichLV;"
+            : null;
 
-        return (sql, parameters);
+        return new QlhvImportSourceReadSql(
+            hocVienSql,
+            khoaHocSql,
+            giaoVienSql,
+            relationSql,
+            parameters);
     }
 
     public static (string Sql, DynamicParameters Parameters) BuildTargetKhoaHocCount(
@@ -175,3 +246,25 @@ WHERE LTRIM(RTRIM(MaKhoa)) LIKE @MaDkPrefix
         return parameters;
     }
 }
+
+internal sealed record QlhvImportSourceReadCapabilities(
+    bool KhoaHocExists,
+    bool KhoaHocStudentJoinReady,
+    bool GiaoVienExists,
+    bool RelationExists,
+    bool DmHangDtExists,
+    bool DmHangDtJoinReady,
+    bool DmDvhcExists,
+    bool DmDvhcJoinReady,
+    bool KhoaHocHasMaCsdt,
+    bool HasDuongDanAnh,
+    bool HasChatLuongAnh,
+    bool HasNgayThuNhanAnh,
+    bool HasNguoiThuNhanAnh);
+
+internal sealed record QlhvImportSourceReadSql(
+    string HocVienSql,
+    string? KhoaHocSql,
+    string? GiaoVienSql,
+    string? RelationSql,
+    DynamicParameters Parameters);

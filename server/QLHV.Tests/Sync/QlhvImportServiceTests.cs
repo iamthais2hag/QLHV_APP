@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.Options;
 using QLHV.Application.HocVien.Photos;
 using QLHV.Application.Sync;
@@ -117,6 +118,7 @@ public sealed class QlhvImportServiceTests
 
         Assert.False(plan.Executable);
         Assert.Contains(plan.Blockers, blocker => blocker.Contains("bat buoc phai la CSDL_OTO_BAK", StringComparison.Ordinal));
+        Assert.Empty(plan.ExecutableDomains);
     }
 
     [Fact]
@@ -139,7 +141,9 @@ public sealed class QlhvImportServiceTests
         Assert.False(plan.Executable);
         Assert.Equal(0, plan.SourceHocVienRows);
         Assert.Equal(0, plan.PlannedUpsertHocVienRows);
-        Assert.Contains(plan.Blockers, blocker => blocker.Contains("0 hoc vien", StringComparison.Ordinal));
+        Assert.Contains(
+            plan.HocVienBlockers,
+            blocker => blocker.Contains("0 hoc vien", StringComparison.Ordinal));
         Assert.Equal(0, target.UpsertCalls);
     }
 
@@ -202,7 +206,9 @@ public sealed class QlhvImportServiceTests
         var result = await service.ExecuteAsync(ExecuteRequest());
 
         Assert.False(result.Executed);
-        Assert.Contains(result.Plan.Blockers, blocker => blocker.Contains("CHECK constraint", StringComparison.Ordinal));
+        Assert.Contains(
+            result.Plan.HocVienBlockers,
+            blocker => blocker.Contains("CHECK constraint", StringComparison.Ordinal));
         Assert.Equal(0, target.UpsertCalls);
     }
 
@@ -271,7 +277,9 @@ public sealed class QlhvImportServiceTests
         Assert.Equal(0, diagnostics.SourceDistinctMaDkRows);
         Assert.Equal(0, diagnostics.DuplicateSourceMaDkRows);
         Assert.False(diagnostics.Executable);
-        Assert.Contains(diagnostics.Blockers, blocker => blocker.Contains("0 hoc vien", StringComparison.Ordinal));
+        Assert.Contains(
+            diagnostics.HocVienBlockers,
+            blocker => blocker.Contains("0 hoc vien", StringComparison.Ordinal));
         Assert.Equal(0, target.UpsertCalls);
     }
 
@@ -302,7 +310,9 @@ public sealed class QlhvImportServiceTests
         Assert.Equal(3, diagnostics.SourceHocVienRows);
         Assert.Equal(1, diagnostics.SourceDistinctMaDkRows);
         Assert.Equal(1, diagnostics.DuplicateSourceMaDkRows);
-        Assert.Contains(diagnostics.Blockers, blocker => blocker.Contains("MaDK bi trung", StringComparison.Ordinal));
+        Assert.Contains(
+            diagnostics.HocVienBlockers,
+            blocker => blocker.Contains("MaDK bi trung", StringComparison.Ordinal));
         Assert.Equal(0, target.UpsertCalls);
     }
 
@@ -352,7 +362,9 @@ public sealed class QlhvImportServiceTests
 
         var plan = await service.GetPlanAsync(OtoRequest());
 
-        Assert.Contains(plan.Blockers, blocker => blocker.Contains("khong cho phep CSDT_OTO", StringComparison.Ordinal));
+        Assert.Contains(
+            plan.HocVienBlockers,
+            blocker => blocker.Contains("khong cho phep CSDT_OTO", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -371,7 +383,7 @@ public sealed class QlhvImportServiceTests
     }
 
     [Fact]
-    public async Task Plan_blocks_assignment_that_does_not_reference_teacher_in_same_snapshot()
+    public async Task Plan_skips_optional_assignment_that_does_not_reference_teacher_in_same_snapshot()
     {
         var reads = new FakeReadRepository
         {
@@ -392,9 +404,185 @@ public sealed class QlhvImportServiceTests
 
         var plan = await service.GetPlanAsync(OtoRequest());
 
-        Assert.False(plan.Executable);
+        Assert.True(plan.Executable);
         Assert.Equal(1, plan.RelationConflicts);
-        Assert.Contains(plan.Blockers, blocker => blocker.Contains("quan he", StringComparison.OrdinalIgnoreCase));
+        Assert.Empty(plan.Blockers);
+        Assert.Empty(plan.HocVienBlockers);
+        Assert.Contains(
+            plan.RelationBlockers,
+            blocker => blocker.Contains("quan he", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(QlhvImportDomains.HocVien, plan.ExecutableDomains);
+        Assert.Contains(QlhvImportDomains.Relation, plan.SkippedDomains);
+    }
+
+    [Fact]
+    public async Task Plan_keeps_hoc_vien_executable_when_all_optional_target_schemas_are_missing()
+    {
+        var reads = OneOtoRow(new QlhvImportTargetSnapshot
+        {
+            KhoaHocBlockers = ["Target thieu bang dbo.App_KhoaHoc."],
+            GiaoVienBlockers = ["Target thieu bang dbo.App_GiaoVien."],
+            RelationBlockers = ["Target thieu bang dbo.App_KhoaHoc_GiaoVien."],
+        });
+        var service = CreateService(reads, new FakeTargetRepository());
+
+        var plan = await service.GetPlanAsync(OtoRequest());
+
+        Assert.True(plan.Executable);
+        Assert.Empty(plan.Blockers);
+        Assert.Empty(plan.HocVienBlockers);
+        Assert.Equal(QlhvImportDomainStatuses.Executable, plan.HocVienStatus);
+        Assert.Equal(QlhvImportDomainStatuses.SkippedSchemaNotReady, plan.KhoaHocStatus);
+        Assert.Equal(QlhvImportDomainStatuses.SkippedSchemaNotReady, plan.GiaoVienStatus);
+        Assert.Equal(QlhvImportDomainStatuses.SkippedSchemaNotReady, plan.RelationStatus);
+        Assert.Equal(new[] { QlhvImportDomains.HocVien }, plan.ExecutableDomains);
+        Assert.Equal(
+            new[]
+            {
+                QlhvImportDomains.KhoaHoc,
+                QlhvImportDomains.GiaoVien,
+                QlhvImportDomains.Relation,
+            },
+            plan.SkippedDomains);
+        Assert.Contains(
+            plan.OptionalWarnings,
+            warning => warning.Contains("App_KhoaHoc", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Plan_reports_missing_target_control_schema_as_global_blocker()
+    {
+        var reads = OneOtoRow(new QlhvImportTargetSnapshot());
+        reads.TargetException = new QlhvImportGlobalBlockerException(
+            "Target QLHV_APP thieu schema control bat buoc cho full sync.");
+        var service = CreateService(reads, new FakeTargetRepository());
+
+        var plan = await service.GetPlanAsync(OtoRequest());
+
+        Assert.False(plan.Executable);
+        Assert.Contains(
+            plan.Blockers,
+            blocker => blocker.Contains("schema control", StringComparison.Ordinal));
+        Assert.Empty(plan.HocVienBlockers);
+        Assert.Empty(plan.ExecutableDomains);
+        Assert.Equal(QlhvImportDomainStatuses.Blocked, plan.HocVienStatus);
+    }
+
+    [Fact]
+    public async Task Plan_marks_zero_row_optional_domain_as_skipped_source_not_ready()
+    {
+        var reads = new FakeReadRepository
+        {
+            Source = new QlhvImportSourceSnapshot
+            {
+                HocVienRows =
+                [
+                    new V2HocVienSourceRow
+                    {
+                        MaDK = "66029-001",
+                        HangDaoTao = "B2",
+                        TenHangDT = "Hang B2",
+                        HoVaTen = "Nguyen Van A",
+                        NgaySinh = new DateTime(1990, 1, 2),
+                        SoCMT = "001234567890",
+                        GioiTinh = "M",
+                    },
+                ],
+            },
+        };
+        var service = CreateService(reads, new FakeTargetRepository());
+
+        var plan = await service.GetPlanAsync(OtoRequest());
+
+        Assert.True(plan.Executable);
+        Assert.Equal(QlhvImportDomainStatuses.SkippedSourceNotReady, plan.KhoaHocStatus);
+        Assert.Contains(
+            plan.KhoaHocBlockers,
+            blocker => blocker.Contains("0 dong", StringComparison.Ordinal));
+        Assert.DoesNotContain(QlhvImportDomains.KhoaHoc, plan.ExecutableDomains);
+    }
+
+    [Fact]
+    public async Task Plan_marks_optional_mapping_failure_as_skipped_source_not_ready()
+    {
+        var reads = new FakeReadRepository
+        {
+            Source = new QlhvImportSourceSnapshot
+            {
+                HocVienRows = [Source("66029-001")],
+                KhoaHocSourceRows =
+                [
+                    new QlhvKhoaHocSourceRow
+                    {
+                        MaKH = " ",
+                        MaCSDT = "66029",
+                        TrangThai = true,
+                    },
+                ],
+            },
+        };
+        var service = CreateService(reads, new FakeTargetRepository());
+
+        var plan = await service.GetPlanAsync(OtoRequest());
+
+        Assert.True(plan.Executable);
+        Assert.Equal(QlhvImportDomainStatuses.SkippedSourceNotReady, plan.KhoaHocStatus);
+        Assert.Contains(
+            plan.KhoaHocBlockers,
+            blocker => blocker.Contains("thieu MaKH", StringComparison.Ordinal));
+        Assert.DoesNotContain(QlhvImportDomains.KhoaHoc, plan.ExecutableDomains);
+    }
+
+    [Fact]
+    public async Task Plan_marks_optional_duplicate_source_keys_as_skipped_source_not_ready()
+    {
+        var course = new QlhvKhoaHocSourceRow
+        {
+            MaKH = "66029K01",
+            MaCSDT = "66029",
+            TenKH = "Khoa OTO",
+            TrangThai = true,
+        };
+        var reads = new FakeReadRepository
+        {
+            Source = new QlhvImportSourceSnapshot
+            {
+                HocVienRows = [Source("66029-001")],
+                KhoaHocSourceRows = [course, course],
+            },
+        };
+        var service = CreateService(reads, new FakeTargetRepository());
+
+        var plan = await service.GetPlanAsync(OtoRequest());
+
+        Assert.True(plan.Executable);
+        Assert.Equal(QlhvImportDomainStatuses.SkippedSourceNotReady, plan.KhoaHocStatus);
+        Assert.Contains(
+            plan.KhoaHocBlockers,
+            blocker => blocker.Contains("SourceMaKhoaHoc bi trung", StringComparison.Ordinal));
+        Assert.DoesNotContain(QlhvImportDomains.KhoaHoc, plan.ExecutableDomains);
+    }
+
+    [Fact]
+    public async Task Plan_keeps_target_hoc_vien_identity_conflict_as_required_blocker()
+    {
+        var reads = OneOtoRow(new QlhvImportTargetSnapshot
+        {
+            DuplicateHocVienTargetIdentityRows = 1,
+        });
+        var target = new FakeTargetRepository();
+        var service = CreateService(reads, target);
+
+        var plan = await service.GetPlanAsync(OtoRequest());
+
+        Assert.False(plan.Executable);
+        Assert.Empty(plan.Blockers);
+        Assert.Contains(
+            plan.HocVienBlockers,
+            blocker => blocker.Contains("HocVien", StringComparison.Ordinal) &&
+                       blocker.Contains("identity bi trung", StringComparison.Ordinal));
+        Assert.DoesNotContain(QlhvImportDomains.HocVien, plan.ExecutableDomains);
+        Assert.Equal(0, target.UpsertCalls);
     }
 
     [Fact]
@@ -424,6 +612,148 @@ public sealed class QlhvImportServiceTests
         Assert.Equal("CSDT_OTO", model.SourceProfileCode);
         Assert.Equal("66029-001", model.SourceMaDK);
         Assert.Equal("66029-001", model.MaDK);
+    }
+
+    [Fact]
+    public async Task Execute_reports_partial_success_when_optional_domain_fails_after_hoc_vien_commits()
+    {
+        var history = new FakeOperationHistoryRepository();
+        var hocVienCounts = new QlhvEntityWriteCounts(1, 1, 0, 0, 0, 0);
+        var target = new FakeTargetRepository
+        {
+            FullSyncResult = new QlhvImportFullSyncWriteResult(
+                QlhvEntityWriteCounts.Empty,
+                QlhvEntityWriteCounts.Empty,
+                QlhvEntityWriteCounts.Empty,
+                hocVienCounts,
+                0, 0, 0, 0, 0, 0)
+            {
+                DomainResults =
+                [
+                    new QlhvDomainWriteResult(
+                        QlhvImportDomains.KhoaHoc,
+                        QlhvImportDomainStatuses.Failed,
+                        "fixture optional failure",
+                        QlhvEntityWriteCounts.Empty),
+                    new QlhvDomainWriteResult(
+                        QlhvImportDomains.HocVien,
+                        QlhvImportDomainStatuses.Succeeded,
+                        null,
+                        hocVienCounts),
+                ],
+            },
+        };
+        var service = CreateService(
+            OneOtoRow(new QlhvImportTargetSnapshot()),
+            target,
+            dryRun: false,
+            enableWrites: true,
+            operationHistory: history);
+
+        var result = await service.ExecuteAsync(ExecuteRequest());
+
+        Assert.True(result.Executed);
+        Assert.Equal(QlhvImportOverallStatuses.PartialSuccess, result.Status);
+        Assert.Equal(1, result.InsertedHocVienRows);
+        Assert.Equal(1, result.HocVien.Insert);
+        Assert.Contains(
+            result.Plan.Warnings,
+            warning => warning.Contains("fixture optional failure", StringComparison.Ordinal));
+        Assert.Contains(
+            result.DomainResults,
+            domain => domain.Domain == QlhvImportDomains.KhoaHoc &&
+                      domain.Status == QlhvImportDomainStatuses.Failed);
+        Assert.Contains(
+            result.DomainResults,
+            domain => domain.Domain == QlhvImportDomains.HocVien &&
+                      domain.Status == QlhvImportDomainStatuses.Succeeded);
+        Assert.Equal(QlhvOperationTypes.PartialSuccess, Assert.Single(history.Completed).Value.Status);
+    }
+
+    [Fact]
+    public async Task Execute_reports_and_audits_failed_hoc_vien_after_optional_domain_commits()
+    {
+        var history = new FakeOperationHistoryRepository();
+        var khoaHocCounts = new QlhvEntityWriteCounts(1, 1, 0, 0, 0, 0);
+        var hocVienCounts = new QlhvEntityWriteCounts(1, 0, 0, 0, 0, 1);
+        var target = new FakeTargetRepository
+        {
+            FullSyncResult = new QlhvImportFullSyncWriteResult(
+                khoaHocCounts,
+                QlhvEntityWriteCounts.Empty,
+                QlhvEntityWriteCounts.Empty,
+                hocVienCounts,
+                0, 0, 0, 0, 0, 0)
+            {
+                DomainResults =
+                [
+                    new QlhvDomainWriteResult(
+                        QlhvImportDomains.KhoaHoc,
+                        QlhvImportDomainStatuses.Succeeded,
+                        null,
+                        khoaHocCounts),
+                    new QlhvDomainWriteResult(
+                        QlhvImportDomains.HocVien,
+                        QlhvImportDomainStatuses.Failed,
+                        "fixture hoc vien transaction failed",
+                        hocVienCounts),
+                ],
+            },
+        };
+        var service = CreateService(
+            OneOtoRow(new QlhvImportTargetSnapshot()),
+            target,
+            dryRun: false,
+            enableWrites: true,
+            operationHistory: history);
+
+        var result = await service.ExecuteAsync(ExecuteRequest());
+
+        Assert.True(result.Executed);
+        Assert.Equal(QlhvImportOverallStatuses.Failed, result.Status);
+        Assert.Equal(1, result.KhoaHoc.SourceRows);
+        Assert.Equal(1, result.KhoaHoc.Insert);
+        Assert.Equal(1, result.HocVien.SourceRows);
+        Assert.Equal(1, result.HocVien.Skip);
+        Assert.Equal(2, result.DomainResults.Count);
+        Assert.Contains(
+            result.DomainResults,
+            domain => domain.Domain == QlhvImportDomains.KhoaHoc &&
+                      domain.Status == QlhvImportDomainStatuses.Succeeded &&
+                      domain.Counts.Insert == 1);
+        Assert.Contains(
+            result.DomainResults,
+            domain => domain.Domain == QlhvImportDomains.HocVien &&
+                      domain.Status == QlhvImportDomainStatuses.Failed &&
+                      domain.Counts.Skip == 1);
+        Assert.True(target.FullSyncTokenCaptured);
+        Assert.False(target.LastFullSyncCancellationToken.CanBeCanceled);
+
+        var completion = Assert.Single(history.Completed).Value;
+        Assert.Equal(QlhvOperationTypes.Failed, completion.Status);
+        Assert.Equal(2, completion.SourceRows);
+        Assert.Equal(1, completion.InsertedRows);
+        Assert.Equal(1, completion.SkippedRows);
+        Assert.Equal("fixture hoc vien transaction failed", completion.ErrorMessage);
+        Assert.NotNull(completion.DetailJson);
+        using var detail = JsonDocument.Parse(completion.DetailJson);
+        Assert.Equal(
+            QlhvImportOverallStatuses.Failed,
+            detail.RootElement.GetProperty("OverallStatus").GetString());
+        var auditedDomains = detail.RootElement
+            .GetProperty("DomainResults")
+            .EnumerateArray()
+            .ToArray();
+        Assert.Contains(
+            auditedDomains,
+            domain => domain.GetProperty("Domain").GetString() == QlhvImportDomains.KhoaHoc &&
+                      domain.GetProperty("Status").GetString() == QlhvImportDomainStatuses.Succeeded &&
+                      domain.GetProperty("Counts").GetProperty("Inserted").GetInt32() == 1);
+        Assert.Contains(
+            auditedDomains,
+            domain => domain.GetProperty("Domain").GetString() == QlhvImportDomains.HocVien &&
+                      domain.GetProperty("Status").GetString() == QlhvImportDomainStatuses.Failed &&
+                      domain.GetProperty("Counts").GetProperty("Skipped").GetInt32() == 1);
     }
 
     [Fact]
@@ -848,6 +1178,7 @@ public sealed class QlhvImportServiceTests
     {
         public QlhvImportSourceSnapshot Source { get; init; } = new();
         public QlhvImportTargetSnapshot Target { get; init; } = new();
+        public Exception? TargetException { get; set; }
         public int SourceReads { get; private set; }
         public int TargetReads { get; private set; }
 
@@ -885,6 +1216,10 @@ public sealed class QlhvImportServiceTests
                 KhoaHocSourceRows = courseRows,
                 GiaoVienRows = Source.GiaoVienRows,
                 KhoaHocGiaoVienRows = Source.KhoaHocGiaoVienRows,
+                HocVienWarnings = Source.HocVienWarnings,
+                KhoaHocBlockers = Source.KhoaHocBlockers,
+                GiaoVienBlockers = Source.GiaoVienBlockers,
+                RelationBlockers = Source.RelationBlockers,
             });
         }
 
@@ -894,6 +1229,11 @@ public sealed class QlhvImportServiceTests
             CancellationToken cancellationToken = default)
         {
             TargetReads++;
+            if (TargetException is not null)
+            {
+                throw TargetException;
+            }
+
             return Task.FromResult(Target);
         }
     }
@@ -906,6 +1246,8 @@ public sealed class QlhvImportServiceTests
         public int UpsertCalls { get; private set; }
         public string? LastFullSyncProfile { get; private set; }
         public QlhvImportFullSyncPayload? LastPayload { get; private set; }
+        public bool FullSyncTokenCaptured { get; private set; }
+        public CancellationToken LastFullSyncCancellationToken { get; private set; }
         public List<QlhvImportHocVienWriteModel> WrittenRows { get; } = new();
         public UpsertCounts UpsertResult { get; init; } = UpsertCounts.Empty;
         public QlhvImportFullSyncWriteResult FullSyncResult { get; init; } =
@@ -980,6 +1322,8 @@ public sealed class QlhvImportServiceTests
         {
             UpsertCalls++;
             LastFullSyncProfile = sourceProfileCode;
+            FullSyncTokenCaptured = true;
+            LastFullSyncCancellationToken = cancellationToken;
             if (!FullSyncResult.HasConflicts)
             {
                 WrittenRows.AddRange(rows);

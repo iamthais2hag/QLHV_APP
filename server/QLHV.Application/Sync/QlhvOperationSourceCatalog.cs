@@ -76,6 +76,7 @@ public static class QlhvOperationTypes
     public const string Queued = "QUEUED";
     public const string Running = "RUNNING";
     public const string Succeeded = "SUCCEEDED";
+    public const string PartialSuccess = "PARTIAL_SUCCESS";
     public const string Failed = "FAILED";
 }
 

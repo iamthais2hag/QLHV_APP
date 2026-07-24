@@ -9,6 +9,7 @@ public static class QlhvAutoSyncConstants
     public const string Queued = "QUEUED";
     public const string Running = "RUNNING";
     public const string Succeeded = "SUCCEEDED";
+    public const string PartialSuccess = "PARTIAL_SUCCESS";
     public const string PartialFailed = "PARTIAL_FAILED";
     public const string Failed = "FAILED";
 

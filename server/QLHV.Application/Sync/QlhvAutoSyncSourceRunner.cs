@@ -103,7 +103,8 @@ public sealed class QlhvAutoSyncSourceRunner : IQlhvAutoSyncSourceRunner
             var plan = await _import.GetPlanAsync(request, cancellationToken);
             if (!plan.Executable || string.IsNullOrWhiteSpace(plan.BackupSnapshotToken))
             {
-                var blocker = plan.Blockers.FirstOrDefault();
+                var blocker = plan.Blockers.FirstOrDefault() ??
+                              plan.HocVienBlockers.FirstOrDefault();
                 return Failed(
                     source.SourceType,
                     startedAtUtc,
@@ -132,10 +133,28 @@ public sealed class QlhvAutoSyncSourceRunner : IQlhvAutoSyncSourceRunner
                     execute.Message);
             }
 
+            if (string.Equals(
+                    execute.Status,
+                    QlhvImportOverallStatuses.Failed,
+                    StringComparison.Ordinal))
+            {
+                return Failed(
+                    source.SourceType,
+                    startedAtUtc,
+                    refreshOperationId,
+                    syncOperationId,
+                    execute.Message);
+            }
+
             return new QlhvAutoSyncSourceResultDto
             {
                 SourceType = source.SourceType,
-                Status = QlhvAutoSyncConstants.Succeeded,
+                Status = string.Equals(
+                    execute.Status,
+                    QlhvImportOverallStatuses.PartialSuccess,
+                    StringComparison.Ordinal)
+                    ? QlhvAutoSyncConstants.PartialSuccess
+                    : QlhvAutoSyncConstants.Succeeded,
                 RefreshOperationId = refreshOperationId,
                 SyncOperationId = syncOperationId,
                 StartedAtUtc = startedAtUtc,

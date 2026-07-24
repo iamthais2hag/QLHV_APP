@@ -154,6 +154,7 @@ public sealed class QlhvAutoSyncRunRepository : IQlhvAutoSyncRunRepository
     {
         if (outcome.Status is not (
                 QlhvAutoSyncConstants.Succeeded or
+                QlhvAutoSyncConstants.PartialSuccess or
                 QlhvAutoSyncConstants.PartialFailed or
                 QlhvAutoSyncConstants.Failed))
         {
@@ -421,7 +422,7 @@ SET Status = @Status,
     ActiveSlot = NULL,
     CurrentSourceType = NULL,
     CurrentStage = CASE
-        WHEN @Status = N'SUCCEEDED' THEN N'COMPLETED'
+        WHEN @Status IN (N'SUCCEEDED', N'PARTIAL_SUCCESS') THEN N'COMPLETED'
         ELSE N'FAILED'
     END,
     CompletedAtUtc = @CompletedAtUtc,

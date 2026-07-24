@@ -89,6 +89,17 @@ public sealed class QlhvImportService : IQlhvImportService
             Photo = plan.Photo,
             DuplicateSourceKeys = plan.DuplicateSourceKeys,
             RelationConflicts = plan.RelationConflicts,
+            HocVienStatus = plan.HocVienStatus,
+            KhoaHocStatus = plan.KhoaHocStatus,
+            GiaoVienStatus = plan.GiaoVienStatus,
+            RelationStatus = plan.RelationStatus,
+            HocVienBlockers = plan.HocVienBlockers,
+            KhoaHocBlockers = plan.KhoaHocBlockers,
+            GiaoVienBlockers = plan.GiaoVienBlockers,
+            RelationBlockers = plan.RelationBlockers,
+            OptionalWarnings = plan.OptionalWarnings,
+            ExecutableDomains = plan.ExecutableDomains,
+            SkippedDomains = plan.SkippedDomains,
             Blockers = plan.Blockers,
             Warnings = plan.Warnings,
         };
@@ -264,13 +275,77 @@ public sealed class QlhvImportService : IQlhvImportService
                 return WithOperation(Blocked(context.Plan, "Import bi chan vi plan co blocker."), operationId);
             }
 
+            // Once the first domain transaction can commit, an HTTP disconnect must not
+            // cancel the remaining domains and leave an unaudited partial write. The
+            // durable operation lock/history own completion from this point onward.
             var write = await _writeRepository.FullSyncAsync(
                 context.Plan.SourceProfileCode,
                 context.Payload,
-                cancellationToken);
+                CancellationToken.None);
+            if (write.RequiredDomainFailed && write.DomainResults.Count > 0)
+            {
+                var failedPlan = context.Plan;
+                var hocVienFailure = write.DomainResults.First(result =>
+                    string.Equals(result.Domain, QlhvImportDomains.HocVien, StringComparison.Ordinal) &&
+                    string.Equals(result.Status, QlhvImportDomainStatuses.Failed, StringComparison.Ordinal));
+                failedPlan = AddHocVienBlocker(
+                    failedPlan,
+                    hocVienFailure.Message ?? "HocVien transaction that bai.");
+                foreach (var optionalResult in write.DomainResults.Where(result =>
+                             !string.Equals(
+                                 result.Domain,
+                                 QlhvImportDomains.HocVien,
+                                 StringComparison.Ordinal)))
+                {
+                    failedPlan = AddWarning(
+                        failedPlan,
+                        $"{optionalResult.Domain}: {optionalResult.Message ?? optionalResult.Status}.");
+                }
+
+                var safeError = hocVienFailure.Message ?? "HocVien transaction that bai.";
+                var failureHistoryWarning = await TryCompleteWriteHistoryAsync(
+                    operationId,
+                    failedPlan,
+                    write,
+                    photoQueue: null,
+                    QlhvImportOverallStatuses.Failed,
+                    safeError);
+                return new QlhvImportExecuteResultDto
+                {
+                    OperationId = operationId,
+                    Executed = true,
+                    Status = QlhvImportOverallStatuses.Failed,
+                    Message = failureHistoryWarning is null
+                        ? "HocVien that bai; cac module truoc do co the da commit. " +
+                          "Xem ket qua tung module va khong tu dong retry."
+                        : "HocVien that bai sau khi mot so module co the da commit; " +
+                          "cap nhat lich su cung that bai, khong duoc retry tu dong.",
+                    Plan = failedPlan,
+                    InsertedHocVienRows = write.Inserted,
+                    UpdatedHocVienRows = write.Updated,
+                    ReactivatedHocVienRows = write.Reactivated,
+                    SoftDeletedHocVienRows = write.SoftDeleted,
+                    SkippedHocVienRows = write.Skipped,
+                    HocVien = ToDto(write.HocVien),
+                    KhoaHoc = ToDto(write.KhoaHoc),
+                    GiaoVien = ToDto(write.GiaoVien),
+                    KhoaHocGiaoVien = ToDto(write.Relation),
+                    DomainResults = write.DomainResults.Select(ToDto).ToArray(),
+                };
+            }
+
             if (write.HasConflicts)
             {
                 var blockedPlan = context.Plan;
+                var hocVienFailure = write.DomainResults.FirstOrDefault(result =>
+                    string.Equals(result.Domain, QlhvImportDomains.HocVien, StringComparison.Ordinal) &&
+                    string.Equals(result.Status, QlhvImportDomainStatuses.Failed, StringComparison.Ordinal));
+                if (hocVienFailure is not null)
+                {
+                    blockedPlan = AddBlocker(
+                        blockedPlan,
+                        hocVienFailure.Message ?? "HocVien transaction that bai.");
+                }
                 if (write.InvalidSourceProfileRows > 0)
                 {
                     blockedPlan = AddBlocker(
@@ -323,29 +398,54 @@ public sealed class QlhvImportService : IQlhvImportService
                     operationId);
             }
 
+            var domainResults = write.DomainResults.Select(ToDto).ToArray();
+            var optionalIssues = write.DomainResults
+                .Where(result =>
+                    !string.Equals(result.Domain, QlhvImportDomains.HocVien, StringComparison.Ordinal) &&
+                    !string.Equals(result.Status, QlhvImportDomainStatuses.Succeeded, StringComparison.Ordinal) &&
+                    !string.Equals(result.Status, QlhvImportDomainStatuses.NoOp, StringComparison.Ordinal))
+                .ToArray();
+            var overallStatus = optionalIssues.Length > 0
+                ? QlhvImportOverallStatuses.PartialSuccess
+                : write.TotalInserted + write.TotalUpdated + write.TotalReactivated + write.TotalSoftDeleted == 0
+                    ? QlhvImportOverallStatuses.NoOp
+                    : QlhvImportOverallStatuses.Success;
+            var resultPlan = context.Plan;
+            foreach (var issue in optionalIssues)
+            {
+                resultPlan = AddWarning(
+                    resultPlan,
+                    $"{issue.Domain}: {issue.Message ?? issue.Status}; module da khong xoa du lieu cu.");
+            }
+
             var (photoQueue, photoWarning) = await QueuePhotosAfterCommitSafelyAsync(
                 context.Payload.HocVienRows,
                 operationActor);
             var completedPlan = photoWarning is null
-                ? context.Plan
-                : AddWarning(context.Plan, photoWarning);
+                ? resultPlan
+                : AddWarning(resultPlan, photoWarning);
 
-            var historyWarning = await TryCompleteSucceededHistoryAsync(
+            var historyWarning = await TryCompleteWriteHistoryAsync(
                 operationId,
                 completedPlan,
                 write,
                 photoQueue,
-                cancellationToken);
+                overallStatus,
+                safeError: null);
             return new QlhvImportExecuteResultDto
             {
                 OperationId = operationId,
                 Executed = true,
-                Status = "ThanhCong",
+                Status = overallStatus,
                 Message = historyWarning is not null
                     ? "Full sync da commit vao QLHV_APP, nhung cap nhat lich su that bai; khong duoc retry tu dong."
+                    : string.Equals(overallStatus, QlhvImportOverallStatuses.PartialSuccess, StringComparison.Ordinal)
+                        ? "HocVien da dong bo; module tuy chon chua san sang hoac that bai da duoc bo qua, khong bi xoa."
                     : photoWarning is not null
                         ? "Full sync DB da commit hoan tat; xu ly anh duoc tach rieng va co canh bao."
-                        : "Full sync khoa hoc, giao vien va hoc vien tu CSDT BAK vao QLHV_APP hoan tat.",
+                        : string.Equals(overallStatus, QlhvImportOverallStatuses.NoOp, StringComparison.Ordinal)
+                            ? "Snapshot da khop QLHV_APP; khong co thay doi can ghi."
+                            : "Cac module san sang da dong bo tu CSDT BAK vao QLHV_APP.",
                 Plan = completedPlan,
                 InsertedHocVienRows = write.Inserted,
                 UpdatedHocVienRows = write.Updated,
@@ -357,6 +457,7 @@ public sealed class QlhvImportService : IQlhvImportService
                 GiaoVien = ToDto(write.GiaoVien),
                 KhoaHocGiaoVien = ToDto(write.Relation),
                 PhotoQueue = photoQueue,
+                DomainResults = domainResults,
             };
         }
         catch (OperationCanceledException)
@@ -402,11 +503,20 @@ public sealed class QlhvImportService : IQlhvImportService
         QlhvImportRequest request,
         CancellationToken cancellationToken)
     {
-        var blockers = Validate(request).ToList();
-        if (blockers.Count > 0)
+        var globalBlockers = Validate(request).ToList();
+        var hocVienBlockers = new List<string>();
+        var khoaHocBlockers = new List<string>();
+        var giaoVienBlockers = new List<string>();
+        var relationBlockers = new List<string>();
+        var warnings = new List<string>();
+        var optionalWarnings = new List<string>();
+        if (globalBlockers.Count > 0)
         {
             return new PlanContext(
-                CreateBasePlan(request, blockers),
+                CreateBasePlan(request, globalBlockers) with
+                {
+                    HocVienBlockers = ["Khong the lap plan HocVien khi yeu cau dau vao khong hop le."],
+                },
                 Array.Empty<QlhvImportHocVienWriteModel>());
         }
 
@@ -415,7 +525,7 @@ public sealed class QlhvImportService : IQlhvImportService
             var targetDiagnostics = await _targetRepository.GetDiagnosticsAsync(cancellationToken);
             if (!targetDiagnostics.AppHocVienExists)
             {
-                blockers.Add("Target QLHV_APP thieu bang dbo.App_HocVien.");
+                hocVienBlockers.Add("Target QLHV_APP thieu bang dbo.App_HocVien.");
             }
 
             var missingColumns = targetDiagnostics.RequiredColumns
@@ -424,7 +534,7 @@ public sealed class QlhvImportService : IQlhvImportService
                 .ToArray();
             if (missingColumns.Length > 0)
             {
-                blockers.Add(
+                hocVienBlockers.Add(
                     "Target dbo.App_HocVien thieu cot bat buoc: " +
                     string.Join(", ", missingColumns) + ".");
             }
@@ -435,13 +545,16 @@ public sealed class QlhvImportService : IQlhvImportService
         }
         catch (Exception ex)
         {
-            blockers.Add($"Khong doc duoc schema QLHV_APP. Chi tiet: {ex.GetType().Name}.");
+            globalBlockers.Add($"Khong doc duoc schema QLHV_APP. Chi tiet: {ex.GetType().Name}.");
         }
 
-        if (blockers.Count > 0)
+        if (globalBlockers.Count > 0 || hocVienBlockers.Count > 0)
         {
             return new PlanContext(
-                CreateBasePlan(request, blockers),
+                CreateBasePlan(request, globalBlockers) with
+                {
+                    HocVienBlockers = Distinct(hocVienBlockers),
+                },
                 Array.Empty<QlhvImportHocVienWriteModel>());
         }
 
@@ -456,25 +569,34 @@ public sealed class QlhvImportService : IQlhvImportService
         }
         catch (QlhvImportReadException ex)
         {
-            blockers.Add(ex.Message);
+            hocVienBlockers.Add(ex.Message);
             return new PlanContext(
-                CreateBasePlan(request, blockers),
+                CreateBasePlan(request, globalBlockers) with
+                {
+                    HocVienBlockers = Distinct(hocVienBlockers),
+                },
                 Array.Empty<QlhvImportHocVienWriteModel>());
         }
         catch (Exception ex)
         {
-            blockers.Add($"Khong doc duoc nguon {request.SourceProfileCode}. Chi tiet: {ex.GetType().Name}.");
+            globalBlockers.Add(
+                $"Khong doc duoc nguon {request.SourceProfileCode}. Chi tiet: {ex.GetType().Name}.");
             return new PlanContext(
-                CreateBasePlan(request, blockers),
+                CreateBasePlan(request, globalBlockers),
                 Array.Empty<QlhvImportHocVienWriteModel>());
         }
 
         var definition = SupportedProfiles[request.SourceProfileCode];
         if (!string.Equals(source.SourceDatabaseName, definition.ExpectedDatabaseName, StringComparison.Ordinal))
         {
-            blockers.Add(
+            globalBlockers.Add(
                 $"Source database la {source.SourceDatabaseName}; bat buoc phai la {definition.ExpectedDatabaseName}.");
         }
+
+        warnings.AddRange(source.HocVienWarnings);
+        khoaHocBlockers.AddRange(source.KhoaHocBlockers);
+        giaoVienBlockers.AddRange(source.GiaoVienBlockers);
+        relationBlockers.AddRange(source.RelationBlockers);
 
         var normalizedSourceMaDks = source.HocVienRows
             .Where(row => !string.IsNullOrWhiteSpace(row.MaDK))
@@ -486,19 +608,19 @@ public sealed class QlhvImportService : IQlhvImportService
         var duplicateSourceMaDks = CountDuplicateSourceMaDks(normalizedSourceMaDks);
         if (duplicateSourceMaDks > 0)
         {
-            blockers.Add($"Nguon co {duplicateSourceMaDks} MaDK bi trung trong pham vi full sync.");
+            hocVienBlockers.Add($"Nguon co {duplicateSourceMaDks} MaDK bi trung trong pham vi full sync.");
         }
 
         if (source.HocVienRows.Count == 0)
         {
-            blockers.Add(
-                "Nguon co 0 hoc vien; full sync bi chan de khong soft-delete toan bo partition.");
+            hocVienBlockers.Add(
+                "Nguon co 0 hoc vien; full sync HocVien bi chan de khong soft-delete toan bo partition.");
         }
 
         var blankSourceKeys = source.HocVienRows.Count - normalizedSourceMaDks.Length;
         if (blankSourceKeys > 0)
         {
-            blockers.Add($"Nguon co {blankSourceKeys} dong thieu MaDK/SourceMaDK.");
+            hocVienBlockers.Add($"Nguon co {blankSourceKeys} dong thieu MaDK/SourceMaDK.");
         }
 
         var sourceIdentity = new HocVienSourceIdentityContext(request.SourceProfileCode, "V2");
@@ -506,73 +628,97 @@ public sealed class QlhvImportService : IQlhvImportService
         var khoaHocModels = new List<QlhvImportKhoaHocWriteModel>(source.KhoaHocSourceRows.Count);
         var giaoVienModels = new List<QlhvImportGiaoVienWriteModel>(source.GiaoVienRows.Count);
         var relationModels = new List<QlhvImportKhoaHocGiaoVienWriteModel>(source.KhoaHocGiaoVienRows.Count);
-        var warnings = new List<string>();
         foreach (var sourceRow in source.HocVienRows)
         {
             var mapped = QlhvImportHocVienMapper.MapAndValidate(sourceRow, sourceIdentity);
             warnings.AddRange(mapped.Warnings.Select(warning =>
                 $"{warning.MaDK}: {warning.Message}"));
-            blockers.AddRange(mapped.Blockers);
+            hocVienBlockers.AddRange(mapped.Blockers);
             if (!mapped.ShouldSkip && mapped.Model is not null)
             {
                 sourceModels.Add(mapped.Model);
             }
         }
 
-        foreach (var sourceRow in source.KhoaHocSourceRows)
+        if (khoaHocBlockers.Count == 0)
         {
-            try
+            foreach (var sourceRow in source.KhoaHocSourceRows)
             {
-                var mapped = QlhvImportCourseTeacherMapper.MapKhoaHoc(
-                    sourceRow,
-                    request.SourceProfileCode);
-                blockers.AddRange(mapped.Blockers);
-                warnings.AddRange(mapped.Warnings);
-                if (mapped.Model is not null) khoaHocModels.Add(mapped.Model);
-            }
-            catch (InvalidOperationException ex)
-            {
-                blockers.Add($"Khong map duoc KhoaHoc {sourceRow.MaKH}: {ex.Message}");
+                try
+                {
+                    var mapped = QlhvImportCourseTeacherMapper.MapKhoaHoc(
+                        sourceRow,
+                        request.SourceProfileCode);
+                    khoaHocBlockers.AddRange(mapped.Blockers);
+                    optionalWarnings.AddRange(mapped.Warnings.Select(value => $"KhoaHoc: {value}"));
+                    if (mapped.Model is not null) khoaHocModels.Add(mapped.Model);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    khoaHocBlockers.Add($"Khong map duoc KhoaHoc {sourceRow.MaKH}: {ex.Message}");
+                }
             }
         }
 
-        foreach (var sourceRow in source.GiaoVienRows)
+        if (giaoVienBlockers.Count == 0)
         {
-            try
+            foreach (var sourceRow in source.GiaoVienRows)
             {
-                var mapped = QlhvImportCourseTeacherMapper.MapGiaoVien(
-                    sourceRow,
-                    request.SourceProfileCode);
-                blockers.AddRange(mapped.Blockers);
-                warnings.AddRange(mapped.Warnings);
-                if (mapped.Model is not null) giaoVienModels.Add(mapped.Model);
-            }
-            catch (InvalidOperationException ex)
-            {
-                blockers.Add($"Khong map duoc GiaoVien {sourceRow.MaGV}: {ex.Message}");
+                try
+                {
+                    var mapped = QlhvImportCourseTeacherMapper.MapGiaoVien(
+                        sourceRow,
+                        request.SourceProfileCode);
+                    giaoVienBlockers.AddRange(mapped.Blockers);
+                    optionalWarnings.AddRange(mapped.Warnings.Select(value => $"GiaoVien: {value}"));
+                    if (mapped.Model is not null) giaoVienModels.Add(mapped.Model);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    giaoVienBlockers.Add($"Khong map duoc GiaoVien {sourceRow.MaGV}: {ex.Message}");
+                }
             }
         }
 
-        foreach (var sourceRow in source.KhoaHocGiaoVienRows)
+        if (relationBlockers.Count == 0)
         {
-            try
+            foreach (var sourceRow in source.KhoaHocGiaoVienRows)
             {
-                var mapped = QlhvImportCourseTeacherMapper.MapRelation(
-                    sourceRow,
-                    request.SourceProfileCode);
-                blockers.AddRange(mapped.Blockers);
-                warnings.AddRange(mapped.Warnings);
-                if (mapped.Model is not null) relationModels.Add(mapped.Model);
-            }
-            catch (InvalidOperationException ex)
-            {
-                blockers.Add($"Khong map duoc KhoaHoc_GiaoVien {sourceRow.MaLichLV}: {ex.Message}");
+                try
+                {
+                    var mapped = QlhvImportCourseTeacherMapper.MapRelation(
+                        sourceRow,
+                        request.SourceProfileCode);
+                    relationBlockers.AddRange(mapped.Blockers);
+                    optionalWarnings.AddRange(mapped.Warnings.Select(value => $"QuanHe: {value}"));
+                    if (mapped.Model is not null) relationModels.Add(mapped.Model);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    relationBlockers.Add(
+                        $"Khong map duoc KhoaHoc_GiaoVien {sourceRow.MaLichLV}: {ex.Message}");
+                }
             }
         }
 
         if (source.HocVienRows.Count > 0 && sourceModels.Count == 0)
         {
-            blockers.Add("Khong co dong hoc vien nao map duoc an toan de full sync.");
+            hocVienBlockers.Add("Khong co dong hoc vien nao map duoc an toan de full sync.");
+        }
+        if (source.KhoaHocSourceRows.Count == 0)
+        {
+            khoaHocBlockers.Add(
+                "Source KhoaHoc co 0 dong; module duoc bo qua de khong soft-delete du lieu cu.");
+        }
+        if (source.GiaoVienRows.Count == 0)
+        {
+            giaoVienBlockers.Add(
+                "Source GiaoVien co 0 dong; module duoc bo qua de khong soft-delete du lieu cu.");
+        }
+        if (source.KhoaHocGiaoVienRows.Count == 0)
+        {
+            relationBlockers.Add(
+                "Source quan he co 0 dong; module duoc bo qua de khong soft-delete du lieu cu.");
         }
 
         var duplicateKhoaHocKeys = CountDuplicateKeys(
@@ -584,11 +730,11 @@ public sealed class QlhvImportService : IQlhvImportService
             .GroupBy(row => row.MaLichLV)
             .Count(group => group.Skip(1).Any());
         if (duplicateKhoaHocKeys > 0)
-            blockers.Add($"Nguon co {duplicateKhoaHocKeys} SourceMaKhoaHoc bi trung.");
+            khoaHocBlockers.Add($"Nguon co {duplicateKhoaHocKeys} SourceMaKhoaHoc bi trung.");
         if (duplicateGiaoVienKeys > 0)
-            blockers.Add($"Nguon co {duplicateGiaoVienKeys} SourceMaGV bi trung.");
+            giaoVienBlockers.Add($"Nguon co {duplicateGiaoVienKeys} SourceMaGV bi trung.");
         if (duplicateRelationKeys > 0)
-            blockers.Add($"Nguon co {duplicateRelationKeys} SourceMaLichLV bi trung.");
+            relationBlockers.Add($"Nguon co {duplicateRelationKeys} SourceMaLichLV bi trung.");
 
         var courseSourceKeys = khoaHocModels
             .Select(row => row.SourceMaKhoaHoc)
@@ -599,21 +745,24 @@ public sealed class QlhvImportService : IQlhvImportService
         var relationConflicts = relationModels.Count(row =>
             !courseSourceKeys.Contains(row.SourceMaKhoaHoc) ||
             !teacherSourceKeys.Contains(row.SourceMaGV));
+        if (relationConflicts > 0)
+        {
+            relationBlockers.Add(
+                $"Nguon co {relationConflicts} quan he khong tim thay KhoaHoc/GiaoVien cung snapshot.");
+        }
+
         var courseNaturalKeys = khoaHocModels
             .Select(row => row.MaKhoa)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        relationConflicts += sourceModels.Count(row =>
+        var hocVienCourseReferencesMissing = sourceModels.Count(row =>
             !string.IsNullOrWhiteSpace(row.MaKhoa) &&
             !courseNaturalKeys.Contains(row.MaKhoa));
-
-        if (relationConflicts > 0)
+        if (hocVienCourseReferencesMissing > 0)
         {
-            blockers.Add(
-                $"Nguon co {relationConflicts} quan he hoc vien/phan cong khong tim thay khoa hoc hoac giao vien cung snapshot.");
+            optionalWarnings.Add(
+                $"Co {hocVienCourseReferencesMissing} HocVien tham chieu khoa hoc khong co trong module KhoaHoc; " +
+                "HocVien van duoc dong bo doc lap.");
         }
-
-        var duplicateSourceKeys = duplicateSourceMaDks + duplicateKhoaHocKeys +
-                                  duplicateGiaoVienKeys + duplicateRelationKeys;
 
         QlhvImportTargetSnapshot target;
         try
@@ -627,16 +776,43 @@ public sealed class QlhvImportService : IQlhvImportService
         {
             throw;
         }
-        catch (QlhvImportReadException ex)
+        catch (QlhvImportGlobalBlockerException ex)
         {
-            blockers.Add(ex.Message);
+            globalBlockers.Add(ex.Message);
             return new PlanContext(
                 CreateBasePlan(
                     request,
-                    blockers,
+                    globalBlockers,
                     source,
                     distinctSourceMaDks.Length,
-                    duplicateSourceMaDks),
+                    duplicateSourceMaDks) with
+                {
+                    HocVienBlockers = Distinct(hocVienBlockers),
+                    KhoaHocBlockers = Distinct(khoaHocBlockers),
+                    GiaoVienBlockers = Distinct(giaoVienBlockers),
+                    RelationBlockers = Distinct(relationBlockers),
+                },
+                sourceModels,
+                khoaHocModels,
+                giaoVienModels,
+                relationModels);
+        }
+        catch (QlhvImportReadException ex)
+        {
+            hocVienBlockers.Add(ex.Message);
+            return new PlanContext(
+                CreateBasePlan(
+                    request,
+                    globalBlockers,
+                    source,
+                    distinctSourceMaDks.Length,
+                    duplicateSourceMaDks) with
+                {
+                    HocVienBlockers = Distinct(hocVienBlockers),
+                    KhoaHocBlockers = Distinct(khoaHocBlockers),
+                    GiaoVienBlockers = Distinct(giaoVienBlockers),
+                    RelationBlockers = Distinct(relationBlockers),
+                },
                 sourceModels,
                 khoaHocModels,
                 giaoVienModels,
@@ -644,42 +820,73 @@ public sealed class QlhvImportService : IQlhvImportService
         }
         catch (Exception ex)
         {
-            blockers.Add($"Khong doc duoc du lieu hien tai trong QLHV_APP. Chi tiet: {ex.GetType().Name}.");
+            globalBlockers.Add(
+                $"Khong doc duoc du lieu hien tai trong QLHV_APP. Chi tiet: {ex.GetType().Name}.");
             return new PlanContext(
                 CreateBasePlan(
                     request,
-                    blockers,
+                    globalBlockers,
                     source,
                     distinctSourceMaDks.Length,
-                    duplicateSourceMaDks),
+                    duplicateSourceMaDks) with
+                {
+                    HocVienBlockers = Distinct(hocVienBlockers),
+                    KhoaHocBlockers = Distinct(khoaHocBlockers),
+                    GiaoVienBlockers = Distinct(giaoVienBlockers),
+                    RelationBlockers = Distinct(relationBlockers),
+                },
                 sourceModels,
                 khoaHocModels,
                 giaoVienModels,
                 relationModels);
         }
 
+        khoaHocBlockers.AddRange(target.KhoaHocBlockers);
+        giaoVienBlockers.AddRange(target.GiaoVienBlockers);
+        relationBlockers.AddRange(target.RelationBlockers);
+
         if (target.SourceProfileConstraintExists && !target.SourceProfileAllowedByConstraint)
         {
-            blockers.Add(
+            hocVienBlockers.Add(
                 $"CHECK constraint cua App_HocVien.SourceProfileCode hien khong cho phep {request.SourceProfileCode}.");
         }
-
-        if (target.DuplicateTargetIdentityRows > 0)
+        if (target.DuplicateHocVienTargetIdentityRows > 0)
         {
-            blockers.Add(
-                $"Target co {target.DuplicateTargetIdentityRows} source identity bi trung trong cac partition.");
+            hocVienBlockers.Add(
+                $"Target HocVien co {target.DuplicateHocVienTargetIdentityRows} source identity bi trung.");
+        }
+        if (target.DuplicateKhoaHocTargetIdentityRows > 0)
+        {
+            khoaHocBlockers.Add(
+                $"Target KhoaHoc co {target.DuplicateKhoaHocTargetIdentityRows} source identity bi trung.");
+        }
+        if (target.DuplicateGiaoVienTargetIdentityRows > 0)
+        {
+            giaoVienBlockers.Add(
+                $"Target GiaoVien co {target.DuplicateGiaoVienTargetIdentityRows} source identity bi trung.");
+        }
+        if (target.DuplicateRelationTargetIdentityRows > 0)
+        {
+            relationBlockers.Add(
+                $"Target quan he co {target.DuplicateRelationTargetIdentityRows} source identity bi trung.");
         }
 
-        var invalidTargetIdentities = target.HocVienRows.Count(row =>
-            string.IsNullOrWhiteSpace(row.SourceMaDK)) +
-            target.KhoaHocRows.Count(row => string.IsNullOrWhiteSpace(row.SourceKey)) +
-            target.GiaoVienRows.Count(row => string.IsNullOrWhiteSpace(row.SourceKey)) +
-            target.RelationRows.Count(row => string.IsNullOrWhiteSpace(row.SourceKey));
-        if (invalidTargetIdentities > 0)
-        {
-            blockers.Add(
-                $"Target partition co {invalidTargetIdentities} dong thieu source identity.");
-        }
+        var invalidHocVienTargetIdentities = target.HocVienRows.Count(row =>
+            string.IsNullOrWhiteSpace(row.SourceMaDK));
+        var invalidKhoaHocTargetIdentities = target.KhoaHocRows.Count(row =>
+            string.IsNullOrWhiteSpace(row.SourceKey));
+        var invalidGiaoVienTargetIdentities = target.GiaoVienRows.Count(row =>
+            string.IsNullOrWhiteSpace(row.SourceKey));
+        var invalidRelationTargetIdentities = target.RelationRows.Count(row =>
+            string.IsNullOrWhiteSpace(row.SourceKey));
+        if (invalidHocVienTargetIdentities > 0)
+            hocVienBlockers.Add($"Target HocVien co {invalidHocVienTargetIdentities} dong thieu source identity.");
+        if (invalidKhoaHocTargetIdentities > 0)
+            khoaHocBlockers.Add($"Target KhoaHoc co {invalidKhoaHocTargetIdentities} dong thieu source identity.");
+        if (invalidGiaoVienTargetIdentities > 0)
+            giaoVienBlockers.Add($"Target GiaoVien co {invalidGiaoVienTargetIdentities} dong thieu source identity.");
+        if (invalidRelationTargetIdentities > 0)
+            relationBlockers.Add($"Target quan he co {invalidRelationTargetIdentities} dong thieu source identity.");
 
         if (target.TargetMaDkConflictsOtherProfiles > 0)
         {
@@ -689,10 +896,7 @@ public sealed class QlhvImportService : IQlhvImportService
         }
 
         QlhvFullSyncPlan? fullSyncPlan = null;
-        if (sourceModels.Count > 0 &&
-            duplicateSourceMaDks == 0 &&
-            target.DuplicateTargetIdentityRows == 0 &&
-            invalidTargetIdentities == 0)
+        if (sourceModels.Count > 0 && hocVienBlockers.Count == 0)
         {
             try
             {
@@ -700,14 +904,12 @@ public sealed class QlhvImportService : IQlhvImportService
             }
             catch (InvalidOperationException ex)
             {
-                blockers.Add(ex.Message);
+                hocVienBlockers.Add(ex.Message);
             }
         }
 
         var khoaHocPlan = QlhvEntityFullSyncPlan.Empty;
-        var giaoVienPlan = QlhvEntityFullSyncPlan.Empty;
-        var relationPlan = QlhvEntityFullSyncPlan.Empty;
-        if (target.DuplicateTargetIdentityRows == 0 && invalidTargetIdentities == 0)
+        if (khoaHocModels.Count > 0 && khoaHocBlockers.Count == 0)
         {
             try
             {
@@ -720,9 +922,13 @@ public sealed class QlhvImportService : IQlhvImportService
             }
             catch (InvalidOperationException ex)
             {
-                blockers.Add(ex.Message);
+                khoaHocBlockers.Add(ex.Message);
             }
+        }
 
+        var giaoVienPlan = QlhvEntityFullSyncPlan.Empty;
+        if (giaoVienModels.Count > 0 && giaoVienBlockers.Count == 0)
+        {
             try
             {
                 giaoVienPlan = QlhvEntityFullSyncPlanner.BuildPlan(
@@ -734,9 +940,24 @@ public sealed class QlhvImportService : IQlhvImportService
             }
             catch (InvalidOperationException ex)
             {
-                blockers.Add(ex.Message);
+                giaoVienBlockers.Add(ex.Message);
             }
+        }
 
+        var khoaHocExecutable = khoaHocModels.Count > 0 && khoaHocBlockers.Count == 0;
+        var giaoVienExecutable = giaoVienModels.Count > 0 && giaoVienBlockers.Count == 0;
+        if (!khoaHocExecutable || !giaoVienExecutable)
+        {
+            relationBlockers.Add(
+                "Quan he duoc bo qua vi KhoaHoc hoac GiaoVien chua san sang.");
+        }
+
+        var relationPlan = QlhvEntityFullSyncPlan.Empty;
+        if (relationModels.Count > 0 &&
+            relationBlockers.Count == 0 &&
+            khoaHocExecutable &&
+            giaoVienExecutable)
+        {
             try
             {
                 relationPlan = QlhvEntityFullSyncPlanner.BuildPlan(
@@ -748,7 +969,7 @@ public sealed class QlhvImportService : IQlhvImportService
             }
             catch (InvalidOperationException ex)
             {
-                blockers.Add(ex.Message);
+                relationBlockers.Add(ex.Message);
             }
         }
 
@@ -767,23 +988,47 @@ public sealed class QlhvImportService : IQlhvImportService
             }
             catch (Exception ex)
             {
-                // Photo inventory is advisory. A missing photo patch/model or an inaccessible
-                // source root must never turn a valid database full-sync plan into a blocker.
                 warnings.Add(
                     $"Khong lap duoc ke hoach anh the ({ex.GetType().Name}); full sync DB van duoc phep.");
             }
         }
 
-        warnings = warnings
-            .Where(value => !string.IsNullOrWhiteSpace(value))
-            .Distinct(StringComparer.Ordinal)
-            .Take(100)
-            .ToList();
-        blockers = blockers
-            .Where(value => !string.IsNullOrWhiteSpace(value))
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
+        globalBlockers = Distinct(globalBlockers).ToList();
+        hocVienBlockers = Distinct(hocVienBlockers).ToList();
+        khoaHocBlockers = Distinct(khoaHocBlockers).ToList();
+        giaoVienBlockers = Distinct(giaoVienBlockers).ToList();
+        relationBlockers = Distinct(relationBlockers).ToList();
+        optionalWarnings.AddRange(khoaHocBlockers.Select(value => $"KhoaHoc tam bo qua: {value}"));
+        optionalWarnings.AddRange(giaoVienBlockers.Select(value => $"GiaoVien tam bo qua: {value}"));
+        optionalWarnings.AddRange(relationBlockers.Select(value => $"QuanHe tam bo qua: {value}"));
+        optionalWarnings = Distinct(optionalWarnings).Take(100).ToList();
+        warnings.AddRange(optionalWarnings);
+        warnings = Distinct(warnings).Take(100).ToList();
 
+        var executableDomains = new List<string>();
+        if (globalBlockers.Count == 0 &&
+            khoaHocModels.Count > 0 &&
+            khoaHocBlockers.Count == 0)
+            executableDomains.Add(QlhvImportDomains.KhoaHoc);
+        if (globalBlockers.Count == 0 &&
+            giaoVienModels.Count > 0 &&
+            giaoVienBlockers.Count == 0)
+            executableDomains.Add(QlhvImportDomains.GiaoVien);
+        if (globalBlockers.Count == 0 &&
+            relationModels.Count > 0 &&
+            relationBlockers.Count == 0)
+            executableDomains.Add(QlhvImportDomains.Relation);
+        if (globalBlockers.Count == 0 &&
+            hocVienBlockers.Count == 0 &&
+            sourceModels.Count > 0 &&
+            fullSyncPlan is not null)
+        {
+            executableDomains.Add(QlhvImportDomains.HocVien);
+        }
+
+        var skippedDomains = QlhvImportDomains.Ordered
+            .Where(domain => !executableDomains.Contains(domain, StringComparer.Ordinal))
+            .ToArray();
         var hocVienDto = new QlhvEntitySyncCountsDto
         {
             SourceRows = source.HocVienRows.Count,
@@ -796,13 +1041,13 @@ public sealed class QlhvImportService : IQlhvImportService
         };
         var khoaHocDto = ToDto(
             khoaHocPlan,
-            source.KhoaHocSourceRows.Count > 0 ? source.KhoaHocSourceRows.Count : source.KhoaHocRows,
+            source.KhoaHocSourceRows.Count,
             duplicateKhoaHocKeys);
         var giaoVienDto = ToDto(giaoVienPlan, source.GiaoVienRows.Count, duplicateGiaoVienKeys);
         var relationDto = ToDto(
             relationPlan,
             source.KhoaHocGiaoVienRows.Count,
-            relationConflicts);
+            duplicateRelationKeys);
 
         var plan = new QlhvImportPlanDto
         {
@@ -836,10 +1081,41 @@ public sealed class QlhvImportService : IQlhvImportService
             GiaoVien = giaoVienDto,
             KhoaHocGiaoVien = relationDto,
             Photo = photoPlan,
-            DuplicateSourceKeys = duplicateSourceKeys,
+            DuplicateSourceKeys = duplicateSourceMaDks,
             RelationConflicts = relationConflicts,
             SourceRelationRows = source.KhoaHocGiaoVienRows.Count,
-            Blockers = blockers,
+            HocVienStatus = executableDomains.Contains(QlhvImportDomains.HocVien, StringComparer.Ordinal)
+                ? QlhvImportDomainStatuses.Executable
+                : QlhvImportDomainStatuses.Blocked,
+            KhoaHocStatus = ResolveOptionalStatus(
+                executableDomains,
+                QlhvImportDomains.KhoaHoc,
+                khoaHocBlockers,
+                target.KhoaHocBlockers,
+                source.KhoaHocBlockers,
+                dependencyNotReady: false),
+            GiaoVienStatus = ResolveOptionalStatus(
+                executableDomains,
+                QlhvImportDomains.GiaoVien,
+                giaoVienBlockers,
+                target.GiaoVienBlockers,
+                source.GiaoVienBlockers,
+                dependencyNotReady: false),
+            RelationStatus = ResolveOptionalStatus(
+                executableDomains,
+                QlhvImportDomains.Relation,
+                relationBlockers,
+                target.RelationBlockers,
+                source.RelationBlockers,
+                dependencyNotReady: !khoaHocExecutable || !giaoVienExecutable),
+            HocVienBlockers = hocVienBlockers,
+            KhoaHocBlockers = khoaHocBlockers,
+            GiaoVienBlockers = giaoVienBlockers,
+            RelationBlockers = relationBlockers,
+            OptionalWarnings = optionalWarnings,
+            ExecutableDomains = executableDomains,
+            SkippedDomains = skippedDomains,
+            Blockers = globalBlockers,
             Warnings = warnings,
         };
 
@@ -866,6 +1142,40 @@ public sealed class QlhvImportService : IQlhvImportService
         => normalizedMaDks
             .GroupBy(value => value, StringComparer.OrdinalIgnoreCase)
             .Count(group => group.Skip(1).Any());
+
+    private static IReadOnlyList<string> Distinct(IEnumerable<string> values)
+        => values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+    private static string ResolveOptionalStatus(
+        IReadOnlyCollection<string> executableDomains,
+        string domain,
+        IReadOnlyCollection<string> allDomainBlockers,
+        IReadOnlyCollection<string> targetSchemaBlockers,
+        IReadOnlyCollection<string> sourceBlockers,
+        bool dependencyNotReady)
+    {
+        if (executableDomains.Contains(domain, StringComparer.Ordinal))
+        {
+            return QlhvImportDomainStatuses.Executable;
+        }
+
+        if (targetSchemaBlockers.Count > 0)
+        {
+            return QlhvImportDomainStatuses.SkippedSchemaNotReady;
+        }
+
+        if (dependencyNotReady)
+        {
+            return QlhvImportDomainStatuses.SkippedDependencyNotReady;
+        }
+
+        return sourceBlockers.Count > 0 || allDomainBlockers.Count > 0
+            ? QlhvImportDomainStatuses.SkippedSourceNotReady
+            : QlhvImportDomainStatuses.Blocked;
+    }
 
     private static IReadOnlyList<HocVienPhotoProcessingSource> ToPhotoSources(
         IReadOnlyList<QlhvImportHocVienWriteModel> rows)
@@ -909,6 +1219,15 @@ public sealed class QlhvImportService : IQlhvImportService
             Reactivate = counts.Reactivated,
             SoftDelete = counts.SoftDeleted,
             Skip = counts.Skipped,
+        };
+
+    private static QlhvImportDomainResultDto ToDto(QlhvDomainWriteResult result)
+        => new()
+        {
+            Domain = result.Domain,
+            Status = result.Status,
+            Message = result.Message,
+            Counts = ToDto(result.Counts),
         };
 
     private static IReadOnlyList<string> Validate(QlhvImportRequest request)
@@ -982,87 +1301,47 @@ public sealed class QlhvImportService : IQlhvImportService
             },
             DuplicateSourceKeys = duplicateSourceMaDkRows,
             SourceRelationRows = source?.KhoaHocGiaoVienRows.Count ?? 0,
+            HocVienStatus = QlhvImportDomainStatuses.Blocked,
+            KhoaHocStatus = QlhvImportDomainStatuses.SkippedSourceNotReady,
+            GiaoVienStatus = QlhvImportDomainStatuses.SkippedSourceNotReady,
+            RelationStatus = QlhvImportDomainStatuses.SkippedDependencyNotReady,
+            ExecutableDomains = Array.Empty<string>(),
+            SkippedDomains = QlhvImportDomains.Ordered,
             Blockers = blockers,
             Warnings = Array.Empty<string>(),
         };
 
     private static QlhvImportPlanDto AddBlocker(QlhvImportPlanDto plan, string blocker)
-        => new()
+        => plan with
         {
-            SourceProfileCode = plan.SourceProfileCode,
-            SourceDatabaseName = plan.SourceDatabaseName,
-            BackupSnapshotToken = plan.BackupSnapshotToken,
-            GeneratedAtUtc = plan.GeneratedAtUtc,
-            MaCSDT = plan.MaCSDT,
-            MaKhoaHoc = plan.MaKhoaHoc,
-            SourceHocVienRows = plan.SourceHocVienRows,
-            SourceDistinctMaDkRows = plan.SourceDistinctMaDkRows,
-            DuplicateSourceMaDkRows = plan.DuplicateSourceMaDkRows,
-            SourceKhoaHocRows = plan.SourceKhoaHocRows,
-            CurrentAppHocVienRows = plan.CurrentAppHocVienRows,
-            CurrentAppKhoaHocRows = plan.CurrentAppKhoaHocRows,
-            TargetRowsForSourceProfile = plan.TargetRowsForSourceProfile,
-            TargetExactIdentityMatches = plan.TargetExactIdentityMatches,
-            TargetMaDkConflictsOtherProfiles = plan.TargetMaDkConflictsOtherProfiles,
-            SoftDeletedIdentityConflicts = plan.SoftDeletedIdentityConflicts,
-            SourceProfileConstraintExists = plan.SourceProfileConstraintExists,
-            SourceProfileAllowedByConstraint = plan.SourceProfileAllowedByConstraint,
-            PlannedInsertHocVienRows = plan.PlannedInsertHocVienRows,
-            PlannedUpdateHocVienRows = plan.PlannedUpdateHocVienRows,
-            PlannedReactivateHocVienRows = plan.PlannedReactivateHocVienRows,
-            PlannedSoftDeleteHocVienRows = plan.PlannedSoftDeleteHocVienRows,
-            PlannedSkipHocVienRows = plan.PlannedSkipHocVienRows,
-            PlannedUpsertHocVienRows = plan.PlannedUpsertHocVienRows,
-            PlannedUpsertKhoaHocRows = plan.PlannedUpsertKhoaHocRows,
-            HocVien = plan.HocVien,
-            KhoaHoc = plan.KhoaHoc,
-            GiaoVien = plan.GiaoVien,
-            KhoaHocGiaoVien = plan.KhoaHocGiaoVien,
-            Photo = plan.Photo,
-            DuplicateSourceKeys = plan.DuplicateSourceKeys,
-            RelationConflicts = plan.RelationConflicts,
-            SourceRelationRows = plan.SourceRelationRows,
             Blockers = plan.Blockers.Concat(new[] { blocker }).Distinct(StringComparer.Ordinal).ToArray(),
-            Warnings = plan.Warnings,
+        };
+
+    private static QlhvImportPlanDto AddHocVienBlocker(
+        QlhvImportPlanDto plan,
+        string blocker)
+        => plan with
+        {
+            HocVienStatus = QlhvImportDomainStatuses.Blocked,
+            HocVienBlockers = plan.HocVienBlockers
+                .Concat(new[] { blocker })
+                .Distinct(StringComparer.Ordinal)
+                .ToArray(),
+            ExecutableDomains = plan.ExecutableDomains
+                .Where(domain => !string.Equals(
+                    domain,
+                    QlhvImportDomains.HocVien,
+                    StringComparison.Ordinal))
+                .ToArray(),
+            SkippedDomains = plan.SkippedDomains
+                .Concat(new[] { QlhvImportDomains.HocVien })
+                .Distinct(StringComparer.Ordinal)
+                .ToArray(),
         };
 
     private static QlhvImportPlanDto AddWarning(QlhvImportPlanDto plan, string warning)
-        => new()
+        => plan with
         {
-            SourceProfileCode = plan.SourceProfileCode,
-            SourceDatabaseName = plan.SourceDatabaseName,
-            BackupSnapshotToken = plan.BackupSnapshotToken,
-            GeneratedAtUtc = plan.GeneratedAtUtc,
-            MaCSDT = plan.MaCSDT,
-            MaKhoaHoc = plan.MaKhoaHoc,
-            SourceHocVienRows = plan.SourceHocVienRows,
-            SourceDistinctMaDkRows = plan.SourceDistinctMaDkRows,
-            DuplicateSourceMaDkRows = plan.DuplicateSourceMaDkRows,
-            SourceKhoaHocRows = plan.SourceKhoaHocRows,
-            CurrentAppHocVienRows = plan.CurrentAppHocVienRows,
-            CurrentAppKhoaHocRows = plan.CurrentAppKhoaHocRows,
-            TargetRowsForSourceProfile = plan.TargetRowsForSourceProfile,
-            TargetExactIdentityMatches = plan.TargetExactIdentityMatches,
-            TargetMaDkConflictsOtherProfiles = plan.TargetMaDkConflictsOtherProfiles,
-            SoftDeletedIdentityConflicts = plan.SoftDeletedIdentityConflicts,
-            SourceProfileConstraintExists = plan.SourceProfileConstraintExists,
-            SourceProfileAllowedByConstraint = plan.SourceProfileAllowedByConstraint,
-            PlannedInsertHocVienRows = plan.PlannedInsertHocVienRows,
-            PlannedUpdateHocVienRows = plan.PlannedUpdateHocVienRows,
-            PlannedReactivateHocVienRows = plan.PlannedReactivateHocVienRows,
-            PlannedSoftDeleteHocVienRows = plan.PlannedSoftDeleteHocVienRows,
-            PlannedSkipHocVienRows = plan.PlannedSkipHocVienRows,
-            PlannedUpsertHocVienRows = plan.PlannedUpsertHocVienRows,
-            PlannedUpsertKhoaHocRows = plan.PlannedUpsertKhoaHocRows,
-            HocVien = plan.HocVien,
-            KhoaHoc = plan.KhoaHoc,
-            GiaoVien = plan.GiaoVien,
-            KhoaHocGiaoVien = plan.KhoaHocGiaoVien,
-            Photo = plan.Photo,
-            DuplicateSourceKeys = plan.DuplicateSourceKeys,
-            RelationConflicts = plan.RelationConflicts,
-            SourceRelationRows = plan.SourceRelationRows,
-            Blockers = plan.Blockers,
             Warnings = plan.Warnings.Concat(new[] { warning })
                 .Distinct(StringComparer.Ordinal)
                 .Take(100)
@@ -1110,17 +1389,24 @@ public sealed class QlhvImportService : IQlhvImportService
         }
     }
 
-    private async Task<string?> TryCompleteSucceededHistoryAsync(
+    private async Task<string?> TryCompleteWriteHistoryAsync(
         Guid operationId,
         QlhvImportPlanDto plan,
         QlhvImportFullSyncWriteResult write,
         HocVienPhotoQueueBatchResult? photoQueue,
-        CancellationToken cancellationToken)
+        string overallStatus,
+        string? safeError)
     {
         var sourceRows = write.TotalSourceRows;
+        var historyStatus = overallStatus switch
+        {
+            QlhvImportOverallStatuses.PartialSuccess => QlhvOperationTypes.PartialSuccess,
+            QlhvImportOverallStatuses.Failed => QlhvOperationTypes.Failed,
+            _ => QlhvOperationTypes.Succeeded,
+        };
         var completion = new QlhvOperationHistoryCompletion(
             operationId,
-            QlhvOperationTypes.Succeeded,
+            historyStatus,
             DateTime.UtcNow,
             sourceRows,
             write.TotalInserted,
@@ -1129,16 +1415,24 @@ public sealed class QlhvImportService : IQlhvImportService
             write.TotalSoftDeleted,
             write.TotalSkipped,
             plan.BackupSnapshotToken,
-            null,
+            string.IsNullOrWhiteSpace(safeError)
+                ? null
+                : safeError.Length <= 2000
+                    ? safeError
+                    : safeError[..2000],
             JsonSerializer.Serialize(new
             {
+                OverallStatus = overallStatus,
                 plan.SourceDatabaseName,
                 plan.GeneratedAtUtc,
                 plan.Warnings,
+                plan.ExecutableDomains,
+                plan.SkippedDomains,
                 HocVien = write.HocVien,
                 KhoaHoc = write.KhoaHoc,
                 GiaoVien = write.GiaoVien,
                 KhoaHocGiaoVien = write.Relation,
+                DomainResults = write.DomainResults,
                 PhotoQueue = photoQueue,
                 TargetActiveHocVienRows = Math.Max(
                     0,
@@ -1173,7 +1467,8 @@ public sealed class QlhvImportService : IQlhvImportService
                     50,
                     CancellationToken.None))
                 .FirstOrDefault(row => row.OperationId == operationId);
-            if (persisted is { Status: QlhvOperationTypes.Succeeded })
+            if (persisted is not null &&
+                string.Equals(persisted.Status, historyStatus, StringComparison.Ordinal))
             {
                 return null;
             }
@@ -1246,6 +1541,7 @@ public sealed class QlhvImportService : IQlhvImportService
             GiaoVien = result.GiaoVien,
             KhoaHocGiaoVien = result.KhoaHocGiaoVien,
             PhotoQueue = result.PhotoQueue,
+            DomainResults = result.DomainResults,
         };
 
     private static string TryResolveSourceType(string sourceProfileCode)
@@ -1304,6 +1600,22 @@ public sealed class QlhvImportService : IQlhvImportService
             GiaoVienModels,
             RelationModels,
             SourceModels,
-            Plan.BackupSnapshotToken);
+            Plan.BackupSnapshotToken,
+            Plan.ExecutableDomains,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [QlhvImportDomains.KhoaHoc] =
+                    $"{Plan.KhoaHocStatus}: " +
+                    (Plan.KhoaHocBlockers.FirstOrDefault() ?? "Module KhoaHoc khong duoc chon."),
+                [QlhvImportDomains.GiaoVien] =
+                    $"{Plan.GiaoVienStatus}: " +
+                    (Plan.GiaoVienBlockers.FirstOrDefault() ?? "Module GiaoVien khong duoc chon."),
+                [QlhvImportDomains.Relation] =
+                    $"{Plan.RelationStatus}: " +
+                    (Plan.RelationBlockers.FirstOrDefault() ?? "Module quan he khong duoc chon."),
+                [QlhvImportDomains.HocVien] =
+                    $"{Plan.HocVienStatus}: " +
+                    (Plan.HocVienBlockers.FirstOrDefault() ?? "Module HocVien khong duoc chon."),
+            });
     }
 }

@@ -253,6 +253,30 @@ public sealed class QlhvAutoSyncTests
     }
 
     [Fact]
+    public async Task Session_status_treats_partial_success_as_terminal_success()
+    {
+        var runs = new FakeRunRepository();
+        var service = CreateService(runs, new FakeAutoQueue());
+        var queued = await service.QueueSessionStartAsync(serverStartedByLauncher: false);
+        await runs.CompleteAsync(
+            queued.RunId!.Value,
+            new QlhvAutoSyncOutcome(
+                QlhvAutoSyncConstants.PartialSuccess,
+                "Optional domain skipped",
+                DateTime.UtcNow));
+
+        var status = await service.GetSessionStartStatusAsync(
+            serverStartedByLauncher: false,
+            queued.RunId);
+
+        Assert.Equal("partial-success", status.State);
+        Assert.True(status.IsTerminal);
+        Assert.True(status.Succeeded);
+        Assert.False(status.NeedSync);
+        Assert.Equal("Optional domain skipped", status.ErrorMessage);
+    }
+
+    [Fact]
     public async Task Session_status_exposes_write_guard_without_creating_a_run()
     {
         var runs = new FakeRunRepository();
@@ -345,6 +369,52 @@ public sealed class QlhvAutoSyncTests
         Assert.Contains(QlhvAutoSyncConstants.LoadingDataStage, runs.CurrentStages);
         Assert.Equal(QlhvAutoSyncConstants.PartialFailed, outcome.Status);
         Assert.Equal("OTO failed", outcome.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task Coordinator_reports_partial_success_when_optional_domain_is_skipped_in_one_source()
+    {
+        var runs = new FakeRunRepository();
+        var runner = new FakeSourceRunner(sourceType =>
+            sourceType == "OTO"
+                ? SourceResult(
+                    sourceType,
+                    QlhvAutoSyncConstants.PartialSuccess,
+                    "HocVien da dong bo; GiaoVien duoc bo qua.")
+                : SourceResult(sourceType, QlhvAutoSyncConstants.Succeeded));
+        var coordinator = new QlhvAutoSyncCoordinator(runs, runner);
+
+        var outcome = await coordinator.ExecuteAsync(NewRun());
+
+        Assert.Equal(new[] { "OTO", "MOTO" }, runner.Calls);
+        Assert.Equal(QlhvAutoSyncConstants.PartialSuccess, outcome.Status);
+        Assert.Equal("HocVien da dong bo; GiaoVien duoc bo qua.", outcome.ErrorMessage);
+        Assert.All(
+            runs.SourceResults,
+            result => Assert.NotEqual(QlhvAutoSyncConstants.Failed, result.Status));
+    }
+
+    [Fact]
+    public async Task Coordinator_reports_partial_failed_when_partial_success_is_followed_by_source_failure()
+    {
+        var runs = new FakeRunRepository();
+        var runner = new FakeSourceRunner(sourceType =>
+            sourceType == "OTO"
+                ? SourceResult(
+                    sourceType,
+                    QlhvAutoSyncConstants.PartialSuccess,
+                    "OTO optional domain skipped")
+                : SourceResult(
+                    sourceType,
+                    QlhvAutoSyncConstants.Failed,
+                    "MOTO refresh failed"));
+        var coordinator = new QlhvAutoSyncCoordinator(runs, runner);
+
+        var outcome = await coordinator.ExecuteAsync(NewRun());
+
+        Assert.Equal(new[] { "OTO", "MOTO" }, runner.Calls);
+        Assert.Equal(QlhvAutoSyncConstants.PartialFailed, outcome.Status);
+        Assert.Equal("MOTO refresh failed", outcome.ErrorMessage);
     }
 
     [Fact]
@@ -462,6 +532,7 @@ public sealed class QlhvAutoSyncTests
                 SourceProfileCode = "CSDT_OTO",
                 MaCSDT = "66029",
                 BackupSnapshotToken = "snapshot-token",
+                ExecutableDomains = [QlhvImportDomains.HocVien],
             },
             ExecuteResult = new QlhvImportExecuteResultDto
             {
@@ -504,6 +575,117 @@ public sealed class QlhvAutoSyncTests
     }
 
     [Fact]
+    public async Task Source_runner_preserves_partial_success_from_import_execution()
+    {
+        var operationId = Guid.NewGuid();
+        var import = new FakeImportService
+        {
+            Plan = new QlhvImportPlanDto
+            {
+                SourceProfileCode = "CSDT_OTO",
+                MaCSDT = "66029",
+                BackupSnapshotToken = "snapshot-token",
+                ExecutableDomains = [QlhvImportDomains.HocVien],
+            },
+            ExecuteResult = new QlhvImportExecuteResultDto
+            {
+                OperationId = Guid.NewGuid(),
+                Executed = true,
+                Status = QlhvImportOverallStatuses.PartialSuccess,
+                Message = "HocVien da dong bo; module tuy chon duoc bo qua.",
+            },
+        };
+        var runs = new FakeRunRepository();
+        var runId = Guid.NewGuid();
+        runs.SeedRunning(runId, QlhvOperationActors.SystemAutoSync);
+        var runner = new QlhvAutoSyncSourceRunner(
+            new FakeOperationsService(operationId),
+            new FakeOperationHistory
+            {
+                ById = new QlhvOperationHistoryDto
+                {
+                    OperationId = operationId,
+                    SourceType = "OTO",
+                    OperationType = QlhvOperationTypes.RefreshBackup,
+                    Status = QlhvOperationTypes.Succeeded,
+                },
+            },
+            import,
+            runs,
+            Options.Create(new QlhvAutoSyncOptions
+            {
+                RefreshBackupBeforeSync = true,
+                OperationPollMilliseconds = 100,
+            }));
+
+        var result = await runner.RunAsync(
+            runId,
+            "OTO",
+            QlhvOperationActors.SystemAutoSync);
+
+        Assert.Equal(QlhvAutoSyncConstants.PartialSuccess, result.Status);
+        Assert.Equal(import.ExecuteResult.OperationId, result.SyncOperationId);
+        Assert.Equal(import.ExecuteResult.Message, result.Message);
+        Assert.Equal(1, import.ExecuteCalls);
+    }
+
+    [Fact]
+    public async Task Source_runner_reports_failed_when_required_domain_failed_after_optional_commit()
+    {
+        var refreshOperationId = Guid.NewGuid();
+        var syncOperationId = Guid.NewGuid();
+        var import = new FakeImportService
+        {
+            Plan = new QlhvImportPlanDto
+            {
+                SourceProfileCode = "CSDT_OTO",
+                MaCSDT = "66029",
+                BackupSnapshotToken = "snapshot-token",
+                ExecutableDomains = [QlhvImportDomains.HocVien],
+            },
+            ExecuteResult = new QlhvImportExecuteResultDto
+            {
+                OperationId = syncOperationId,
+                Executed = true,
+                Status = QlhvImportOverallStatuses.Failed,
+                Message = "HocVien that bai sau khi KhoaHoc da commit.",
+            },
+        };
+        var runs = new FakeRunRepository();
+        var runId = Guid.NewGuid();
+        runs.SeedRunning(runId, QlhvOperationActors.SystemAutoSync);
+        var runner = new QlhvAutoSyncSourceRunner(
+            new FakeOperationsService(refreshOperationId),
+            new FakeOperationHistory
+            {
+                ById = new QlhvOperationHistoryDto
+                {
+                    OperationId = refreshOperationId,
+                    SourceType = "OTO",
+                    OperationType = QlhvOperationTypes.RefreshBackup,
+                    Status = QlhvOperationTypes.Succeeded,
+                },
+            },
+            import,
+            runs,
+            Options.Create(new QlhvAutoSyncOptions
+            {
+                RefreshBackupBeforeSync = true,
+                OperationPollMilliseconds = 100,
+            }));
+
+        var result = await runner.RunAsync(
+            runId,
+            "OTO",
+            QlhvOperationActors.SystemAutoSync);
+
+        Assert.Equal(QlhvAutoSyncConstants.Failed, result.Status);
+        Assert.Equal(syncOperationId, result.SyncOperationId);
+        Assert.Equal(import.ExecuteResult.Message, result.Message);
+        Assert.Equal(1, import.ExecuteCalls);
+    }
+
+    [Fact]
     public async Task Source_runner_never_syncs_when_refresh_before_sync_is_disabled()
     {
         var import = new FakeImportService();
@@ -539,6 +721,11 @@ public sealed class QlhvAutoSyncTests
             Plan = new QlhvImportPlanDto
             {
                 BackupSnapshotToken = "snapshot-token",
+                ExecutableDomains =
+                [
+                    QlhvImportDomains.HocVien,
+                    QlhvImportDomains.Relation,
+                ],
                 KhoaHocGiaoVien = new QlhvEntitySyncCountsDto
                 {
                     SourceRows = 0,
@@ -1048,7 +1235,9 @@ public sealed class QlhvAutoSyncTests
                     Status = outcome.Status,
                     SourceOrder = _active.SourceOrder,
                     CurrentSourceType = null,
-                    CurrentStage = outcome.Status == QlhvAutoSyncConstants.Succeeded
+                    CurrentStage = outcome.Status is
+                        QlhvAutoSyncConstants.Succeeded or
+                        QlhvAutoSyncConstants.PartialSuccess
                         ? QlhvAutoSyncConstants.CompletedStage
                         : QlhvAutoSyncConstants.FailedStage,
                     CreatedAtUtc = _active.CreatedAtUtc,

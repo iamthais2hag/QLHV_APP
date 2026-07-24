@@ -213,13 +213,13 @@ public sealed class QlhvSyncFreshnessService : IQlhvSyncFreshnessService
                 GiaoVien = state.GiaoVienRows,
                 KhoaHocGiaoVien = state.KhoaHocGiaoVienRows,
             };
-            if (!CountsEqual(applied, backup.Rows))
+            if (!CountsEqual(applied, backup.Rows, plan.ExecutableDomains))
             {
                 reasons.Add($"{sourceType}:SO_LUONG_DA_AP_DUNG_KHONG_KHOP_BAK");
             }
         }
 
-        if (plan.Blockers.Count > 0)
+        if (plan.Blockers.Count > 0 || plan.HocVienBlockers.Count > 0)
         {
             reasons.Add($"{sourceType}:PLAN_CO_BLOCKER");
         }
@@ -233,10 +233,12 @@ public sealed class QlhvSyncFreshnessService : IQlhvSyncFreshnessService
 
     private static bool HasPlannedChanges(QlhvImportPlanDto plan)
         => HasChanges(plan.HocVien) ||
-           HasChanges(plan.KhoaHoc) ||
-           HasChanges(plan.GiaoVien) ||
-           HasChanges(plan.KhoaHocGiaoVien) ||
-           plan.RelationConflicts > 0;
+           (plan.ExecutableDomains.Contains(QlhvImportDomains.KhoaHoc, StringComparer.Ordinal) &&
+            HasChanges(plan.KhoaHoc)) ||
+           (plan.ExecutableDomains.Contains(QlhvImportDomains.GiaoVien, StringComparer.Ordinal) &&
+            HasChanges(plan.GiaoVien)) ||
+           (plan.ExecutableDomains.Contains(QlhvImportDomains.Relation, StringComparer.Ordinal) &&
+            HasChanges(plan.KhoaHocGiaoVien));
 
     private static bool HasChanges(QlhvEntitySyncCountsDto counts)
         => counts.Insert > 0 ||
@@ -247,10 +249,19 @@ public sealed class QlhvSyncFreshnessService : IQlhvSyncFreshnessService
     private static bool CountsEqual(
         QlhvSyncEntityCountsDto left,
         QlhvSyncEntityCountsDto right)
+        => CountsEqual(left, right, QlhvImportDomains.Ordered);
+
+    private static bool CountsEqual(
+        QlhvSyncEntityCountsDto left,
+        QlhvSyncEntityCountsDto right,
+        IReadOnlyCollection<string> executableDomains)
         => left.HocVien == right.HocVien &&
-           left.KhoaHoc == right.KhoaHoc &&
-           left.GiaoVien == right.GiaoVien &&
-           left.KhoaHocGiaoVien == right.KhoaHocGiaoVien;
+           (!executableDomains.Contains(QlhvImportDomains.KhoaHoc, StringComparer.Ordinal) ||
+            left.KhoaHoc == right.KhoaHoc) &&
+           (!executableDomains.Contains(QlhvImportDomains.GiaoVien, StringComparer.Ordinal) ||
+            left.GiaoVien == right.GiaoVien) &&
+           (!executableDomains.Contains(QlhvImportDomains.Relation, StringComparer.Ordinal) ||
+            left.KhoaHocGiaoVien == right.KhoaHocGiaoVien);
 
     private static QlhvSyncSnapshotDto CreateSnapshot(
         string sourceType,

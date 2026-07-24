@@ -2460,6 +2460,12 @@
   color: #166534;
 }
 
+.qlhv-session-sync-status.is-warning {
+  border-color: #f4c27a;
+  background: #fff8ed;
+  color: #7c4a03;
+}
+
 .qlhv-session-sync-status.is-failed {
   border-color: #fca5a5;
   background: #fef2f2;
@@ -2912,6 +2918,11 @@
   background: #f0fbf4;
 }
 
+.qlhv-import-result--partial {
+  border-color: #f4c27a;
+  background: #fff8ed;
+}
+
 .qlhv-import-result--blocked {
   border-color: #f1b8b2;
   background: #fff4f2;
@@ -2942,6 +2953,72 @@
   display: grid;
   gap: 12px;
   margin-top: 14px;
+}
+
+.qlhv-import-domain-readiness {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.qlhv-import-domain-readiness__item {
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--tc-border);
+  border-radius: 8px;
+  background: #fafbfd;
+}
+
+.qlhv-import-domain-readiness__item > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.qlhv-import-domain-readiness__item strong {
+  color: var(--tc-blue-900);
+}
+
+.qlhv-import-domain-readiness__item span {
+  font-size: 12px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.qlhv-import-domain-readiness__item p {
+  margin: 8px 0 0;
+  color: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.qlhv-import-domain-readiness__item.is-ok {
+  border-color: #b8e0c3;
+  background: #f0fbf4;
+  color: #0d6b3e;
+}
+
+.qlhv-import-domain-readiness__item.is-warning {
+  border-color: #f4c27a;
+  background: #fff8ed;
+  color: #7c4a03;
+}
+
+.qlhv-import-domain-readiness__item.is-blocked {
+  border-color: #f1b8b2;
+  background: #fff4f2;
+  color: #b3261e;
+}
+
+.qlhv-import-domain-results h3 {
+  margin: 14px 0 0;
+  color: var(--tc-blue-900);
+  font-size: 14px;
+}
+
+.qlhv-import-partial-warning {
+  margin-top: 12px;
 }
 
 .qlhv-import-entity-group {
@@ -3492,7 +3569,13 @@
 .qlhv-operation-state.is-refreshing,
 .qlhv-operation-state.is-syncing,
 .qlhv-operation-state.is-loading,
+.qlhv-operation-state.is-partial-success,
 .qlhv-history-status.is-busy {
+  color: #805100;
+  background: #fff2cf;
+}
+
+.qlhv-history-status.is-warning {
   color: #805100;
   background: #fff2cf;
 }
