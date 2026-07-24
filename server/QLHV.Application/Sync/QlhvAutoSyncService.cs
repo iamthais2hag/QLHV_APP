@@ -407,7 +407,11 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
         var succeeded = string.Equals(
             run.Status,
             QlhvAutoSyncConstants.Succeeded,
-            StringComparison.Ordinal);
+            StringComparison.Ordinal) ||
+            string.Equals(
+                run.Status,
+                QlhvAutoSyncConstants.PartialSuccess,
+                StringComparison.Ordinal);
         return new QlhvSessionStartStatusDto
         {
             ServerReady = true,
@@ -547,6 +551,7 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
             QlhvAutoSyncConstants.Queued => "queued",
             QlhvAutoSyncConstants.Running => "running",
             QlhvAutoSyncConstants.Succeeded => "succeeded",
+            QlhvAutoSyncConstants.PartialSuccess => "partial-success",
             QlhvAutoSyncConstants.PartialFailed => "partial-failed",
             QlhvAutoSyncConstants.Failed => "failed",
             _ => "idle",
@@ -554,6 +559,7 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
 
     private static bool IsTerminal(string status)
         => string.Equals(status, QlhvAutoSyncConstants.Succeeded, StringComparison.Ordinal) ||
+           string.Equals(status, QlhvAutoSyncConstants.PartialSuccess, StringComparison.Ordinal) ||
            string.Equals(status, QlhvAutoSyncConstants.PartialFailed, StringComparison.Ordinal) ||
            string.Equals(status, QlhvAutoSyncConstants.Failed, StringComparison.Ordinal);
 

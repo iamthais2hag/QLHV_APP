@@ -64,6 +64,108 @@ public sealed class QlhvImportSafetySourceTests
     }
 
     [Fact]
+    public void Import_reader_inventories_every_optional_audit_column_used_by_write_sql()
+    {
+        var source = File.ReadAllText(FindWorkspaceFile(
+            "server", "QLHV.Infrastructure", "Sync", "QlhvImportReadRepository.cs"));
+
+        var courseAndTeacherAuditColumns = new[]
+        {
+            "SourceOfTruth",
+            "LastSyncStatus",
+            "LastSyncMessage",
+            "DeletedAt",
+            "DeletedBy",
+            "DeleteReason",
+            "UpdatedAt",
+            "UpdatedBy",
+            "CreatedBy",
+        };
+        foreach (var tableName in new[] { "dbo.App_KhoaHoc", "dbo.App_GiaoVien" })
+        {
+            foreach (var columnName in courseAndTeacherAuditColumns)
+            {
+                Assert.Contains(
+                    $"(N'{tableName}', N'{columnName}')",
+                    source,
+                    StringComparison.Ordinal);
+            }
+        }
+
+        foreach (var columnName in new[]
+                 {
+                     "SourceOfTruth",
+                     "DeletedAt",
+                     "DeletedBy",
+                     "DeleteReason",
+                     "UpdatedAt",
+                     "UpdatedBy",
+                     "CreatedBy",
+                 })
+        {
+            Assert.Contains(
+                $"(N'dbo.App_KhoaHoc_GiaoVien', N'{columnName}')",
+                source,
+                StringComparison.Ordinal);
+        }
+
+        Assert.Contains("BuildTargetDomainSchemaBlockers", source, StringComparison.Ordinal);
+        Assert.Contains("Target App_KhoaHoc chua san sang", source, StringComparison.Ordinal);
+        Assert.Contains("Target App_GiaoVien chua san sang", source, StringComparison.Ordinal);
+        Assert.Contains("Target App_KhoaHoc_GiaoVien chua san sang", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Import_reader_treats_missing_control_schema_as_a_required_target_blocker()
+    {
+        var source = File.ReadAllText(FindWorkspaceFile(
+            "server", "QLHV.Infrastructure", "Sync", "QlhvImportReadRepository.cs"));
+
+        var requiredControlColumns = new Dictionary<string, string[]>
+        {
+            ["dbo.App_DataVersion"] =
+            [
+                "VersionId",
+                "HocVienVersion",
+                "KhoaHocVersion",
+                "GiaoVienVersion",
+                "LastSuccessfulSyncUtc",
+                "UpdatedAtUtc",
+            ],
+            ["dbo.App_QlhvSyncPartitionState"] =
+            [
+                "SourceType",
+                "SourceProfileCode",
+                "AppliedBackupSnapshotToken",
+                "HocVienRows",
+                "KhoaHocRows",
+                "GiaoVienRows",
+                "KhoaHocGiaoVienRows",
+                "AppliedAtUtc",
+                "UpdatedAtUtc",
+            ],
+        };
+        foreach (var (tableName, columnNames) in requiredControlColumns)
+        {
+            foreach (var columnName in columnNames)
+            {
+                Assert.Contains(
+                    $"(N'{tableName}', N'{columnName}')",
+                    source,
+                    StringComparison.Ordinal);
+            }
+        }
+
+        Assert.Contains("TargetControlWriteColumnsSql", source, StringComparison.Ordinal);
+        Assert.Contains("missingControlWriteColumns", source, StringComparison.Ordinal);
+        Assert.Contains(
+            "Target QLHV_APP thieu schema control bat buoc cho full sync",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains("throw new QlhvImportGlobalBlockerException(", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Bak_profile_patch_is_transactional_idempotent_and_has_no_secret()
     {
         var patch = File.ReadAllText(FindWorkspaceFile(

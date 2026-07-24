@@ -24,6 +24,9 @@ import {
 } from './logic';
 import type {
   QlhvImportDiagnostics,
+  QlhvImportDomain,
+  QlhvImportDomainResult,
+  QlhvImportDomainStatus,
   QlhvImportEntityCounts,
   QlhvImportExecuteResult,
   QlhvImportPlan,
@@ -45,6 +48,18 @@ const DATE_FORMAT = new Intl.DateTimeFormat('vi-VN', {
 const POLL_INTERVAL_MS = 2_500;
 const NO_WRITE_PERMISSION_MESSAGE = 'Bạn không có quyền thực hiện: bạn không có quyền Admin';
 const AUTO_SYNC_BUSY_MESSAGE = 'Auto Sync đang chạy; các thao tác ghi tạm thời bị khóa.';
+const PARTIAL_SYNC_WARNING =
+  'Đợt đồng bộ này sẽ cập nhật Học viên. Khóa học/Giáo viên chưa sẵn sàng sẽ được bỏ qua và không bị xóa.';
+
+const IMPORT_DOMAIN_DEFINITIONS: ReadonlyArray<{
+  domain: QlhvImportDomain;
+  label: string;
+}> = [
+  { domain: 'HOC_VIEN', label: 'Học viên' },
+  { domain: 'KHOA_HOC', label: 'Khóa học' },
+  { domain: 'GIAO_VIEN', label: 'Giáo viên' },
+  { domain: 'KHOA_HOC_GIAO_VIEN', label: 'Quan hệ Giáo viên – Khóa học' },
+];
 
 type QlhvImportLastResult = QlhvImportSnapshot<QlhvImportExecuteResult> & {
   outcomeKind: 'executed' | 'blocked';
@@ -395,6 +410,8 @@ export default function QlhvImportPage() {
         lastResult: { request, data: outcome.result, outcomeKind: outcome.kind },
       });
 
+      const failedAfterWrite = outcome.result.executed
+        && outcome.result.status.trim().toUpperCase() === 'FAILED';
       if (outcome.kind === 'blocked' || !outcome.result.executed) {
         patchSource(sourceKind, {
           plan: { request, data: outcome.result.plan },
@@ -404,7 +421,12 @@ export default function QlhvImportPage() {
         patchSource(sourceKind, {
           plan: null,
           diagnostics: null,
-          operationNotice: outcome.result.message || 'Full sync hoàn tất.',
+          operationError: failedAfterWrite
+            ? outcome.result.message || 'Học viên đồng bộ thất bại; hãy kiểm tra kết quả từng module.'
+            : null,
+          operationNotice: failedAfterWrite
+            ? null
+            : outcome.result.message || 'Full sync hoàn tất.',
         });
         await Promise.all([
           reloadStatus(sourceKind, true),
@@ -569,7 +591,8 @@ export default function QlhvImportPage() {
         {active.status && <OperationsStatusView status={active.status} />}
         <div className="qlhv-import-full-sync-warning" role="note">
           Full sync chỉ cập nhật đường dẫn và metadata ảnh trong database; không sao chép file <code>.jp2</code> vật lý.
-          Khóa học, giáo viên và học viên không còn trong snapshot sẽ chỉ bị xóa mềm trong phân vùng {activeSourceDefinition.sourceProfileCode}.
+          Chỉ module có snapshot hợp lệ mới được cập nhật và xóa mềm trong phân vùng {activeSourceDefinition.sourceProfileCode};
+          module tạm bỏ qua sẽ không bị thêm, sửa hoặc xóa.
         </div>
         {active.operationNotice && <SuccessBanner message={active.operationNotice} />}
         {active.operationError && <ErrorBanner message={active.operationError} />}
@@ -756,37 +779,45 @@ function SourceCard({
 }
 
 function DiagnosticsView({ diagnostics }: { diagnostics: QlhvImportDiagnostics }) {
+  const hocVienExecutable = isImportDomainExecutable(diagnostics, 'HOC_VIEN');
   const metrics: MetricItem[] = [
     ['QLHV hiện có', diagnostics.currentAppHocVienRows],
     ['Khớp định danh', diagnostics.targetExactIdentityMatches],
     ['Profile khác cùng MaDK', diagnostics.targetMaDkConflictsOtherProfiles, diagnostics.targetMaDkConflictsOtherProfiles > 0 ? 'warning' : 'ok'],
-    ['Tổng khóa nguồn trùng', diagnostics.duplicateSourceKeys, diagnostics.duplicateSourceKeys > 0 ? 'blocked' : 'ok'],
-    ['Xung đột quan hệ', diagnostics.relationConflicts, diagnostics.relationConflicts > 0 ? 'blocked' : 'ok'],
-    ['Có thể thực hiện', diagnostics.executable ? 'Có' : 'Không', diagnostics.executable ? 'ok' : 'blocked'],
+    ['Khóa Học viên trùng', diagnostics.hocVien.duplicateSourceKeys, diagnostics.hocVien.duplicateSourceKeys > 0 ? 'blocked' : 'ok'],
+    ['Xung đột quan hệ', diagnostics.relationConflicts, diagnostics.relationConflicts > 0 ? 'warning' : 'ok'],
+    ['Học viên sẵn sàng', hocVienExecutable ? 'Có' : 'Không', hocVienExecutable ? 'ok' : 'blocked'],
   ];
   return (
     <>
       <ReadOnlySummary sourceDatabaseName={diagnostics.sourceDatabaseName} profile={diagnostics.sourceProfileCode} maCSDT={diagnostics.maCSDT} />
       <MetricGrid items={metrics} />
+      <DomainReadinessGrid readiness={diagnostics} />
       <EntityCountsGrid
         hocVien={diagnostics.hocVien}
         khoaHoc={diagnostics.khoaHoc}
         giaoVien={diagnostics.giaoVien}
+        khoaHocGiaoVien={diagnostics.khoaHocGiaoVien}
         mode="diagnostics"
       />
       <ImportPhotoCounts counts={diagnostics.photo} />
-      <IssueList title="Điểm chặn chẩn đoán" items={diagnostics.blockers} variant="blocker" />
+      <IssueList title="Điểm chặn toàn cục" items={diagnostics.blockers} variant="blocker" />
+      <IssueList title="Điểm chặn Học viên" items={diagnostics.hocVienBlockers} variant="blocker" />
+      <OptionalDomainIssues readiness={diagnostics} />
+      <IssueList title="Cảnh báo module tùy chọn" items={diagnostics.optionalWarnings} variant="warning" />
       <IssueList title="Cảnh báo chẩn đoán" items={diagnostics.warnings} variant="warning" />
     </>
   );
 }
 
 function PlanView({ plan, snapshotCurrent }: { plan: QlhvImportPlan; snapshotCurrent: boolean }) {
+  const hocVienExecutable = isImportDomainExecutable(plan, 'HOC_VIEN');
+  const hasSkippedOptionalDomains = plan.skippedDomains.some((domain) => domain !== 'HOC_VIEN');
   const metrics: MetricItem[] = [
-    ['Tổng khóa nguồn trùng', plan.duplicateSourceKeys, plan.duplicateSourceKeys > 0 ? 'blocked' : 'ok'],
-    ['Xung đột quan hệ', plan.relationConflicts, plan.relationConflicts > 0 ? 'blocked' : 'ok'],
+    ['Khóa Học viên trùng', plan.hocVien.duplicateSourceKeys, plan.hocVien.duplicateSourceKeys > 0 ? 'blocked' : 'ok'],
+    ['Xung đột quan hệ', plan.relationConflicts, plan.relationConflicts > 0 ? 'warning' : 'ok'],
     ['Token hiện hành', snapshotCurrent ? 'Có' : 'Không', snapshotCurrent ? 'ok' : 'blocked'],
-    ['Có thể thực hiện', plan.executable ? 'Có' : 'Không', plan.executable ? 'ok' : 'blocked'],
+    ['Học viên sẵn sàng', hocVienExecutable ? 'Có' : 'Không', hocVienExecutable ? 'ok' : 'blocked'],
   ];
   return (
     <>
@@ -797,27 +828,158 @@ function PlanView({ plan, snapshotCurrent }: { plan: QlhvImportPlan; snapshotCur
         <strong>{snapshotCurrent ? 'Hiện hành' : 'Đã stale — phải lập lại plan'}</strong>
       </div>
       <MetricGrid items={metrics} />
+      <DomainReadinessGrid readiness={plan} />
       <EntityCountsGrid
         hocVien={plan.hocVien}
         khoaHoc={plan.khoaHoc}
         giaoVien={plan.giaoVien}
+        khoaHocGiaoVien={plan.khoaHocGiaoVien}
       />
       <ImportPhotoCounts counts={plan.photo} />
-      <IssueList title="Điểm chặn kế hoạch" items={plan.blockers} variant="blocker" />
+      <IssueList title="Điểm chặn toàn cục" items={plan.blockers} variant="blocker" />
+      <IssueList title="Điểm chặn Học viên" items={plan.hocVienBlockers} variant="blocker" />
+      <OptionalDomainIssues readiness={plan} />
+      <IssueList title="Cảnh báo module tùy chọn" items={plan.optionalWarnings} variant="warning" />
       <IssueList title="Cảnh báo kế hoạch" items={plan.warnings} variant="warning" />
+      {hocVienExecutable && hasSkippedOptionalDomains && (
+        <div className="qlhv-import-full-sync-warning qlhv-import-partial-warning" role="status">
+          {PARTIAL_SYNC_WARNING}
+        </div>
+      )}
     </>
   );
+}
+
+type ImportDomainReadiness = Pick<
+  QlhvImportPlan,
+  | 'executable'
+  | 'hocVienStatus'
+  | 'khoaHocStatus'
+  | 'giaoVienStatus'
+  | 'relationStatus'
+  | 'hocVienBlockers'
+  | 'khoaHocBlockers'
+  | 'giaoVienBlockers'
+  | 'relationBlockers'
+  | 'executableDomains'
+  | 'skippedDomains'
+>;
+
+function DomainReadinessGrid({ readiness }: { readiness: ImportDomainReadiness }) {
+  return (
+    <div className="qlhv-import-domain-readiness" aria-label="Trạng thái từng nhóm dữ liệu">
+      {IMPORT_DOMAIN_DEFINITIONS.map(({ domain, label }) => {
+        const executable = isImportDomainExecutable(readiness, domain);
+        const skipped = readiness.skippedDomains.includes(domain);
+        const blockers = getImportDomainBlockers(readiness, domain);
+        const domainStatus = getImportDomainStatus(readiness, domain);
+        const tone = executable ? 'ok' : skipped || domain !== 'HOC_VIEN' ? 'warning' : 'blocked';
+        const status = formatDomainReadinessStatus(domainStatus);
+        return (
+          <article key={domain} className={`qlhv-import-domain-readiness__item is-${tone}`}>
+            <div>
+              <strong>{label}</strong>
+              <span>{status}</span>
+            </div>
+            {!executable && (
+              <p>{blockers[0] ?? 'Backend chưa trả lý do cụ thể cho nhóm dữ liệu này.'}</p>
+            )}
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function OptionalDomainIssues({ readiness }: { readiness: ImportDomainReadiness }) {
+  return (
+    <>
+      {IMPORT_DOMAIN_DEFINITIONS
+        .filter(({ domain }) => domain !== 'HOC_VIEN')
+        .map(({ domain, label }) => (
+          <IssueList
+            key={domain}
+            title={`${label}: tạm bỏ qua`}
+            items={getImportDomainBlockers(readiness, domain)}
+            variant="warning"
+          />
+        ))}
+    </>
+  );
+}
+
+function isImportDomainExecutable(
+  readiness: ImportDomainReadiness,
+  domain: QlhvImportDomain,
+): boolean {
+  return readiness.executableDomains.includes(domain)
+    && (domain !== 'HOC_VIEN' || readiness.executable);
+}
+
+function getImportDomainBlockers(
+  readiness: ImportDomainReadiness,
+  domain: QlhvImportDomain,
+): string[] {
+  switch (domain) {
+    case 'HOC_VIEN':
+      return readiness.hocVienBlockers;
+    case 'KHOA_HOC':
+      return readiness.khoaHocBlockers;
+    case 'GIAO_VIEN':
+      return readiness.giaoVienBlockers;
+    case 'KHOA_HOC_GIAO_VIEN':
+      return readiness.relationBlockers;
+  }
+}
+
+function getImportDomainStatus(
+  readiness: ImportDomainReadiness,
+  domain: QlhvImportDomain,
+): QlhvImportDomainStatus {
+  switch (domain) {
+    case 'HOC_VIEN':
+      return readiness.hocVienStatus;
+    case 'KHOA_HOC':
+      return readiness.khoaHocStatus;
+    case 'GIAO_VIEN':
+      return readiness.giaoVienStatus;
+    case 'KHOA_HOC_GIAO_VIEN':
+      return readiness.relationStatus;
+  }
+}
+
+function formatDomainReadinessStatus(status: QlhvImportDomainStatus): string {
+  switch (status) {
+    case 'EXECUTABLE':
+      return 'Sẵn sàng đồng bộ';
+    case 'BLOCKED':
+      return 'Bị chặn';
+    case 'SKIPPED_SCHEMA_NOT_READY':
+      return 'Tạm bỏ qua – schema chưa sẵn sàng';
+    case 'SKIPPED_SOURCE_NOT_READY':
+      return 'Tạm bỏ qua – nguồn chưa sẵn sàng';
+    case 'SKIPPED_DEPENDENCY_NOT_READY':
+      return 'Tạm bỏ qua – phụ thuộc chưa sẵn sàng';
+    case 'SUCCESS':
+      return 'Thành công';
+    case 'FAILED':
+      return 'Thất bại';
+    case 'NO_OP':
+      return 'Không có thay đổi';
+  }
 }
 
 function EntityCountsGrid({
   hocVien,
   khoaHoc,
   giaoVien,
+  khoaHocGiaoVien,
   mode = 'plan',
 }: {
   hocVien: QlhvImportEntityCounts | null;
   khoaHoc: QlhvImportEntityCounts | null;
   giaoVien: QlhvImportEntityCounts | null;
+  khoaHocGiaoVien: QlhvImportEntityCounts | null;
   mode?: 'diagnostics' | 'plan' | 'result';
 }) {
   return (
@@ -825,6 +987,7 @@ function EntityCountsGrid({
       <EntityCountsSection title="Học viên" counts={hocVien} mode={mode} />
       <EntityCountsSection title="Khóa học" counts={khoaHoc} mode={mode} />
       <EntityCountsSection title="Giáo viên" counts={giaoVien} mode={mode} />
+      <EntityCountsSection title="Quan hệ Giáo viên – Khóa học" counts={khoaHocGiaoVien} mode={mode} />
     </div>
   );
 }
@@ -864,7 +1027,20 @@ function EntityCountsSection({
 
 function ResultView({ snapshot }: { snapshot: QlhvImportLastResult }) {
   const result = snapshot.data;
-  const successful = snapshot.outcomeKind === 'executed' && result.executed;
+  const normalizedStatus = result.status.trim().toUpperCase();
+  const successful = snapshot.outcomeKind === 'executed'
+    && result.executed
+    && normalizedStatus !== 'FAILED';
+  const partial = successful && normalizedStatus === 'PARTIAL_SUCCESS';
+  const noOp = successful && normalizedStatus === 'NO_OP';
+  const resultTone = partial ? 'partial' : successful ? 'success' : 'blocked';
+  const resultTitle = partial
+    ? 'Đồng bộ hoàn tất một phần'
+    : noOp
+      ? 'Không có thay đổi cần đồng bộ'
+      : successful
+        ? 'Full sync thành công'
+        : 'Yêu cầu không được thực hiện';
   const hocVien = result.hocVien ?? {
     sourceRows: result.plan.hocVien.sourceRows,
     insert: result.insertedHocVienRows,
@@ -875,12 +1051,17 @@ function ResultView({ snapshot }: { snapshot: QlhvImportLastResult }) {
     duplicateSourceKeys: result.plan.hocVien.duplicateSourceKeys,
   };
   return (
-    <div className={`qlhv-import-result qlhv-import-result--${successful ? 'success' : 'blocked'}`}>
+    <div className={`qlhv-import-result qlhv-import-result--${resultTone}`}>
       <div className="qlhv-import-result__heading">
-        <strong>{successful ? 'Full sync thành công' : 'Yêu cầu không được thực hiện'}</strong>
+        <strong>{resultTitle}</strong>
         <span>{result.status}</span>
       </div>
       <p>{result.message}</p>
+      {partial && (
+        <div className="qlhv-import-full-sync-warning qlhv-import-partial-warning" role="status">
+          {PARTIAL_SYNC_WARNING}
+        </div>
+      )}
       <div className="qlhv-import-result-grid">
         <SummaryRow label="Database snapshot" value={result.plan.sourceDatabaseName} />
         <SummaryRow label="Snapshot token" value={shortToken(result.plan.backupSnapshotToken)} />
@@ -889,11 +1070,50 @@ function ResultView({ snapshot }: { snapshot: QlhvImportLastResult }) {
         hocVien={hocVien}
         khoaHoc={result.khoaHoc ?? null}
         giaoVien={result.giaoVien ?? null}
+        khoaHocGiaoVien={result.khoaHocGiaoVien ?? null}
         mode="result"
       />
+      <DomainResultsGrid results={result.domainResults} />
       <ImportPhotoCounts counts={result.photo ?? result.plan.photo} />
-      {!successful && <IssueList title="Điểm chặn từ backend" items={result.plan.blockers} variant="blocker" />}
+      {!successful && (
+        <>
+          <IssueList title="Điểm chặn toàn cục từ backend" items={result.plan.blockers} variant="blocker" />
+          <IssueList title="Điểm chặn Học viên từ backend" items={result.plan.hocVienBlockers} variant="blocker" />
+        </>
+      )}
     </div>
+  );
+}
+
+function DomainResultsGrid({ results }: { results: QlhvImportDomainResult[] }) {
+  if (results.length === 0) {
+    return null;
+  }
+  return (
+    <section className="qlhv-import-domain-results" aria-label="Kết quả từng nhóm dữ liệu">
+      <h3>Kết quả từng nhóm dữ liệu</h3>
+      <div className="qlhv-import-domain-readiness">
+        {results.map((result) => {
+          const normalizedStatus = result.status.trim().toUpperCase();
+          const tone = normalizedStatus === 'FAILED'
+            ? 'blocked'
+            : normalizedStatus.startsWith('SKIPPED') || normalizedStatus === 'PARTIAL_SUCCESS'
+              ? 'warning'
+              : 'ok';
+          const label = IMPORT_DOMAIN_DEFINITIONS
+            .find((candidate) => candidate.domain === result.domain)?.label ?? result.domain;
+          return (
+            <article key={result.domain} className={`qlhv-import-domain-readiness__item is-${tone}`}>
+              <div>
+                <strong>{label}</strong>
+                <span>{formatDomainResultStatus(result.status)}</span>
+              </div>
+              {result.message && <p>{result.message}</p>}
+            </article>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -972,6 +1192,7 @@ function StatusBadge({ status, loading }: { status: QlhvOperationsStatus | null;
     refreshing: 'Đang refresh BAK',
     syncing: 'Đang full sync',
     succeeded: 'Thành công',
+    'partial-success': 'Thành công một phần',
     failed: 'Có lỗi',
   };
   return <span className={`qlhv-operation-state is-${status.state}`}>{labels[status.state]}</span>;
@@ -1084,11 +1305,21 @@ function shortToken(value: string): string {
   return value.length <= 24 ? value : `${value.slice(0, 12)}…${value.slice(-8)}`;
 }
 
-function historyTone(status: string): 'ok' | 'busy' | 'failed' {
+function historyTone(status: string): 'ok' | 'warning' | 'busy' | 'failed' {
   const normalized = status.toLowerCase();
+  if (normalized.includes('partial') || normalized.includes('skip') || normalized.includes('một phần')) return 'warning';
   if (normalized.includes('fail') || normalized.includes('error') || normalized.includes('lỗi')) return 'failed';
   if (normalized.includes('queue') || normalized.includes('running') || normalized.includes('đang')) return 'busy';
   return 'ok';
+}
+
+function formatDomainResultStatus(status: string): string {
+  const normalized = status.trim().toUpperCase();
+  if (normalized === 'SUCCESS') return 'Thành công';
+  if (normalized === 'NO_OP') return 'Không có thay đổi';
+  if (normalized === 'FAILED') return 'Thất bại';
+  if (normalized.startsWith('SKIPPED')) return 'Tạm bỏ qua';
+  return status;
 }
 
 function formatOperationType(type: QlhvOperationType): string {

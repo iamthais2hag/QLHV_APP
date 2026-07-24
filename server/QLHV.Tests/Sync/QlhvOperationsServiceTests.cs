@@ -215,6 +215,71 @@ public sealed class QlhvOperationsServiceTests
         Assert.Equal(0, operations.ReadCalls);
     }
 
+    [Fact]
+    public async Task Status_preserves_last_successful_timestamps_after_later_failures()
+    {
+        var lastRefreshSuccess = DateTime.UtcNow.AddHours(-3);
+        var lastSyncSuccess = DateTime.UtcNow.AddHours(-2);
+        var history = new FakeHistoryRepository
+        {
+            LatestRefresh = CompletedHistory(
+                QlhvOperationTypes.RefreshBackup,
+                QlhvOperationTypes.Failed,
+                DateTime.UtcNow.AddHours(-1)),
+            LatestSync = CompletedHistory(
+                QlhvOperationTypes.FullSync,
+                QlhvOperationTypes.Failed,
+                DateTime.UtcNow),
+            LatestSuccessfulRefresh = CompletedHistory(
+                QlhvOperationTypes.RefreshBackup,
+                QlhvOperationTypes.Succeeded,
+                lastRefreshSuccess),
+            LatestSuccessfulSync = CompletedHistory(
+                QlhvOperationTypes.FullSync,
+                QlhvOperationTypes.PartialSuccess,
+                lastSyncSuccess),
+        };
+        var service = CreateService(
+            history,
+            new FakeQueue(),
+            dryRun: false,
+            enableWrites: true,
+            operations: HealthyOperations());
+
+        var status = await service.GetStatusAsync("OTO", AppRoles.Admin, writeAuthorized: true);
+
+        Assert.Equal(lastRefreshSuccess, status.BackupLastRefreshTimeUtc);
+        Assert.Equal(lastSyncSuccess, status.LastSyncTimeUtc);
+        Assert.Equal("failed", status.State);
+        Assert.Equal("safe failure", status.LastError);
+    }
+
+    [Fact]
+    public async Task Status_exposes_partial_success_as_distinct_idle_state()
+    {
+        var completedAt = DateTime.UtcNow;
+        var partialSuccess = CompletedHistory(
+            QlhvOperationTypes.FullSync,
+            QlhvOperationTypes.PartialSuccess,
+            completedAt);
+        var history = new FakeHistoryRepository
+        {
+            LatestSync = partialSuccess,
+            LatestSuccessfulSync = partialSuccess,
+        };
+        var service = CreateService(
+            history,
+            new FakeQueue(),
+            dryRun: false,
+            enableWrites: true,
+            operations: HealthyOperations());
+
+        var status = await service.GetStatusAsync("OTO", AppRoles.Admin, writeAuthorized: true);
+
+        Assert.Equal("partial-success", status.State);
+        Assert.Equal(completedAt, status.LastSyncTimeUtc);
+    }
+
     private static QlhvOperationsService CreateService(
         FakeHistoryRepository history,
         FakeQueue queue,
@@ -242,14 +307,17 @@ public sealed class QlhvOperationsServiceTests
             "snapshot-token"),
     };
 
-    private static QlhvOperationHistoryDto CompletedHistory(string operationType, string status) => new()
+    private static QlhvOperationHistoryDto CompletedHistory(
+        string operationType,
+        string status,
+        DateTime? completedAtUtc = null) => new()
     {
         OperationId = Guid.NewGuid(),
         SourceType = "OTO",
         OperationType = operationType,
         Status = status,
         StartedAtUtc = DateTime.UtcNow.AddMinutes(-1),
-        CompletedAtUtc = DateTime.UtcNow,
+        CompletedAtUtc = completedAtUtc ?? DateTime.UtcNow,
         ErrorMessage = status == QlhvOperationTypes.Failed ? "safe failure" : null,
     };
 
@@ -310,6 +378,8 @@ public sealed class QlhvOperationsServiceTests
         public QlhvOperationHistoryDto? Active { get; set; }
         public QlhvOperationHistoryDto? LatestRefresh { get; set; }
         public QlhvOperationHistoryDto? LatestSync { get; set; }
+        public QlhvOperationHistoryDto? LatestSuccessfulRefresh { get; set; }
+        public QlhvOperationHistoryDto? LatestSuccessfulSync { get; set; }
 
         public Task<bool> TryCreateAsync(
             QlhvOperationHistoryCreate entry,
@@ -349,5 +419,13 @@ public sealed class QlhvOperationsServiceTests
             => Task.FromResult(operationType == QlhvOperationTypes.RefreshBackup
                 ? LatestRefresh
                 : LatestSync);
+
+        public Task<QlhvOperationHistoryDto?> GetLatestSuccessfulAsync(
+            string sourceType,
+            string operationType,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(operationType == QlhvOperationTypes.RefreshBackup
+                ? LatestSuccessfulRefresh
+                : LatestSuccessfulSync);
     }
 }

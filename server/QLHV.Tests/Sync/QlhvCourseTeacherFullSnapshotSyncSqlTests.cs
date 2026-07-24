@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using QLHV.Application.Sync;
 using QLHV.Application.Sync.Dtos;
+using QLHV.Application.Sync.Mapping;
 using QLHV.Infrastructure.Sync;
 
 namespace QLHV.Tests.Sync;
@@ -52,17 +53,29 @@ public sealed class QlhvCourseTeacherFullSnapshotSyncSqlTests
     }
 
     [Fact]
-    public void Guards_cover_empty_groups_relations_duplicates_and_cross_partition_natural_keys()
+    public void Per_domain_guards_preserve_empty_duplicate_relation_and_natural_key_protection()
     {
-        var guard = QlhvCourseTeacherFullSnapshotSyncSql.AtomicGuard;
+        var course = QlhvCourseTeacherFullSnapshotSyncSql.KhoaHocAtomicGuard;
+        var teacher = QlhvCourseTeacherFullSnapshotSyncSql.GiaoVienAtomicGuard;
+        var relation = QlhvCourseTeacherFullSnapshotSyncSql.RelationAtomicGuard;
 
-        Assert.Contains("InvalidSourceProfileRows", guard, StringComparison.Ordinal);
-        Assert.Contains("InvalidTargetIdentityRows", guard, StringComparison.Ordinal);
-        Assert.Contains("DuplicateTargetIdentityRows", guard, StringComparison.Ordinal);
-        Assert.Contains("RelationConflicts", guard, StringComparison.Ordinal);
-        Assert.Contains("EmptyPartitionRiskGroups", guard, StringComparison.Ordinal);
-        Assert.Contains("NaturalKeyConflicts", guard, StringComparison.Ordinal);
-        Assert.Contains("WITH (UPDLOCK, HOLDLOCK)", guard, StringComparison.Ordinal);
+        foreach (var guard in new[] { course, teacher, relation })
+        {
+            Assert.Contains("InvalidSourceProfileRows", guard, StringComparison.Ordinal);
+            Assert.Contains("InvalidTargetIdentityRows", guard, StringComparison.Ordinal);
+            Assert.Contains("DuplicateTargetIdentityRows", guard, StringComparison.Ordinal);
+            Assert.Contains("EmptyPartitionRiskGroups", guard, StringComparison.Ordinal);
+            Assert.Contains("WITH (UPDLOCK, HOLDLOCK)", guard, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("NaturalKeyConflicts", course, StringComparison.Ordinal);
+        Assert.Contains("NaturalKeyConflicts", teacher, StringComparison.Ordinal);
+        Assert.Contains("RelationConflicts", relation, StringComparison.Ordinal);
+        Assert.Contains("dbo.App_KhoaHoc AS course", relation, StringComparison.Ordinal);
+        Assert.Contains("dbo.App_GiaoVien AS teacher", relation, StringComparison.Ordinal);
+        Assert.DoesNotContain("dbo.App_HocVien", course, StringComparison.Ordinal);
+        Assert.DoesNotContain("dbo.App_HocVien", teacher, StringComparison.Ordinal);
+        Assert.DoesNotContain("dbo.App_HocVien", relation, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -167,22 +180,177 @@ public sealed class QlhvCourseTeacherFullSnapshotSyncSqlTests
     }
 
     [Fact]
-    public void Repository_runs_all_groups_in_required_order_inside_one_serializable_transaction()
+    public void Repository_runs_selected_groups_in_order_using_independent_serializable_transactions()
     {
         var source = File.ReadAllText(FindWorkspaceFile(
             "server", "QLHV.Infrastructure", "Sync", "QlhvHocVienTargetRepository.cs"));
 
         Assert.Contains("IsolationLevel.Serializable", source, StringComparison.Ordinal);
-        var course = source.IndexOf("MergeKhoaHoc", StringComparison.Ordinal);
-        var teacher = source.IndexOf("MergeGiaoVien", StringComparison.Ordinal);
-        var relation = source.IndexOf("MergeRelation", StringComparison.Ordinal);
-        var student = source.IndexOf("QlhvFullSnapshotSyncSql.Merge", StringComparison.Ordinal);
-        var commit = source.IndexOf("CommitAsync", StringComparison.Ordinal);
+        var course = source.IndexOf("QlhvImportDomains.KhoaHoc,", StringComparison.Ordinal);
+        var teacher = source.IndexOf("QlhvImportDomains.GiaoVien,", StringComparison.Ordinal);
+        var relation = source.IndexOf("QlhvImportDomains.Relation,", StringComparison.Ordinal);
+        var student = source.IndexOf("FullSyncHocVienDomainCoreAsync(", StringComparison.Ordinal);
 
         Assert.True(course >= 0 && course < teacher);
         Assert.True(teacher < relation);
         Assert.True(relation < student);
-        Assert.True(student < commit);
+        Assert.Contains("FullSyncEntityDomainCoreAsync(", source, StringComparison.Ordinal);
+        Assert.Contains("FullSyncHocVienDomainCoreAsync(", source, StringComparison.Ordinal);
+        Assert.Contains("await transaction.CommitAsync(CancellationToken.None)", source, StringComparison.Ordinal);
+        Assert.True(
+            CountOccurrences(source, "BeginTransactionAsync(") >= 3,
+            "Repository must expose separate transaction scopes instead of one four-domain transaction.");
+    }
+
+    [Fact]
+    public void Skipped_or_empty_optional_domains_return_before_any_domain_sql_or_soft_delete()
+    {
+        var source = File.ReadAllText(FindWorkspaceFile(
+            "server", "QLHV.Infrastructure", "Sync", "QlhvHocVienTargetRepository.cs"));
+        var optionalStart = source.IndexOf(
+            "private async Task<DomainTransactionResult> ExecuteOptionalDomainAsync",
+            StringComparison.Ordinal);
+        var sqlStart = source.IndexOf(
+            "private async Task<DomainTransactionResult> FullSyncEntityDomainCoreAsync",
+            StringComparison.Ordinal);
+        Assert.True(optionalStart >= 0 && sqlStart > optionalStart);
+
+        var optionalMethod = source[optionalStart..sqlStart];
+        Assert.Contains("if (!selectedDomains.Contains(domain))", optionalMethod, StringComparison.Ordinal);
+        Assert.Contains("if (sourceRows == 0)", optionalMethod, StringComparison.Ordinal);
+        Assert.DoesNotContain("SqlConnection", optionalMethod, StringComparison.Ordinal);
+        Assert.DoesNotContain("softDeleteSql", optionalMethod, StringComparison.Ordinal);
+        Assert.DoesNotContain("SoftDelete", optionalMethod, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Data_versions_are_updated_inside_the_successful_domain_transaction_only()
+    {
+        var sql = File.ReadAllText(FindWorkspaceFile(
+            "server", "QLHV.Infrastructure", "Sync", "QlhvDataVersionSql.cs"));
+        var repository = File.ReadAllText(FindWorkspaceFile(
+            "server", "QLHV.Infrastructure", "Sync", "QlhvHocVienTargetRepository.cs"));
+
+        Assert.Contains("IncrementAfterKhoaHocCommit", sql, StringComparison.Ordinal);
+        Assert.Contains("IncrementAfterGiaoVienCommit", sql, StringComparison.Ordinal);
+        Assert.Contains("IncrementAfterRelationCommit", sql, StringComparison.Ordinal);
+        Assert.Contains("IncrementAfterHocVienCommit", sql, StringComparison.Ordinal);
+        Assert.Contains("QlhvDataVersionSql.IncrementAfterKhoaHocCommit", repository, StringComparison.Ordinal);
+        Assert.Contains("QlhvDataVersionSql.IncrementAfterGiaoVienCommit", repository, StringComparison.Ordinal);
+        Assert.Contains("QlhvDataVersionSql.IncrementAfterRelationCommit", repository, StringComparison.Ordinal);
+        Assert.Contains("QlhvDataVersionSql.IncrementAfterHocVienCommit", repository, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Partial_sync_records_the_hoc_vien_snapshot_and_preserves_unapplied_optional_counts()
+    {
+        var sql = QlhvDataVersionSql.UpsertPartitionStateAfterSuccessfulFullSync;
+        var repository = File.ReadAllText(FindWorkspaceFile(
+            "server", "QLHV.Infrastructure", "Sync", "QlhvHocVienTargetRepository.cs"));
+
+        Assert.Contains("AppliedBackupSnapshotToken = @AppliedBackupSnapshotToken", sql, StringComparison.Ordinal);
+        Assert.Contains("HocVienRows = @HocVienRows", sql, StringComparison.Ordinal);
+        Assert.Contains(
+            "CASE WHEN @KhoaHocApplied = 1 THEN @KhoaHocRows ELSE KhoaHocRows END",
+            sql,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "CASE WHEN @GiaoVienApplied = 1 THEN @GiaoVienRows ELSE GiaoVienRows END",
+            sql,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "CASE WHEN @RelationApplied = 1 THEN @KhoaHocGiaoVienRows ELSE KhoaHocGiaoVienRows END",
+            sql,
+            StringComparison.Ordinal);
+        Assert.Contains("KhoaHocApplied =", repository, StringComparison.Ordinal);
+        Assert.Contains("GiaoVienApplied =", repository, StringComparison.Ordinal);
+        Assert.Contains("RelationApplied =", repository, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Independent_full_sync_transactions_are_not_retried_after_an_ambiguous_commit()
+    {
+        var source = File.ReadAllText(FindWorkspaceFile(
+            "server", "QLHV.Infrastructure", "Sync", "QlhvHocVienTargetRepository.cs"));
+        var fullSyncStart = source.IndexOf(
+            "private async Task<QlhvImportFullSyncWriteResult> FullSyncDomainsAsync",
+            StringComparison.Ordinal);
+        var upsertStart = source.IndexOf(
+            "private async Task<UpsertCounts> UpsertBatchCoreAsync",
+            StringComparison.Ordinal);
+
+        Assert.True(fullSyncStart >= 0 && upsertStart > fullSyncStart);
+        Assert.DoesNotContain(
+            "SyncRetryPolicyFactory.CreateDefault",
+            source[fullSyncStart..upsertStart],
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Payload_and_write_result_expose_domain_selection_skip_reasons_and_outcomes()
+    {
+        var payload = new QlhvImportFullSyncPayload(
+            Array.Empty<QLHV.Application.Sync.Mapping.QlhvImportKhoaHocWriteModel>(),
+            Array.Empty<QLHV.Application.Sync.Mapping.QlhvImportGiaoVienWriteModel>(),
+            Array.Empty<QLHV.Application.Sync.Mapping.QlhvImportKhoaHocGiaoVienWriteModel>(),
+            Array.Empty<QLHV.Application.Sync.Mapping.QlhvImportHocVienWriteModel>(),
+            ExecutableDomains: [QlhvImportDomains.HocVien],
+            SkippedDomainReasons: new Dictionary<string, string>
+            {
+                [QlhvImportDomains.GiaoVien] = "schema not ready",
+            });
+
+        Assert.Equal([QlhvImportDomains.HocVien], payload.DomainsToExecute);
+        Assert.Equal("schema not ready", payload.DomainSkipReasons[QlhvImportDomains.GiaoVien]);
+
+        var result = new QlhvImportFullSyncWriteResult(0, 0, 0, 0, 0, 0, 0, 0)
+        {
+            DomainResults =
+            [
+                new QlhvDomainWriteResult(
+                    QlhvImportDomains.HocVien,
+                    QlhvImportDomainStatuses.Succeeded,
+                    null,
+                    QlhvEntityWriteCounts.Empty),
+                new QlhvDomainWriteResult(
+                    QlhvImportDomains.GiaoVien,
+                    QlhvImportDomainStatuses.SkippedSchemaNotReady,
+                    "schema not ready",
+                    QlhvEntityWriteCounts.Empty),
+            ],
+        };
+
+        Assert.False(result.RequiredDomainFailed);
+        Assert.False(result.HasConflicts);
+        Assert.Equal(2, result.DomainResults.Count);
+
+        var requiredFailure = result with
+        {
+            DomainResults =
+            [
+                new QlhvDomainWriteResult(
+                    QlhvImportDomains.HocVien,
+                    QlhvImportDomainStatuses.Failed,
+                    "student guard failed",
+                    QlhvEntityWriteCounts.Empty),
+            ],
+        };
+
+        Assert.True(requiredFailure.RequiredDomainFailed);
+        Assert.True(requiredFailure.HasConflicts);
+    }
+
+    private static int CountOccurrences(string value, string pattern)
+    {
+        var count = 0;
+        var offset = 0;
+        while ((offset = value.IndexOf(pattern, offset, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            offset += pattern.Length;
+        }
+
+        return count;
     }
 
     private static string FindWorkspaceFile(

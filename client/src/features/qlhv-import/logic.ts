@@ -99,8 +99,10 @@ export function canOpenExecute(
     && isPlanSnapshotCurrent(plan.data, status)
     && plan.data.executable
     && plan.data.blockers.length === 0
-    && plan.data.duplicateSourceKeys === 0
-    && plan.data.relationConflicts === 0
+    && plan.data.hocVienBlockers.length === 0
+    && plan.data.executableDomains.includes('HOC_VIEN')
+    && plan.data.hocVien.duplicateSourceKeys === 0
+    && plan.data.duplicateSourceMaDkRows === 0
     && plan.data.sourceHocVienRows > 0
     && status.currentUserRole === 'Admin'
     && status.writeAuthorized
@@ -180,14 +182,17 @@ export function getExecuteDisabledReason(
   if (plan.data.sourceHocVienRows <= 0) {
     return 'Snapshot nguồn rỗng; không được phép đồng bộ hoặc xóa mềm phân vùng.';
   }
-  if (plan.data.duplicateSourceKeys > 0) {
-    return 'Nguồn có khóa định danh trùng; kế hoạch đã bị chặn.';
+  if (plan.data.hocVien.duplicateSourceKeys > 0 || plan.data.duplicateSourceMaDkRows > 0) {
+    return 'Nguồn Học viên có khóa định danh trùng; kế hoạch đã bị chặn.';
   }
-  if (plan.data.relationConflicts > 0) {
-    return 'Nguồn có xung đột quan hệ giáo viên – khóa học; kế hoạch đã bị chặn.';
+  if (plan.data.blockers.length > 0) {
+    return plan.data.blockers[0];
   }
-  if (plan.data.blockers.length > 0 || !plan.data.executable) {
-    return 'Kế hoạch có điểm chặn và không thể thực hiện.';
+  if (plan.data.hocVienBlockers.length > 0) {
+    return plan.data.hocVienBlockers[0];
+  }
+  if (!plan.data.executableDomains.includes('HOC_VIEN') || !plan.data.executable) {
+    return 'Nhóm Học viên chưa sẵn sàng đồng bộ.';
   }
   return null;
 }

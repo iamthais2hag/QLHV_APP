@@ -11,6 +11,114 @@ internal static class QlhvCourseTeacherFullSnapshotSyncSql
     public const string GiaoVienStagingTableName = "#QlhvFullSync_GiaoVien";
     public const string RelationStagingTableName = "#QlhvFullSync_KhoaHocGiaoVien";
 
+    public const string CreateKhoaHocStagingTable = @"
+IF OBJECT_ID('tempdb..#QlhvFullSync_KhoaHoc') IS NOT NULL DROP TABLE #QlhvFullSync_KhoaHoc;
+CREATE TABLE #QlhvFullSync_KhoaHoc (
+    SourceProfileCode NVARCHAR(50) NOT NULL,
+    SourceMaKhoaHoc NVARCHAR(50) NOT NULL,
+    SourceHash NVARCHAR(64) NOT NULL,
+    MaKhoa NVARCHAR(50) NOT NULL,
+    TenKhoa NVARCHAR(255) NULL,
+    MaCSDT NVARCHAR(6) NULL,
+    MaSoGTVT NVARCHAR(6) NULL,
+    HangGPLX NVARCHAR(20) NULL,
+    HangDaoTao NVARCHAR(20) NULL,
+    SoQuyetDinhKhaiGiang NVARCHAR(50) NULL,
+    NgayQuyetDinhKhaiGiang DATE NULL,
+    NgayKhaiGiang DATE NULL,
+    NgayBeGiang DATE NULL,
+    MucTieuDaoTao NVARCHAR(1000) NULL,
+    NgayThi DATE NULL,
+    NgaySatHach DATE NULL,
+    TongSoHocVien INT NULL,
+    SoHocVienTotNghiep INT NULL,
+    SoHocVienDuocCapGPLX INT NULL,
+    ThoiGianDaoTao INT NULL,
+    SoNgayOnKiemTra INT NULL,
+    SoNgayThucHoc INT NULL,
+    SoNgayNghiLe INT NULL,
+    TongSoNgay INT NULL,
+    GhiChu NVARCHAR(500) NULL,
+    TrangThaiNguon BIT NOT NULL,
+    TtXuLy INT NULL,
+    HinhThucDaoTao INT NULL,
+    PRIMARY KEY (SourceProfileCode, SourceMaKhoaHoc)
+);";
+
+    public const string CreateGiaoVienStagingTable = @"
+IF OBJECT_ID('tempdb..#QlhvFullSync_GiaoVien') IS NOT NULL DROP TABLE #QlhvFullSync_GiaoVien;
+CREATE TABLE #QlhvFullSync_GiaoVien (
+    SourceProfileCode NVARCHAR(50) NOT NULL,
+    SourceMaGV NVARCHAR(20) NOT NULL,
+    SourceHash NVARCHAR(64) NOT NULL,
+    MaGV NVARCHAR(20) NOT NULL,
+    HoTen NVARCHAR(255) NOT NULL,
+    HoTenDem NVARCHAR(150) NULL,
+    TenGV NVARCHAR(100) NULL,
+    NgaySinh DATE NULL,
+    SoCCCD NVARCHAR(20) NULL,
+    GioiTinh NVARCHAR(20) NULL,
+    DienThoai NVARCHAR(50) NULL,
+    DiaChi NVARCHAR(500) NULL,
+    NoiCtMaDvhc NVARCHAR(5) NULL,
+    NoiCtMaDvql NVARCHAR(5) NULL,
+    HinhThucTuyenDung NVARCHAR(100) NULL,
+    TrinhDoVanHoa NVARCHAR(100) NULL,
+    TrinhDoChuyenMon NVARCHAR(255) NULL,
+    TrinhDoSuPham NVARCHAR(255) NULL,
+    HangGPLX NVARCHAR(100) NULL,
+    NgayCapGPLX DATE NULL,
+    NgayHetHanGPLX DATE NULL,
+    ThamNienLaiXe INT NULL,
+    MonHocGiangDay NVARCHAR(1000) NULL,
+    AnhRelativePath NVARCHAR(500) NULL,
+    GhiChu NVARCHAR(1000) NULL,
+    MaCSDT NVARCHAR(6) NULL,
+    MaSoGTVT NVARCHAR(6) NULL,
+    SoQuyetDinhGCN NVARCHAR(30) NULL,
+    NgayQuyetDinhGCN DATE NULL,
+    LoaiHinhDaoTao NVARCHAR(500) NULL,
+    CacHangGPLXDuocDaoTao NVARCHAR(50) NULL,
+    CauTaoSuaChua NVARCHAR(1) NULL,
+    DaoDucLaiXe NVARCHAR(1) NULL,
+    NghiepVuVanTai NVARCHAR(1) NULL,
+    LuatGTDB NVARCHAR(1) NULL,
+    KyThuatLaiXe NVARCHAR(1) NULL,
+    MaFileTiepNhanXml NVARCHAR(50) NULL,
+    ThoiGianTiepNhanXml DATETIME2 NULL,
+    NoiCapGCN NVARCHAR(500) NULL,
+    LoaiGiaoVien NVARCHAR(50) NULL,
+    CacHangDaCo NVARCHAR(500) NULL,
+    TrangThaiNguon BIT NOT NULL,
+    PRIMARY KEY (SourceProfileCode, SourceMaGV)
+);";
+
+    public const string CreateRelationStagingTable = @"
+IF OBJECT_ID('tempdb..#QlhvFullSync_KhoaHocGiaoVien') IS NOT NULL DROP TABLE #QlhvFullSync_KhoaHocGiaoVien;
+CREATE TABLE #QlhvFullSync_KhoaHocGiaoVien (
+    SourceProfileCode NVARCHAR(50) NOT NULL,
+    SourceMaLichLV BIGINT NOT NULL,
+    SourceMaKhoaHoc NVARCHAR(50) NOT NULL,
+    SourceMaGV NVARCHAR(20) NOT NULL,
+    SourceHash NVARCHAR(64) NOT NULL,
+    MaKhoa NVARCHAR(50) NOT NULL,
+    MaGV NVARCHAR(20) NOT NULL,
+    TenGV NVARCHAR(255) NULL,
+    MaMonHoc NVARCHAR(50) NULL,
+    TenMonHoc NVARCHAR(255) NULL,
+    BienSoXe NVARCHAR(20) NULL,
+    LoaiGV NVARCHAR(50) NULL,
+    SoHocVien INT NULL,
+    NgayHieuLuc DATE NULL,
+    NgayHetHieuLuc DATE NULL,
+    NgayBatDau DATE NULL,
+    NgayKetThuc DATE NULL,
+    IsKhoaHocGiaoVien BIT NOT NULL,
+    GhiChu NVARCHAR(500) NULL,
+    TrangThaiNguon BIT NOT NULL,
+    PRIMARY KEY (SourceProfileCode, SourceMaLichLV)
+);";
+
     public const string CreateStagingTables = @"
 IF OBJECT_ID('tempdb..#QlhvFullSync_KhoaHoc') IS NOT NULL DROP TABLE #QlhvFullSync_KhoaHoc;
 CREATE TABLE #QlhvFullSync_KhoaHoc (
@@ -209,6 +317,100 @@ SELECT
            OR ISNULL(target.SourceMaGV, N'') <> source.SourceMaGV
     ) AS NaturalKeyConflicts;";
 
+    public const string KhoaHocAtomicGuard = @"
+SELECT
+    (SELECT COUNT(1) FROM #QlhvFullSync_KhoaHoc) AS StagedRows,
+    (SELECT COUNT(1) FROM #QlhvFullSync_KhoaHoc
+     WHERE SourceProfileCode <> @SourceProfileCode) AS InvalidSourceProfileRows,
+    (SELECT COUNT(1) FROM dbo.App_KhoaHoc WITH (UPDLOCK, HOLDLOCK)
+     WHERE SourceProfileCode = @SourceProfileCode
+       AND NULLIF(LTRIM(RTRIM(SourceMaKhoaHoc)), N'') IS NULL) AS InvalidTargetIdentityRows,
+    (SELECT COUNT(1) FROM (
+        SELECT SourceMaKhoaHoc
+        FROM dbo.App_KhoaHoc WITH (UPDLOCK, HOLDLOCK)
+        WHERE SourceProfileCode = @SourceProfileCode
+          AND NULLIF(LTRIM(RTRIM(SourceMaKhoaHoc)), N'') IS NOT NULL
+        GROUP BY SourceMaKhoaHoc
+        HAVING COUNT(1) > 1
+     ) AS duplicateIdentity) AS DuplicateTargetIdentityRows,
+    CASE WHEN NOT EXISTS (SELECT 1 FROM #QlhvFullSync_KhoaHoc)
+              AND EXISTS (
+                  SELECT 1 FROM dbo.App_KhoaHoc WITH (UPDLOCK, HOLDLOCK)
+                  WHERE SourceProfileCode = @SourceProfileCode AND IsDeleted = 0)
+         THEN 1 ELSE 0 END AS EmptyPartitionRiskGroups,
+    (SELECT COUNT(1)
+     FROM #QlhvFullSync_KhoaHoc AS source
+     INNER JOIN dbo.App_KhoaHoc AS target WITH (UPDLOCK, HOLDLOCK)
+       ON target.MaKhoa = source.MaKhoa
+     WHERE target.SourceProfileCode IS NULL
+        OR target.SourceProfileCode <> source.SourceProfileCode
+        OR ISNULL(target.SourceMaKhoaHoc, N'') <> source.SourceMaKhoaHoc) AS NaturalKeyConflicts,
+    CAST(0 AS int) AS RelationConflicts;";
+
+    public const string GiaoVienAtomicGuard = @"
+SELECT
+    (SELECT COUNT(1) FROM #QlhvFullSync_GiaoVien) AS StagedRows,
+    (SELECT COUNT(1) FROM #QlhvFullSync_GiaoVien
+     WHERE SourceProfileCode <> @SourceProfileCode) AS InvalidSourceProfileRows,
+    (SELECT COUNT(1) FROM dbo.App_GiaoVien WITH (UPDLOCK, HOLDLOCK)
+     WHERE SourceProfileCode = @SourceProfileCode
+       AND NULLIF(LTRIM(RTRIM(SourceMaGV)), N'') IS NULL) AS InvalidTargetIdentityRows,
+    (SELECT COUNT(1) FROM (
+        SELECT SourceMaGV
+        FROM dbo.App_GiaoVien WITH (UPDLOCK, HOLDLOCK)
+        WHERE SourceProfileCode = @SourceProfileCode
+          AND NULLIF(LTRIM(RTRIM(SourceMaGV)), N'') IS NOT NULL
+        GROUP BY SourceMaGV
+        HAVING COUNT(1) > 1
+     ) AS duplicateIdentity) AS DuplicateTargetIdentityRows,
+    CASE WHEN NOT EXISTS (SELECT 1 FROM #QlhvFullSync_GiaoVien)
+              AND EXISTS (
+                  SELECT 1 FROM dbo.App_GiaoVien WITH (UPDLOCK, HOLDLOCK)
+                  WHERE SourceProfileCode = @SourceProfileCode AND IsDeleted = 0)
+         THEN 1 ELSE 0 END AS EmptyPartitionRiskGroups,
+    (SELECT COUNT(1)
+     FROM #QlhvFullSync_GiaoVien AS source
+     INNER JOIN dbo.App_GiaoVien AS target WITH (UPDLOCK, HOLDLOCK)
+       ON target.MaGV = source.MaGV
+     WHERE target.SourceProfileCode IS NULL
+        OR target.SourceProfileCode <> source.SourceProfileCode
+        OR ISNULL(target.SourceMaGV, N'') <> source.SourceMaGV) AS NaturalKeyConflicts,
+    CAST(0 AS int) AS RelationConflicts;";
+
+    public const string RelationAtomicGuard = @"
+SELECT
+    (SELECT COUNT(1) FROM #QlhvFullSync_KhoaHocGiaoVien) AS StagedRows,
+    (SELECT COUNT(1) FROM #QlhvFullSync_KhoaHocGiaoVien
+     WHERE SourceProfileCode <> @SourceProfileCode) AS InvalidSourceProfileRows,
+    (SELECT COUNT(1) FROM dbo.App_KhoaHoc_GiaoVien WITH (UPDLOCK, HOLDLOCK)
+     WHERE SourceProfileCode = @SourceProfileCode
+       AND SourceMaLichLV IS NULL) AS InvalidTargetIdentityRows,
+    (SELECT COUNT(1) FROM (
+        SELECT SourceMaLichLV
+        FROM dbo.App_KhoaHoc_GiaoVien WITH (UPDLOCK, HOLDLOCK)
+        WHERE SourceProfileCode = @SourceProfileCode
+          AND SourceMaLichLV IS NOT NULL
+        GROUP BY SourceMaLichLV
+        HAVING COUNT(1) > 1
+     ) AS duplicateIdentity) AS DuplicateTargetIdentityRows,
+    CASE WHEN NOT EXISTS (SELECT 1 FROM #QlhvFullSync_KhoaHocGiaoVien)
+              AND EXISTS (
+                  SELECT 1 FROM dbo.App_KhoaHoc_GiaoVien WITH (UPDLOCK, HOLDLOCK)
+                  WHERE SourceProfileCode = @SourceProfileCode AND IsDeleted = 0)
+         THEN 1 ELSE 0 END AS EmptyPartitionRiskGroups,
+    CAST(0 AS int) AS NaturalKeyConflicts,
+    (SELECT COUNT(1)
+     FROM #QlhvFullSync_KhoaHocGiaoVien AS relation
+     LEFT JOIN dbo.App_KhoaHoc AS course WITH (UPDLOCK, HOLDLOCK)
+       ON course.SourceProfileCode = relation.SourceProfileCode
+      AND course.SourceMaKhoaHoc = relation.SourceMaKhoaHoc
+      AND course.IsDeleted = 0
+     LEFT JOIN dbo.App_GiaoVien AS teacher WITH (UPDLOCK, HOLDLOCK)
+       ON teacher.SourceProfileCode = relation.SourceProfileCode
+      AND teacher.SourceMaGV = relation.SourceMaGV
+      AND teacher.IsDeleted = 0
+     WHERE course.SourceMaKhoaHoc IS NULL OR teacher.SourceMaGV IS NULL) AS RelationConflicts;";
+
     public const string MergeKhoaHoc = @"
 MERGE dbo.App_KhoaHoc WITH (HOLDLOCK) AS target
 USING #QlhvFullSync_KhoaHoc AS source
@@ -395,4 +597,13 @@ IF OBJECT_ID('tempdb..#QlhvFullSync_KhoaHocGiaoVien') IS NOT NULL DROP TABLE #Ql
 IF OBJECT_ID('tempdb..#QlhvFullSync_GiaoVien') IS NOT NULL DROP TABLE #QlhvFullSync_GiaoVien;
 IF OBJECT_ID('tempdb..#QlhvFullSync_KhoaHoc') IS NOT NULL DROP TABLE #QlhvFullSync_KhoaHoc;
 " + QlhvFullSnapshotSyncSql.DropStagingTable;
+
+    public const string DropKhoaHocStagingTable = @"
+IF OBJECT_ID('tempdb..#QlhvFullSync_KhoaHoc') IS NOT NULL DROP TABLE #QlhvFullSync_KhoaHoc;";
+
+    public const string DropGiaoVienStagingTable = @"
+IF OBJECT_ID('tempdb..#QlhvFullSync_GiaoVien') IS NOT NULL DROP TABLE #QlhvFullSync_GiaoVien;";
+
+    public const string DropRelationStagingTable = @"
+IF OBJECT_ID('tempdb..#QlhvFullSync_KhoaHocGiaoVien') IS NOT NULL DROP TABLE #QlhvFullSync_KhoaHocGiaoVien;";
 }

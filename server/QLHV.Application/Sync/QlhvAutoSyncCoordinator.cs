@@ -21,6 +21,8 @@ public sealed class QlhvAutoSyncCoordinator
     {
         var sourceOrder = QlhvAutoSyncConstants.NormalizeSourceOrder(run.SourceOrder);
         var succeeded = 0;
+        var partialSucceeded = 0;
+        var failedSources = 0;
         string? latestError = null;
 
         foreach (var sourceType in sourceOrder)
@@ -30,12 +32,38 @@ public sealed class QlhvAutoSyncCoordinator
                 ? run.Oto
                 : run.Moto;
             if (previousResult is not null &&
-                string.Equals(
-                    previousResult.Status,
-                    QlhvAutoSyncConstants.Succeeded,
-                    StringComparison.Ordinal))
+                (string.Equals(
+                     previousResult.Status,
+                     QlhvAutoSyncConstants.Succeeded,
+                     StringComparison.Ordinal) ||
+                 string.Equals(
+                     previousResult.Status,
+                     QlhvAutoSyncConstants.PartialSuccess,
+                     StringComparison.Ordinal) ||
+                 string.Equals(
+                     previousResult.Status,
+                     QlhvAutoSyncConstants.PartialFailed,
+                     StringComparison.Ordinal)))
             {
-                succeeded++;
+                if (string.Equals(
+                        previousResult.Status,
+                        QlhvAutoSyncConstants.PartialSuccess,
+                        StringComparison.Ordinal))
+                {
+                    partialSucceeded++;
+                }
+                else if (string.Equals(
+                             previousResult.Status,
+                             QlhvAutoSyncConstants.PartialFailed,
+                             StringComparison.Ordinal))
+                {
+                    failedSources++;
+                    latestError = previousResult.Message;
+                }
+                else
+                {
+                    succeeded++;
+                }
                 continue;
             }
 
@@ -81,16 +109,35 @@ public sealed class QlhvAutoSyncCoordinator
             {
                 succeeded++;
             }
+            else if (string.Equals(
+                         result.Status,
+                         QlhvAutoSyncConstants.PartialSuccess,
+                         StringComparison.Ordinal))
+            {
+                partialSucceeded++;
+                latestError = result.Message;
+            }
+            else if (string.Equals(
+                         result.Status,
+                         QlhvAutoSyncConstants.PartialFailed,
+                         StringComparison.Ordinal))
+            {
+                failedSources++;
+                latestError = result.Message;
+            }
             else
             {
+                failedSources++;
                 latestError = result.Message ?? $"Auto Sync {sourceType} that bai.";
             }
         }
 
-        var status = succeeded switch
+        var completed = succeeded + partialSucceeded;
+        var status = (completed, partialSucceeded, failedSources) switch
         {
-            2 => QlhvAutoSyncConstants.Succeeded,
-            > 0 => QlhvAutoSyncConstants.PartialFailed,
+            (2, 0, 0) => QlhvAutoSyncConstants.Succeeded,
+            (2, > 0, 0) => QlhvAutoSyncConstants.PartialSuccess,
+            (> 0, _, > 0) => QlhvAutoSyncConstants.PartialFailed,
             _ => QlhvAutoSyncConstants.Failed,
         };
         await _runs.SetCurrentStageAsync(

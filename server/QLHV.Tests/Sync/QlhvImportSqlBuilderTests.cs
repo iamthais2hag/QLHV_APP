@@ -55,6 +55,52 @@ public sealed class QlhvImportSqlBuilderTests
     }
 
     [Fact]
+    public void Hoc_vien_read_does_not_join_optional_tables_when_their_enrichment_schema_is_incomplete()
+    {
+        var request = new QlhvImportRequest
+        {
+            SourceProfileCode = "CSDT_OTO",
+            MaCSDT = "66029",
+        };
+        var reads = QlhvImportSqlBuilder.BuildSourceReads(
+            request,
+            new QlhvImportSourceReadCapabilities(
+                KhoaHocExists: true,
+                KhoaHocStudentJoinReady: false,
+                GiaoVienExists: false,
+                RelationExists: false,
+                DmHangDtExists: true,
+                DmHangDtJoinReady: false,
+                DmDvhcExists: true,
+                DmDvhcJoinReady: false,
+                KhoaHocHasMaCsdt: true,
+                HasDuongDanAnh: false,
+                HasChatLuongAnh: false,
+                HasNgayThuNhanAnh: false,
+                HasNguoiThuNhanAnh: false));
+
+        Assert.DoesNotContain("JOIN dbo.KhoaHoc", reads.HocVienSql, StringComparison.Ordinal);
+        Assert.DoesNotContain("JOIN dbo.DM_HangDT", reads.HocVienSql, StringComparison.Ordinal);
+        Assert.DoesNotContain("JOIN dbo.DM_DVHC", reads.HocVienSql, StringComparison.Ordinal);
+        Assert.Contains(
+            "CAST(NULL AS nvarchar(255))",
+            reads.HocVienSql,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "LTRIM(RTRIM(nlx.MaDK)) LIKE @MaDkPrefix",
+            reads.HocVienSql,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "LTRIM(RTRIM(kh.MaCSDT)) = @MaCSDT",
+            reads.HocVienSql,
+            StringComparison.Ordinal);
+        Assert.NotNull(reads.KhoaHocSql);
+        Assert.Null(reads.GiaoVienSql);
+        Assert.Null(reads.RelationSql);
+        AssertReadOnly(reads.HocVienSql);
+    }
+
+    [Fact]
     public void Target_khoa_hoc_count_uses_parameterized_center_and_course_scope()
     {
         var request = new QlhvImportRequest

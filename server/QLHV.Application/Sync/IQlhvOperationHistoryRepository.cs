@@ -33,4 +33,15 @@ public interface IQlhvOperationHistoryRepository
         string sourceType,
         string operationType,
         CancellationToken cancellationToken = default);
+
+    async Task<QlhvOperationHistoryDto?> GetLatestSuccessfulAsync(
+        string sourceType,
+        string operationType,
+        CancellationToken cancellationToken = default)
+    {
+        var history = await SearchAsync(sourceType, 200, cancellationToken);
+        return history.FirstOrDefault(entry =>
+            string.Equals(entry.OperationType, operationType, StringComparison.Ordinal)
+            && entry.Status is QlhvOperationTypes.Succeeded or QlhvOperationTypes.PartialSuccess);
+    }
 }

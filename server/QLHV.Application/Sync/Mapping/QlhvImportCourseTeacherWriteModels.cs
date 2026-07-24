@@ -1,3 +1,5 @@
+using QLHV.Application.Sync;
+
 namespace QLHV.Application.Sync.Mapping;
 
 public sealed record QlhvImportKhoaHocWriteModel(
@@ -101,4 +103,14 @@ public sealed record QlhvImportFullSyncPayload(
     IReadOnlyList<QlhvImportGiaoVienWriteModel> GiaoVienRows,
     IReadOnlyList<QlhvImportKhoaHocGiaoVienWriteModel> RelationRows,
     IReadOnlyList<QlhvImportHocVienWriteModel> HocVienRows,
-    string BackupSnapshotToken = "");
+    string BackupSnapshotToken = "",
+    IReadOnlyCollection<string>? ExecutableDomains = null,
+    IReadOnlyDictionary<string, string>? SkippedDomainReasons = null)
+{
+    public IReadOnlyCollection<string> DomainsToExecute =>
+        ExecutableDomains ?? QlhvImportDomains.Ordered;
+
+    public IReadOnlyDictionary<string, string> DomainSkipReasons =>
+        SkippedDomainReasons ??
+        new Dictionary<string, string>(StringComparer.Ordinal);
+}

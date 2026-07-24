@@ -21,7 +21,7 @@ public sealed class QlhvImportExecuteRequest : QlhvImportRequest
     public string Actor { get; set; } = QlhvOperationActors.ManualAdmin;
 }
 
-public sealed class QlhvImportPlanDto
+public sealed record QlhvImportPlanDto
 {
     public bool IsReadOnly { get; init; } = true;
 
@@ -91,7 +91,32 @@ public sealed class QlhvImportPlanDto
 
     internal int SourceRelationRows { get; init; }
 
-    public bool Executable => Blockers.Count == 0;
+    public string HocVienStatus { get; init; } = QlhvImportDomainStatuses.Blocked;
+
+    public string KhoaHocStatus { get; init; } = QlhvImportDomainStatuses.SkippedSourceNotReady;
+
+    public string GiaoVienStatus { get; init; } = QlhvImportDomainStatuses.SkippedSourceNotReady;
+
+    public string RelationStatus { get; init; } = QlhvImportDomainStatuses.SkippedDependencyNotReady;
+
+    public IReadOnlyList<string> HocVienBlockers { get; init; } = Array.Empty<string>();
+
+    public IReadOnlyList<string> KhoaHocBlockers { get; init; } = Array.Empty<string>();
+
+    public IReadOnlyList<string> GiaoVienBlockers { get; init; } = Array.Empty<string>();
+
+    public IReadOnlyList<string> RelationBlockers { get; init; } = Array.Empty<string>();
+
+    public IReadOnlyList<string> OptionalWarnings { get; init; } = Array.Empty<string>();
+
+    public IReadOnlyList<string> ExecutableDomains { get; init; } = Array.Empty<string>();
+
+    public IReadOnlyList<string> SkippedDomains { get; init; } = Array.Empty<string>();
+
+    public bool Executable =>
+        Blockers.Count == 0 &&
+        HocVienBlockers.Count == 0 &&
+        ExecutableDomains.Contains(QlhvImportDomains.HocVien, StringComparer.Ordinal);
 
     public IReadOnlyList<string> Blockers { get; init; } = Array.Empty<string>();
 
@@ -129,6 +154,20 @@ public sealed class QlhvImportExecuteResultDto
     public QlhvEntitySyncCountsDto KhoaHocGiaoVien { get; init; } = new();
 
     public HocVienPhotoQueueBatchResult? PhotoQueue { get; init; }
+
+    public IReadOnlyList<QlhvImportDomainResultDto> DomainResults { get; init; } =
+        Array.Empty<QlhvImportDomainResultDto>();
+}
+
+public sealed class QlhvImportDomainResultDto
+{
+    public string Domain { get; init; } = string.Empty;
+
+    public string Status { get; init; } = string.Empty;
+
+    public string? Message { get; init; }
+
+    public QlhvEntitySyncCountsDto Counts { get; init; } = new();
 }
 
 public sealed class QlhvEntitySyncCountsDto
@@ -208,7 +247,32 @@ public sealed class QlhvImportDiagnosticsDto
 
     public int RelationConflicts { get; init; }
 
-    public bool Executable => Blockers.Count == 0;
+    public string HocVienStatus { get; init; } = QlhvImportDomainStatuses.Blocked;
+
+    public string KhoaHocStatus { get; init; } = QlhvImportDomainStatuses.SkippedSourceNotReady;
+
+    public string GiaoVienStatus { get; init; } = QlhvImportDomainStatuses.SkippedSourceNotReady;
+
+    public string RelationStatus { get; init; } = QlhvImportDomainStatuses.SkippedDependencyNotReady;
+
+    public IReadOnlyList<string> HocVienBlockers { get; init; } = Array.Empty<string>();
+
+    public IReadOnlyList<string> KhoaHocBlockers { get; init; } = Array.Empty<string>();
+
+    public IReadOnlyList<string> GiaoVienBlockers { get; init; } = Array.Empty<string>();
+
+    public IReadOnlyList<string> RelationBlockers { get; init; } = Array.Empty<string>();
+
+    public IReadOnlyList<string> OptionalWarnings { get; init; } = Array.Empty<string>();
+
+    public IReadOnlyList<string> ExecutableDomains { get; init; } = Array.Empty<string>();
+
+    public IReadOnlyList<string> SkippedDomains { get; init; } = Array.Empty<string>();
+
+    public bool Executable =>
+        Blockers.Count == 0 &&
+        HocVienBlockers.Count == 0 &&
+        ExecutableDomains.Contains(QlhvImportDomains.HocVien, StringComparer.Ordinal);
 
     public IReadOnlyList<string> Blockers { get; init; } = Array.Empty<string>();
 
@@ -235,6 +299,14 @@ public sealed class QlhvImportSourceSnapshot
 
     public IReadOnlyList<QlhvKhoaHocGiaoVienSourceRow> KhoaHocGiaoVienRows { get; init; } =
         Array.Empty<QlhvKhoaHocGiaoVienSourceRow>();
+
+    public IReadOnlyList<string> HocVienWarnings { get; init; } = Array.Empty<string>();
+
+    public IReadOnlyList<string> KhoaHocBlockers { get; init; } = Array.Empty<string>();
+
+    public IReadOnlyList<string> GiaoVienBlockers { get; init; } = Array.Empty<string>();
+
+    public IReadOnlyList<string> RelationBlockers { get; init; } = Array.Empty<string>();
 }
 
 public sealed class QlhvImportTargetSnapshot
@@ -271,4 +343,18 @@ public sealed class QlhvImportTargetSnapshot
     public bool SourceProfileConstraintExists { get; init; }
 
     public bool SourceProfileAllowedByConstraint { get; init; } = true;
+
+    public int DuplicateHocVienTargetIdentityRows { get; init; }
+
+    public int DuplicateKhoaHocTargetIdentityRows { get; init; }
+
+    public int DuplicateGiaoVienTargetIdentityRows { get; init; }
+
+    public int DuplicateRelationTargetIdentityRows { get; init; }
+
+    public IReadOnlyList<string> KhoaHocBlockers { get; init; } = Array.Empty<string>();
+
+    public IReadOnlyList<string> GiaoVienBlockers { get; init; } = Array.Empty<string>();
+
+    public IReadOnlyList<string> RelationBlockers { get; init; } = Array.Empty<string>();
 }

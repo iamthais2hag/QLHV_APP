@@ -2,7 +2,29 @@ export type QlhvImportSourceKind = 'OTO' | 'MOTO';
 
 export type QlhvImportSourceProfileCode = 'CSDT_OTO' | 'CSDT_MOTO';
 
-export type QlhvOperationState = 'idle' | 'refreshing' | 'syncing' | 'succeeded' | 'failed';
+export type QlhvImportDomain =
+  | 'HOC_VIEN'
+  | 'KHOA_HOC'
+  | 'GIAO_VIEN'
+  | 'KHOA_HOC_GIAO_VIEN';
+
+export type QlhvImportDomainStatus =
+  | 'EXECUTABLE'
+  | 'BLOCKED'
+  | 'SKIPPED_SCHEMA_NOT_READY'
+  | 'SKIPPED_SOURCE_NOT_READY'
+  | 'SKIPPED_DEPENDENCY_NOT_READY'
+  | 'SUCCESS'
+  | 'FAILED'
+  | 'NO_OP';
+
+export type QlhvOperationState =
+  | 'idle'
+  | 'refreshing'
+  | 'syncing'
+  | 'succeeded'
+  | 'partial-success'
+  | 'failed';
 
 export type QlhvOperationType =
   | 'REFRESH_BACKUP'
@@ -38,6 +60,13 @@ export interface QlhvImportPhotoCounts {
   reviewRequired: number;
 }
 
+export interface QlhvImportDomainResult {
+  domain: QlhvImportDomain;
+  status: string;
+  message: string | null;
+  counts: QlhvImportEntityCounts;
+}
+
 export interface QlhvImportDiagnostics {
   isReadOnly: boolean;
   sourceDatabaseName: string;
@@ -63,12 +92,24 @@ export interface QlhvImportDiagnostics {
   hocVien: QlhvImportEntityCounts;
   khoaHoc: QlhvImportEntityCounts;
   giaoVien: QlhvImportEntityCounts;
+  khoaHocGiaoVien: QlhvImportEntityCounts;
   photo?: QlhvImportPhotoCounts;
   duplicateSourceKeys: number;
   relationConflicts: number;
   executable: boolean;
+  hocVienStatus: QlhvImportDomainStatus;
+  khoaHocStatus: QlhvImportDomainStatus;
+  giaoVienStatus: QlhvImportDomainStatus;
+  relationStatus: QlhvImportDomainStatus;
   blockers: string[];
   warnings: string[];
+  hocVienBlockers: string[];
+  khoaHocBlockers: string[];
+  giaoVienBlockers: string[];
+  relationBlockers: string[];
+  optionalWarnings: string[];
+  executableDomains: QlhvImportDomain[];
+  skippedDomains: QlhvImportDomain[];
 }
 
 export interface QlhvImportPlan {
@@ -101,12 +142,24 @@ export interface QlhvImportPlan {
   hocVien: QlhvImportEntityCounts;
   khoaHoc: QlhvImportEntityCounts;
   giaoVien: QlhvImportEntityCounts;
+  khoaHocGiaoVien: QlhvImportEntityCounts;
   photo?: QlhvImportPhotoCounts;
   duplicateSourceKeys: number;
   relationConflicts: number;
   executable: boolean;
+  hocVienStatus: QlhvImportDomainStatus;
+  khoaHocStatus: QlhvImportDomainStatus;
+  giaoVienStatus: QlhvImportDomainStatus;
+  relationStatus: QlhvImportDomainStatus;
   blockers: string[];
   warnings: string[];
+  hocVienBlockers: string[];
+  khoaHocBlockers: string[];
+  giaoVienBlockers: string[];
+  relationBlockers: string[];
+  optionalWarnings: string[];
+  executableDomains: QlhvImportDomain[];
+  skippedDomains: QlhvImportDomain[];
 }
 
 export interface QlhvImportExecuteResult {
@@ -122,6 +175,8 @@ export interface QlhvImportExecuteResult {
   hocVien?: QlhvImportEntityCounts;
   khoaHoc?: QlhvImportEntityCounts;
   giaoVien?: QlhvImportEntityCounts;
+  khoaHocGiaoVien?: QlhvImportEntityCounts;
+  domainResults: QlhvImportDomainResult[];
   photo?: QlhvImportPhotoCounts;
 }
 
@@ -202,6 +257,7 @@ export type QlhvAutoSyncState =
   | 'queued'
   | 'running'
   | 'succeeded'
+  | 'partial-success'
   | 'partial-failed'
   | 'failed';
 

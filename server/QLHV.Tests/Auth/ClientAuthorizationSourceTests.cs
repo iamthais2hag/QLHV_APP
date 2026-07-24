@@ -72,7 +72,10 @@ public sealed class ClientAuthorizationSourceTests
         Assert.Contains("executeQlhvImport(body)", page, StringComparison.Ordinal);
         Assert.Contains("expectedSnapshotToken: plan.data.backupSnapshotToken", logic, StringComparison.Ordinal);
         Assert.Contains("plan.data.blockers.length === 0", logic, StringComparison.Ordinal);
+        Assert.Contains("plan.data.hocVienBlockers.length === 0", logic, StringComparison.Ordinal);
+        Assert.Contains("plan.data.executableDomains.includes('HOC_VIEN')", logic, StringComparison.Ordinal);
         Assert.Contains("plan.data.sourceHocVienRows > 0", logic, StringComparison.Ordinal);
+        Assert.DoesNotContain("plan.data.relationConflicts === 0", logic, StringComparison.Ordinal);
         Assert.Contains("isOperationBusy(status)", logic, StringComparison.Ordinal);
         Assert.Contains("status.canSync", logic, StringComparison.Ordinal);
         Assert.Contains("aria-busy={state.refreshing}", page, StringComparison.Ordinal);

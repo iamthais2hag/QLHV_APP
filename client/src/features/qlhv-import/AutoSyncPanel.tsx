@@ -242,7 +242,18 @@ export default function AutoSyncPanel({
               value={trackedStatus.enabled && trackedStatus.runOnServerStartup ? 'Đang bật' : 'Đang tắt'}
               tone={trackedStatus.enabled && trackedStatus.runOnServerStartup ? 'ok' : 'warning'}
             />
-            <AutoSyncFact label="Trạng thái" value={formatAutoSyncState(trackedStatus.state)} tone={running ? 'busy' : trackedStatus.state === 'failed' || trackedStatus.state === 'partial-failed' ? 'failed' : 'ok'} />
+            <AutoSyncFact
+              label="Trạng thái"
+              value={formatAutoSyncState(trackedStatus.state)}
+              tone={running
+                ? 'busy'
+                : trackedStatus.state === 'failed'
+                  ? 'failed'
+                  : trackedStatus.state === 'partial-success'
+                    || trackedStatus.state === 'partial-failed'
+                    ? 'warning'
+                    : 'ok'}
+            />
             <AutoSyncFact label="Nguồn đang xử lý" value={trackedStatus.currentSourceType ?? 'Không có'} />
             <AutoSyncFact label="Bước hiện tại" value={formatAutoSyncStage(trackedStatus.currentStage)} tone={running ? 'busy' : 'default'} />
             <AutoSyncFact label="Actor" value={trackedStatus.actor ?? 'Chưa có'} />
@@ -349,6 +360,17 @@ function SessionStartStatus({
     );
   }
 
+  if (status.state === 'partial-success') {
+    return (
+      <div className="qlhv-session-sync-status is-warning" role="status">
+        <strong>Hoàn tất một phần.</strong>
+        <span>
+          {' '}Dữ liệu đã đồng bộ thành công vẫn được tải lại; module chưa sẵn sàng được bỏ qua và không bị xóa.
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div className="qlhv-session-sync-status is-failed" role="alert">
       <strong>Phiên cập nhật có lỗi.</strong>
@@ -419,8 +441,9 @@ function formatAutoSyncState(state: QlhvAutoSyncStatus['state']): string {
     queued: 'Đang chờ',
     running: 'Đang chạy',
     succeeded: 'Thành công',
-    'partial-failed': 'Thành công một phần',
-    failed: 'Có lỗi',
+    'partial-success': 'Thành công một phần',
+    'partial-failed': 'Có nguồn thất bại',
+    failed: 'Thất bại',
   };
   return labels[state];
 }

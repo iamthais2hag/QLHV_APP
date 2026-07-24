@@ -85,6 +85,8 @@ public sealed class QlhvImportClientSafetySourceTests
         Assert.Contains("isOperationBusy(status)", logic, StringComparison.Ordinal);
         Assert.Contains("plan.data.sourceHocVienRows > 0", logic, StringComparison.Ordinal);
         Assert.Contains("plan.data.blockers.length === 0", logic, StringComparison.Ordinal);
+        Assert.Contains("plan.data.hocVienBlockers.length === 0", logic, StringComparison.Ordinal);
+        Assert.Contains("plan.data.executableDomains.includes('HOC_VIEN')", logic, StringComparison.Ordinal);
         Assert.Contains("status.canSync", logic, StringComparison.Ordinal);
         Assert.Contains("pendingOperationId", page, StringComparison.Ordinal);
         Assert.Contains("!!state.pendingOperationId", page, StringComparison.Ordinal);
@@ -104,18 +106,90 @@ public sealed class QlhvImportClientSafetySourceTests
         Assert.Contains("<EntityCountsSection title=\"Học viên\" counts={hocVien}", page, StringComparison.Ordinal);
         Assert.Contains("<EntityCountsSection title=\"Khóa học\" counts={khoaHoc}", page, StringComparison.Ordinal);
         Assert.Contains("<EntityCountsSection title=\"Giáo viên\" counts={giaoVien}", page, StringComparison.Ordinal);
+        Assert.Contains("<EntityCountsSection title=\"Quan hệ Giáo viên – Khóa học\" counts={khoaHocGiaoVien}", page, StringComparison.Ordinal);
         Assert.Contains("hocVien={diagnostics.hocVien}", page, StringComparison.Ordinal);
         Assert.Contains("khoaHoc={diagnostics.khoaHoc}", page, StringComparison.Ordinal);
         Assert.Contains("giaoVien={diagnostics.giaoVien}", page, StringComparison.Ordinal);
+        Assert.Contains("khoaHocGiaoVien={diagnostics.khoaHocGiaoVien}", page, StringComparison.Ordinal);
         Assert.Contains("hocVien={plan.hocVien}", page, StringComparison.Ordinal);
         Assert.Contains("khoaHoc={plan.khoaHoc}", page, StringComparison.Ordinal);
         Assert.Contains("giaoVien={plan.giaoVien}", page, StringComparison.Ordinal);
+        Assert.Contains("khoaHocGiaoVien={plan.khoaHocGiaoVien}", page, StringComparison.Ordinal);
         Assert.Contains("khoaHoc={result.khoaHoc ?? null}", page, StringComparison.Ordinal);
         Assert.Contains("giaoVien={result.giaoVien ?? null}", page, StringComparison.Ordinal);
+        Assert.Contains("khoaHocGiaoVien={result.khoaHocGiaoVien ?? null}", page, StringComparison.Ordinal);
 
         Assert.Contains("hocVien: QlhvImportEntityCounts", types, StringComparison.Ordinal);
         Assert.Contains("khoaHoc: QlhvImportEntityCounts", types, StringComparison.Ordinal);
         Assert.Contains("giaoVien: QlhvImportEntityCounts", types, StringComparison.Ordinal);
+        Assert.Contains("khoaHocGiaoVien: QlhvImportEntityCounts", types, StringComparison.Ordinal);
+        Assert.Contains("function DomainReadinessGrid", page, StringComparison.Ordinal);
+        Assert.Contains("function DomainResultsGrid", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Partial_domain_contract_is_validated_and_optional_modules_do_not_lock_student_sync()
+    {
+        var api = ReadClientFile("api.ts");
+        var logic = ReadClientFile("logic.ts");
+        var page = ReadClientFile("QlhvImportPage.tsx");
+        var types = ReadClientFile("types.ts");
+
+        foreach (var field in new[]
+                 {
+                     "hocVienBlockers",
+                     "khoaHocBlockers",
+                     "giaoVienBlockers",
+                     "relationBlockers",
+                     "optionalWarnings",
+                     "executableDomains",
+                     "skippedDomains",
+                 })
+        {
+            Assert.Contains(field, types, StringComparison.Ordinal);
+            Assert.Contains($"value.{field}", api, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("'HOC_VIEN'", types, StringComparison.Ordinal);
+        Assert.Contains("'KHOA_HOC'", types, StringComparison.Ordinal);
+        Assert.Contains("'GIAO_VIEN'", types, StringComparison.Ordinal);
+        Assert.Contains("'KHOA_HOC_GIAO_VIEN'", types, StringComparison.Ordinal);
+        foreach (var statusField in new[]
+                 {
+                     "hocVienStatus",
+                     "khoaHocStatus",
+                     "giaoVienStatus",
+                     "relationStatus",
+                 })
+        {
+            Assert.Contains(statusField, types, StringComparison.Ordinal);
+            Assert.Contains($"value.{statusField}", api, StringComparison.Ordinal);
+        }
+        Assert.Contains("'SKIPPED_SCHEMA_NOT_READY'", types, StringComparison.Ordinal);
+        Assert.Contains("domainResults: QlhvImportDomainResult[]", types, StringComparison.Ordinal);
+        Assert.Contains("value.domainResults.every(isImportDomainResult)", api, StringComparison.Ordinal);
+        Assert.Contains("'khoaHocGiaoVien'", api, StringComparison.Ordinal);
+
+        Assert.Contains("plan.data.hocVienBlockers.length === 0", logic, StringComparison.Ordinal);
+        Assert.Contains("plan.data.executableDomains.includes('HOC_VIEN')", logic, StringComparison.Ordinal);
+        Assert.Contains("plan.data.hocVien.duplicateSourceKeys === 0", logic, StringComparison.Ordinal);
+        Assert.DoesNotContain("plan.data.relationConflicts === 0", logic, StringComparison.Ordinal);
+        Assert.DoesNotContain("plan.data.khoaHocBlockers.length === 0", logic, StringComparison.Ordinal);
+        Assert.DoesNotContain("plan.data.giaoVienBlockers.length === 0", logic, StringComparison.Ordinal);
+        Assert.DoesNotContain("plan.data.relationBlockers.length === 0", logic, StringComparison.Ordinal);
+
+        Assert.Contains(
+            "Đợt đồng bộ này sẽ cập nhật Học viên. Khóa học/Giáo viên chưa sẵn sàng sẽ được bỏ qua và không bị xóa.",
+            page,
+            StringComparison.Ordinal);
+        Assert.Contains("Đồng bộ hoàn tất một phần", page, StringComparison.Ordinal);
+        Assert.Contains("PARTIAL_SUCCESS", page, StringComparison.Ordinal);
+        Assert.Contains("failedAfterWrite", page, StringComparison.Ordinal);
+        Assert.Contains(
+            "status.trim().toUpperCase() === 'FAILED'",
+            page,
+            StringComparison.Ordinal);
+        Assert.Contains("Tạm bỏ qua", page, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -131,8 +205,10 @@ public sealed class QlhvImportClientSafetySourceTests
         Assert.Contains("!isOperationBusy(status)", logic, StringComparison.Ordinal);
         Assert.Contains("!busy", logic, StringComparison.Ordinal);
         Assert.Contains("isPlanSnapshotCurrent(plan.data, status)", logic, StringComparison.Ordinal);
-        Assert.Contains("plan.data.duplicateSourceKeys === 0", logic, StringComparison.Ordinal);
-        Assert.Contains("plan.data.relationConflicts === 0", logic, StringComparison.Ordinal);
+        Assert.Contains("plan.data.hocVien.duplicateSourceKeys === 0", logic, StringComparison.Ordinal);
+        Assert.Contains("plan.data.hocVienBlockers.length === 0", logic, StringComparison.Ordinal);
+        Assert.Contains("plan.data.executableDomains.includes('HOC_VIEN')", logic, StringComparison.Ordinal);
+        Assert.DoesNotContain("plan.data.relationConflicts === 0", logic, StringComparison.Ordinal);
 
         Assert.Contains("Bạn không có quyền Admin.", logic, StringComparison.Ordinal);
         Assert.Contains("Chế độ DryRun đang bật.", logic, StringComparison.Ordinal);
@@ -142,8 +218,8 @@ public sealed class QlhvImportClientSafetySourceTests
         Assert.Contains("Cần lập kế hoạch mới trước khi đồng bộ.", logic, StringComparison.Ordinal);
         Assert.Contains("Kế hoạch không khớp nguồn hiện tại", logic, StringComparison.Ordinal);
         Assert.Contains("Snapshot BAK đã thay đổi hoặc chưa có token", logic, StringComparison.Ordinal);
-        Assert.Contains("Nguồn có khóa định danh trùng", logic, StringComparison.Ordinal);
-        Assert.Contains("Nguồn có xung đột quan hệ giáo viên – khóa học", logic, StringComparison.Ordinal);
+        Assert.Contains("Nguồn Học viên có khóa định danh trùng", logic, StringComparison.Ordinal);
+        Assert.DoesNotContain("Nguồn có xung đột quan hệ giáo viên – khóa học", logic, StringComparison.Ordinal);
         Assert.Contains("status.refreshBlockers[0]", logic, StringComparison.Ordinal);
         Assert.Contains("status.syncBlockers[0]", logic, StringComparison.Ordinal);
 

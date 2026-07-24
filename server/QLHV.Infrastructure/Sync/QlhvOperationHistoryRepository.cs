@@ -177,6 +177,15 @@ public sealed class QlhvOperationHistoryRepository : IQlhvOperationHistoryReposi
             new { SourceType = sourceType, OperationType = operationType },
             cancellationToken);
 
+    public Task<QlhvOperationHistoryDto?> GetLatestSuccessfulAsync(
+        string sourceType,
+        string operationType,
+        CancellationToken cancellationToken = default)
+        => GetSingleAsync(
+            LatestSuccessfulSql,
+            new { SourceType = sourceType, OperationType = operationType },
+            cancellationToken);
+
     private async Task<QlhvOperationHistoryDto?> GetSingleAsync(
         string sql,
         object parameters,
@@ -303,6 +312,13 @@ ORDER BY CreatedAtUtc DESC, Id DESC;";
 FROM dbo.App_QlhvSyncOperationHistory
 WHERE SourceType = @SourceType
   AND OperationType = @OperationType
-  AND Status IN (N'SUCCEEDED', N'FAILED')
+  AND Status IN (N'SUCCEEDED', N'PARTIAL_SUCCESS', N'FAILED')
+ORDER BY CompletedAtUtc DESC, Id DESC;";
+
+    private const string LatestSuccessfulSql = "SELECT TOP (1) " + Projection + @"
+FROM dbo.App_QlhvSyncOperationHistory
+WHERE SourceType = @SourceType
+  AND OperationType = @OperationType
+  AND Status IN (N'SUCCEEDED', N'PARTIAL_SUCCESS')
 ORDER BY CompletedAtUtc DESC, Id DESC;";
 }
