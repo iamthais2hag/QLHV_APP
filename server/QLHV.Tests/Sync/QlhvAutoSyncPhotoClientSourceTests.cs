@@ -9,7 +9,8 @@ public sealed class QlhvAutoSyncPhotoClientSourceTests
     {
         var api = ReadClientFile("features", "qlhv-import", "api.ts");
         var panel = ReadClientFile("features", "qlhv-import", "AutoSyncPanel.tsx");
-        var combined = string.Join('\n', api, panel);
+        var page = ReadClientFile("features", "qlhv-import", "QlhvImportPage.tsx");
+        var combined = string.Join('\n', api, panel, page);
 
         Assert.Contains("/operations/auto-sync/status", api, StringComparison.Ordinal);
         Assert.Contains("/operations/auto-sync`", api, StringComparison.Ordinal);
@@ -24,14 +25,28 @@ public sealed class QlhvAutoSyncPhotoClientSourceTests
         Assert.Contains("SYSTEM_SESSION_START", panel, StringComparison.Ordinal);
         Assert.Contains("sessionStartRunId", panel, StringComparison.Ordinal);
         Assert.Contains("trackedSessionRunId", panel, StringComparison.Ordinal);
+        Assert.Contains("manualRunId", panel, StringComparison.Ordinal);
+        Assert.Contains("setManualRunId(result.runId)", panel, StringComparison.Ordinal);
+        Assert.Contains("const trackedRunId = manualRunId ?? trackedSessionRunId", panel, StringComparison.Ordinal);
         Assert.Contains("currentStage", panel, StringComparison.Ordinal);
-        Assert.Contains("waitingForExpectedSession", panel, StringComparison.Ordinal);
-        Assert.Contains("const shouldPoll = running || waitingForExpectedSession", panel, StringComparison.Ordinal);
-        Assert.Contains("notifiedTerminalRunRef.current = trackedSessionRunId", panel, StringComparison.Ordinal);
-        Assert.Contains("getQlhvAutoSyncStatus(trackedSessionRunId)", panel, StringComparison.Ordinal);
+        Assert.Contains("waitingForTrackedRun", panel, StringComparison.Ordinal);
+        Assert.Contains("const shouldPoll = running || waitingForTrackedRun", panel, StringComparison.Ordinal);
+        Assert.Contains("shouldPoll ? POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS", panel, StringComparison.Ordinal);
+        Assert.Contains("notifiedTerminalRunRef.current = trackedRunId", panel, StringComparison.Ordinal);
+        Assert.Contains("getQlhvAutoSyncStatus(requestedRunId)", panel, StringComparison.Ordinal);
         Assert.Contains("parameters.set('runId', runId)", api, StringComparison.Ordinal);
-        Assert.Contains("status.found", panel, StringComparison.Ordinal);
-        Assert.Contains("loadInFlightRef.current", panel, StringComparison.Ordinal);
+        Assert.Contains("trackedStatus.found", panel, StringComparison.Ordinal);
+        Assert.Contains("statusQueryRunId === trackedRunId", panel, StringComparison.Ordinal);
+        Assert.Contains("requestId !== loadRequestIdRef.current", panel, StringComparison.Ordinal);
+        Assert.Contains("onBusyChange?.(busy)", panel, StringComparison.Ordinal);
+        Assert.Contains("AUTO_SYNC_BUSY_MESSAGE", page, StringComparison.Ordinal);
+        Assert.Contains("onBusyChange={handleAutoSyncBusyChange}", page, StringComparison.Ordinal);
+        Assert.Contains("if (autoSyncBusy)", page, StringComparison.Ordinal);
+        Assert.Contains("await dataVersion.reload()", page, StringComparison.Ordinal);
+        Assert.Contains(
+            "writeBlockedReason={autoSyncBusy ? AUTO_SYNC_BUSY_MESSAGE : null}",
+            page,
+            StringComparison.Ordinal);
         Assert.DoesNotContain("setStatus(null)", panel, StringComparison.Ordinal);
         Assert.DoesNotContain("Operations-Key", combined, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("confirmText", combined, StringComparison.OrdinalIgnoreCase);
@@ -96,7 +111,11 @@ public sealed class QlhvAutoSyncPhotoClientSourceTests
         Assert.Contains("Thất bại", panel, StringComparison.Ordinal);
         Assert.Contains("Cần kiểm tra", panel, StringComparison.Ordinal);
         Assert.Contains("Viewer chỉ được xem ảnh", panel, StringComparison.Ordinal);
-        Assert.Contains("disabled={!isAdmin || pending", panel, StringComparison.Ordinal);
+        Assert.Contains("writeBlockedReason", panel, StringComparison.Ordinal);
+        Assert.Contains(
+            "disabled={!isAdmin || !!writeBlockedReason || pending",
+            panel,
+            StringComparison.Ordinal);
         Assert.Contains("!data.engineReady || !canApprove(item)", panel, StringComparison.Ordinal);
         Assert.Contains("pendingIds.has(item.id)", panel, StringComparison.Ordinal);
         Assert.Contains("pendingIdsRef.current.has(item.id)", panel, StringComparison.Ordinal);

@@ -62,27 +62,19 @@ Bấm shortcut Desktop **QLHV Thành Công**. Launcher:
 2. lấy mutex cùng file lock cross-session, rồi kiểm tra process/PID và port 8088;
 3. nếu server chưa chạy, khởi động đúng một process; nếu server đã chạy thì giữ nguyên PID, không restart và không dừng `dotnet.exe`;
 4. chờ `GET /health/live`, sau đó `GET /health/ready`;
-5. gọi `GET /api/dong-bo-v2/qlhv/operations/session-start-sync/status` để backend
-   quyết định `NeedSync`;
-6. chỉ khi `NeedSync=true` mới gọi
-   `POST /api/dong-bo-v2/qlhv/operations/session-start-sync`;
-7. tạo hoặc tham gia một phiên đồng bộ tuần tự OTO rồi MOTO, theo dõi đúng `runId`
-   đến khi operation kết thúc;
-8. sau khi chờ xong mới mở `/qlhv-import`; trang này tải dữ liệu đã commit mới nhất
-   và hiển thị rõ lỗi nếu operation không thành công.
+5. mở ngay `/qlhv-import` sau khi server sẵn sàng.
 
-Nếu backend trả `NeedSync=false`, launcher không POST lần nữa mà tham gia/chờ
-operation đang chạy hoặc operation startup vừa hoàn tất.
+Launcher không đọc `NeedSync`, không yêu cầu `runId`, không gọi POST
+`session-start-sync` và không chờ Auto Sync. Vì vậy endpoint trạng thái operation
+không hoạt động cũng không thể giữ cửa sổ ở vòng lặp thử lại. Nếu readiness hết thời
+gian nhưng process vẫn live, launcher ghi/báo cảnh báo và vẫn mở ứng dụng để đăng
+nhập, xem trạng thái và chẩn đoán. Hành vi tương đương là: ứng dụng được mở ngay khi
+có thể; bấm lại icon để thử lại; đóng cửa sổ ứng dụng/thông báo để kết thúc.
 
-Cầu nối session-start không dùng cookie Admin và không dùng Operations key. Nó chỉ
-chấp nhận kết nối loopback kèm marker riêng của launcher; máy trạm trong LAN không
-thể gọi endpoint này. Actor được ghi là `SYSTEM_SESSION_START`. Nếu startup Auto
-Sync hoặc một launcher khác đang chạy, lần bấm icon hiện tại tham gia operation đó,
-không tạo operation thứ hai.
-
-Nếu session sync thất bại, server và ứng dụng vẫn chạy bằng dữ liệu commit gần
-nhất. Trang Đồng bộ dữ liệu CSĐT hiển thị nguồn lỗi và thời điểm sync thành công
-gần nhất; nó không thông báo nhầm rằng dữ liệu cũ vừa được cập nhật.
+Auto Sync startup và nút Auto Sync của Admin là các luồng backend độc lập. Lỗi Auto
+Sync không làm server dừng, không chặn đăng nhập hoặc mở ứng dụng. Trang Đồng bộ dữ
+liệu CSĐT hiển thị operation đang chạy, nguồn lỗi và thời điểm sync thành công gần
+nhất.
 
 Nếu port 8088 thuộc process khác, launcher báo rõ PID và không khởi động QLHV.
 Nếu đã có process QLHV nhưng readiness chưa đạt, launcher không restart hoặc dừng
@@ -171,13 +163,18 @@ It is forced back to disabled unless the configured model, SHA-256, accepted SPD
 license, license manifest, and manifest SHA-256 all validate. Production Local files,
 their backups, models, and real photos remain outside Git.
 
-The daily launcher uses bounded GET retries. It joins `activeRunId` when an operation
-is already active. If `NeedSync=false` and no run is active, it opens the application
-without requiring a `runId`. It sends the session-start POST at most once. If that
-POST times out or returns an ambiguous response, the launcher reconciles via GET and
-joins the run found by the backend; it never blindly resends the POST.
+The daily launcher only settles one runtime process and bounded liveness/readiness,
+then opens `/qlhv-import`. An existing healthy runtime keeps the same PID; a missing
+runtime is started once under the cross-session launcher locks. Desktop launch does
+not read `NeedSync`, require a `runId`, call the session-start POST, or wait for Auto
+Sync. Consequently a missing/failed operation-status endpoint cannot hold the
+browser in a retry loop. If bounded readiness fails while the process is still live,
+the launcher reports/logs the warning and still opens the application for login and
+diagnosis. This non-blocking rule supersedes the earlier session-coordination daily
+launch sequence.
 
 Refresh BAK và full sync có thể được Admin chủ động chạy trong ứng dụng, hoặc được
 orchestrator Auto Sync gọi theo guard hiện có. Launcher không gọi trực tiếp endpoint
-`refresh-backup` hay `import-execute`; nó chỉ gọi cầu nối localhost session-start,
-để backend áp dụng cùng lock, snapshot token, transaction và duplicate guards.
+`refresh-backup`, `import-execute` hay `session-start-sync`. Backend vẫn áp dụng
+durable active slot, applock, snapshot token, transaction và duplicate guards cho
+các luồng Auto Sync độc lập.

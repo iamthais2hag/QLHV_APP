@@ -46,6 +46,7 @@ public sealed class ClientAuthorizationSourceTests
         var app = ReadClientFile("App.tsx");
         var menu = ReadClientFile("navigation", "menu.ts");
         var page = ReadClientFile("features", "qlhv-import", "QlhvImportPage.tsx");
+        var autoSyncPanel = ReadClientFile("features", "qlhv-import", "AutoSyncPanel.tsx");
 
         Assert.Contains("return item.path === '/qlhv-import'", menu, StringComparison.Ordinal);
         Assert.Contains("user.role === 'Admin' ? <Dashboard /> : viewerRedirect", app, StringComparison.Ordinal);
@@ -55,6 +56,8 @@ public sealed class ClientAuthorizationSourceTests
         Assert.Contains("refreshReason={!isAdmin", page, StringComparison.Ordinal);
         Assert.Contains("executeReason={!isAdmin", page, StringComparison.Ordinal);
         Assert.Contains("if (!isAdmin)", page, StringComparison.Ordinal);
+        Assert.Contains("if (!isAdmin) return 'Bạn không có quyền thực hiện: cần vai trò Admin.'", autoSyncPanel, StringComparison.Ordinal);
+        Assert.Contains("disabled={disabledReason !== null}", autoSyncPanel, StringComparison.Ordinal);
     }
 
     [Fact]

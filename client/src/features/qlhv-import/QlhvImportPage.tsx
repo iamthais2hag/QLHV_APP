@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { useDataVersionRefresh } from '../data-version/useDataVersionRefresh';
@@ -44,6 +44,7 @@ const DATE_FORMAT = new Intl.DateTimeFormat('vi-VN', {
 });
 const POLL_INTERVAL_MS = 2_500;
 const NO_WRITE_PERMISSION_MESSAGE = 'Bạn không có quyền thực hiện: bạn không có quyền Admin';
+const AUTO_SYNC_BUSY_MESSAGE = 'Auto Sync đang chạy; các thao tác ghi tạm thời bị khóa.';
 
 type QlhvImportLastResult = QlhvImportSnapshot<QlhvImportExecuteResult> & {
   outcomeKind: 'executed' | 'blocked';
@@ -105,6 +106,10 @@ export default function QlhvImportPage() {
     MOTO: createEmptySourceState(),
   });
   const [contentReloadToken, setContentReloadToken] = useState(0);
+  const [autoSyncBusy, setAutoSyncBusy] = useState(false);
+  const handleAutoSyncBusyChange = useCallback((busy: boolean) => {
+    setAutoSyncBusy(busy);
+  }, []);
 
   function patchSource(sourceKind: QlhvImportSourceKind, patch: Partial<SourceViewState>) {
     setSources((current) => ({
@@ -324,6 +329,10 @@ export default function QlhvImportPage() {
       patchSource(sourceKind, { operationError: NO_WRITE_PERMISSION_MESSAGE });
       return;
     }
+    if (autoSyncBusy) {
+      patchSource(sourceKind, { operationError: AUTO_SYNC_BUSY_MESSAGE });
+      return;
+    }
 
     const body = buildRefreshRequest(sourceKind);
     if (getRefreshDisabledReason(
@@ -359,6 +368,10 @@ export default function QlhvImportPage() {
     setActiveSource(sourceKind);
     if (!isAdmin) {
       patchSource(sourceKind, { operationError: NO_WRITE_PERMISSION_MESSAGE });
+      return;
+    }
+    if (autoSyncBusy) {
+      patchSource(sourceKind, { operationError: AUTO_SYNC_BUSY_MESSAGE });
       return;
     }
 
@@ -445,6 +458,8 @@ export default function QlhvImportPage() {
     || !!active.pendingOperationId;
   const activeExecuteReason = !isAdmin
     ? NO_WRITE_PERMISSION_MESSAGE
+    : autoSyncBusy
+      ? AUTO_SYNC_BUSY_MESSAGE
     : getExecuteDisabledReason(
         active.plan,
         activeRequest,
@@ -495,8 +510,9 @@ export default function QlhvImportPage() {
         operationBlocker={autoSyncOperationBlocker}
         operationHistory={combinedHistory}
         reloadToken={contentReloadToken}
+        onBusyChange={handleAutoSyncBusyChange}
         onAccepted={async () => {
-          await reloadVisibleData();
+          await dataVersion.reload();
         }}
         sessionStartRunId={sessionStartRunId}
         sessionStartRequestFailed={sessionStartRequestFailed}
@@ -514,6 +530,8 @@ export default function QlhvImportPage() {
               selected={activeSource === sourceKind}
               executeReason={!isAdmin
                 ? NO_WRITE_PERMISSION_MESSAGE
+                : autoSyncBusy
+                  ? AUTO_SYNC_BUSY_MESSAGE
                 : getExecuteDisabledReason(
                     state.plan,
                     request,
@@ -522,6 +540,8 @@ export default function QlhvImportPage() {
                   )}
               refreshReason={!isAdmin
                 ? NO_WRITE_PERMISSION_MESSAGE
+                : autoSyncBusy
+                  ? AUTO_SYNC_BUSY_MESSAGE
                 : getRefreshDisabledReason(
                     state.status,
                     sourceKind,
@@ -619,6 +639,7 @@ export default function QlhvImportPage() {
         isAdmin={isAdmin}
         photoVersion={dataVersion.version?.photoVersion}
         reloadToken={contentReloadToken}
+        writeBlockedReason={autoSyncBusy ? AUTO_SYNC_BUSY_MESSAGE : null}
       />
 
     </div>
