@@ -1,5 +1,15 @@
 USE [QLHV_APP];
 GO
+
+SET ANSI_NULLS ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_PADDING ON;
+SET ANSI_WARNINGS ON;
+SET ARITHABORT ON;
+SET CONCAT_NULL_YIELDS_NULL ON;
+SET NUMERIC_ROUNDABORT OFF;
+GO
+
 SET XACT_ABORT ON;
 GO
 
@@ -47,7 +57,8 @@ BEGIN TRY
         SELECT 1 FROM sys.columns
         WHERE object_id = OBJECT_ID(N'dbo.App_GiaoVien')
           AND name = N'HangGPLX'
-          AND max_length < 200)
+          AND max_length <> -1
+          AND (system_type_id <> TYPE_ID(N'nvarchar') OR max_length < 200 OR is_nullable = 0))
         ALTER TABLE dbo.App_GiaoVien ALTER COLUMN HangGPLX NVARCHAR(100) NULL;
     IF COL_LENGTH(N'dbo.App_GiaoVien', N'NoiCtMaDvhc') IS NULL ALTER TABLE dbo.App_GiaoVien ADD NoiCtMaDvhc NVARCHAR(5) NULL;
     IF COL_LENGTH(N'dbo.App_GiaoVien', N'NoiCtMaDvql') IS NULL ALTER TABLE dbo.App_GiaoVien ADD NoiCtMaDvql NVARCHAR(5) NULL;
@@ -88,50 +99,147 @@ BEGIN TRY
         ALTER TABLE dbo.App_KhoaHoc_GiaoVien ADD CreatedAtUtc DATETIME2(0) NOT NULL CONSTRAINT DF_App_KhoaHoc_GiaoVien_CreatedAtUtc DEFAULT SYSUTCDATETIME() WITH VALUES;
     IF COL_LENGTH(N'dbo.App_KhoaHoc_GiaoVien', N'UpdatedAtUtc') IS NULL ALTER TABLE dbo.App_KhoaHoc_GiaoVien ADD UpdatedAtUtc DATETIME2(0) NULL;
 
-    IF OBJECT_ID(N'dbo.CK_App_KhoaHoc_SourceIdentity', N'C') IS NULL
-        ALTER TABLE dbo.App_KhoaHoc WITH CHECK ADD CONSTRAINT CK_App_KhoaHoc_SourceIdentity CHECK (
-            (SourceProfileCode IS NULL AND SourceMaKhoaHoc IS NULL AND SourceHash IS NULL)
-            OR (SourceProfileCode IN (N'CSDT_OTO', N'CSDT_MOTO') AND SourceMaKhoaHoc IS NOT NULL AND SourceHash IS NOT NULL));
-    IF OBJECT_ID(N'dbo.CK_App_GiaoVien_SourceIdentity', N'C') IS NULL
-        ALTER TABLE dbo.App_GiaoVien WITH CHECK ADD CONSTRAINT CK_App_GiaoVien_SourceIdentity CHECK (
-            (SourceProfileCode IS NULL AND SourceMaGV IS NULL AND SourceHash IS NULL)
-            OR (SourceProfileCode IN (N'CSDT_OTO', N'CSDT_MOTO') AND SourceMaGV IS NOT NULL AND SourceHash IS NOT NULL));
-    IF OBJECT_ID(N'dbo.CK_App_KhoaHoc_GiaoVien_SourceIdentity', N'C') IS NULL
-        ALTER TABLE dbo.App_KhoaHoc_GiaoVien WITH CHECK ADD CONSTRAINT CK_App_KhoaHoc_GiaoVien_SourceIdentity CHECK (
-            (SourceProfileCode IS NULL AND SourceMaLichLV IS NULL AND SourceMaKhoaHoc IS NULL AND SourceMaGV IS NULL AND SourceHash IS NULL)
-            OR (SourceProfileCode IN (N'CSDT_OTO', N'CSDT_MOTO') AND SourceMaLichLV IS NOT NULL AND SourceMaKhoaHoc IS NOT NULL AND SourceMaGV IS NOT NULL AND SourceHash IS NOT NULL));
+    /*
+       Compile post-ADD DDL only after the new columns exist. Keeping these
+       statements in dynamic batches avoids SQL Server binding first-run
+       constraint/index column references before the ALTER ADD statements run.
+    */
+    IF EXISTS (
+        SELECT 1
+        FROM (
+            VALUES
+                (N'dbo.App_KhoaHoc', N'SourceProfileCode', N'nvarchar', 100),
+                (N'dbo.App_KhoaHoc', N'SourceMaKhoaHoc', N'nvarchar', 100),
+                (N'dbo.App_KhoaHoc', N'SourceHash', N'nvarchar', 128),
+                (N'dbo.App_GiaoVien', N'SourceProfileCode', N'nvarchar', 100),
+                (N'dbo.App_GiaoVien', N'SourceMaGV', N'nvarchar', 40),
+                (N'dbo.App_GiaoVien', N'SourceHash', N'nvarchar', 128),
+                (N'dbo.App_KhoaHoc_GiaoVien', N'SourceProfileCode', N'nvarchar', 100),
+                (N'dbo.App_KhoaHoc_GiaoVien', N'SourceMaLichLV', N'bigint', 8),
+                (N'dbo.App_KhoaHoc_GiaoVien', N'SourceMaKhoaHoc', N'nvarchar', 100),
+                (N'dbo.App_KhoaHoc_GiaoVien', N'SourceMaGV', N'nvarchar', 40),
+                (N'dbo.App_KhoaHoc_GiaoVien', N'SourceHash', N'nvarchar', 128)
+        ) AS expectedColumn(TableName, ColumnName, TypeName, MaxLength)
+        LEFT JOIN sys.columns AS targetColumn
+            ON targetColumn.object_id = OBJECT_ID(expectedColumn.TableName, N'U')
+           AND targetColumn.name = expectedColumn.ColumnName
+        WHERE targetColumn.column_id IS NULL
+           OR TYPE_NAME(targetColumn.system_type_id) <> expectedColumn.TypeName
+           OR targetColumn.max_length <> expectedColumn.MaxLength
+           OR targetColumn.is_nullable <> 1
+           OR targetColumn.is_computed <> 0)
+        THROW 51000, N'Cot source identity ton tai nhung sai kieu, do dai, nullability hoac la computed column.', 1;
 
-    ALTER TABLE dbo.App_KhoaHoc WITH CHECK CHECK CONSTRAINT CK_App_KhoaHoc_SourceIdentity;
-    ALTER TABLE dbo.App_GiaoVien WITH CHECK CHECK CONSTRAINT CK_App_GiaoVien_SourceIdentity;
-    ALTER TABLE dbo.App_KhoaHoc_GiaoVien WITH CHECK CHECK CONSTRAINT CK_App_KhoaHoc_GiaoVien_SourceIdentity;
+    IF EXISTS (
+        SELECT 1 FROM sys.check_constraints
+        WHERE name = N'CK_App_KhoaHoc_SourceIdentity'
+          AND schema_id = SCHEMA_ID(N'dbo')
+          AND parent_object_id <> OBJECT_ID(N'dbo.App_KhoaHoc'))
+        THROW 51000, N'CK_App_KhoaHoc_SourceIdentity ton tai tren sai bang.', 1;
+    IF EXISTS (
+        SELECT 1 FROM sys.check_constraints
+        WHERE name = N'CK_App_GiaoVien_SourceIdentity'
+          AND schema_id = SCHEMA_ID(N'dbo')
+          AND parent_object_id <> OBJECT_ID(N'dbo.App_GiaoVien'))
+        THROW 51000, N'CK_App_GiaoVien_SourceIdentity ton tai tren sai bang.', 1;
+    IF EXISTS (
+        SELECT 1 FROM sys.check_constraints
+        WHERE name = N'CK_App_KhoaHoc_GiaoVien_SourceIdentity'
+          AND schema_id = SCHEMA_ID(N'dbo')
+          AND parent_object_id <> OBJECT_ID(N'dbo.App_KhoaHoc_GiaoVien'))
+        THROW 51000, N'CK_App_KhoaHoc_GiaoVien_SourceIdentity ton tai tren sai bang.', 1;
+
+    /*
+       Recreate the named checks inside the transaction so an idempotent rerun
+       also repairs an old same-name constraint with a stale definition.
+    */
+    IF OBJECT_ID(N'dbo.CK_App_KhoaHoc_SourceIdentity', N'C') IS NOT NULL
+        EXEC sys.sp_executesql N'ALTER TABLE dbo.App_KhoaHoc DROP CONSTRAINT CK_App_KhoaHoc_SourceIdentity;';
+    EXEC sys.sp_executesql N'
+        ALTER TABLE dbo.App_KhoaHoc WITH CHECK
+        ADD CONSTRAINT CK_App_KhoaHoc_SourceIdentity CHECK (
+            (SourceProfileCode IS NULL AND SourceMaKhoaHoc IS NULL AND SourceHash IS NULL)
+            OR (SourceProfileCode IN (N''CSDT_OTO'', N''CSDT_MOTO'') AND SourceMaKhoaHoc IS NOT NULL AND SourceHash IS NOT NULL));';
+
+    IF OBJECT_ID(N'dbo.CK_App_GiaoVien_SourceIdentity', N'C') IS NOT NULL
+        EXEC sys.sp_executesql N'ALTER TABLE dbo.App_GiaoVien DROP CONSTRAINT CK_App_GiaoVien_SourceIdentity;';
+    EXEC sys.sp_executesql N'
+        ALTER TABLE dbo.App_GiaoVien WITH CHECK
+        ADD CONSTRAINT CK_App_GiaoVien_SourceIdentity CHECK (
+            (SourceProfileCode IS NULL AND SourceMaGV IS NULL AND SourceHash IS NULL)
+            OR (SourceProfileCode IN (N''CSDT_OTO'', N''CSDT_MOTO'') AND SourceMaGV IS NOT NULL AND SourceHash IS NOT NULL));';
+
+    IF OBJECT_ID(N'dbo.CK_App_KhoaHoc_GiaoVien_SourceIdentity', N'C') IS NOT NULL
+        EXEC sys.sp_executesql N'ALTER TABLE dbo.App_KhoaHoc_GiaoVien DROP CONSTRAINT CK_App_KhoaHoc_GiaoVien_SourceIdentity;';
+    EXEC sys.sp_executesql N'
+        ALTER TABLE dbo.App_KhoaHoc_GiaoVien WITH CHECK
+        ADD CONSTRAINT CK_App_KhoaHoc_GiaoVien_SourceIdentity CHECK (
+            (SourceProfileCode IS NULL AND SourceMaLichLV IS NULL AND SourceMaKhoaHoc IS NULL AND SourceMaGV IS NULL AND SourceHash IS NULL)
+            OR (SourceProfileCode IN (N''CSDT_OTO'', N''CSDT_MOTO'') AND SourceMaLichLV IS NOT NULL AND SourceMaKhoaHoc IS NOT NULL AND SourceMaGV IS NOT NULL AND SourceHash IS NOT NULL));';
+
+    EXEC sys.sp_executesql N'ALTER TABLE dbo.App_KhoaHoc WITH CHECK CHECK CONSTRAINT CK_App_KhoaHoc_SourceIdentity;';
+    EXEC sys.sp_executesql N'ALTER TABLE dbo.App_GiaoVien WITH CHECK CHECK CONSTRAINT CK_App_GiaoVien_SourceIdentity;';
+    EXEC sys.sp_executesql N'ALTER TABLE dbo.App_KhoaHoc_GiaoVien WITH CHECK CHECK CONSTRAINT CK_App_KhoaHoc_GiaoVien_SourceIdentity;';
+
+    IF EXISTS (
+        SELECT 1
+        FROM (
+            VALUES
+                (N'CK_App_KhoaHoc_SourceIdentity', N'dbo.App_KhoaHoc'),
+                (N'CK_App_GiaoVien_SourceIdentity', N'dbo.App_GiaoVien'),
+                (N'CK_App_KhoaHoc_GiaoVien_SourceIdentity', N'dbo.App_KhoaHoc_GiaoVien')
+        ) AS expectedConstraint(ConstraintName, TableName)
+        LEFT JOIN sys.check_constraints AS targetConstraint
+            ON targetConstraint.name = expectedConstraint.ConstraintName
+           AND targetConstraint.parent_object_id = OBJECT_ID(expectedConstraint.TableName)
+        WHERE targetConstraint.object_id IS NULL
+           OR targetConstraint.is_disabled <> 0
+           OR targetConstraint.is_not_trusted <> 0)
+        THROW 51000, N'CHECK constraint source identity thieu, disabled hoac khong trusted.', 1;
 
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.App_KhoaHoc') AND name = N'UX_App_KhoaHoc_SourceIdentity')
-        CREATE UNIQUE NONCLUSTERED INDEX UX_App_KhoaHoc_SourceIdentity
+        EXEC sys.sp_executesql N'
+            CREATE UNIQUE NONCLUSTERED INDEX UX_App_KhoaHoc_SourceIdentity
             ON dbo.App_KhoaHoc(SourceProfileCode, SourceMaKhoaHoc)
-            WHERE SourceProfileCode IS NOT NULL AND SourceMaKhoaHoc IS NOT NULL;
+            WHERE SourceProfileCode IS NOT NULL AND SourceMaKhoaHoc IS NOT NULL;';
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.App_GiaoVien') AND name = N'UX_App_GiaoVien_SourceIdentity')
-        CREATE UNIQUE NONCLUSTERED INDEX UX_App_GiaoVien_SourceIdentity
+        EXEC sys.sp_executesql N'
+            CREATE UNIQUE NONCLUSTERED INDEX UX_App_GiaoVien_SourceIdentity
             ON dbo.App_GiaoVien(SourceProfileCode, SourceMaGV)
-            WHERE SourceProfileCode IS NOT NULL AND SourceMaGV IS NOT NULL;
+            WHERE SourceProfileCode IS NOT NULL AND SourceMaGV IS NOT NULL;';
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.App_KhoaHoc_GiaoVien') AND name = N'UX_App_KhoaHoc_GiaoVien_SourceIdentity')
-        CREATE UNIQUE NONCLUSTERED INDEX UX_App_KhoaHoc_GiaoVien_SourceIdentity
+        EXEC sys.sp_executesql N'
+            CREATE UNIQUE NONCLUSTERED INDEX UX_App_KhoaHoc_GiaoVien_SourceIdentity
             ON dbo.App_KhoaHoc_GiaoVien(SourceProfileCode, SourceMaLichLV)
-            WHERE SourceProfileCode IS NOT NULL AND SourceMaLichLV IS NOT NULL;
+            WHERE SourceProfileCode IS NOT NULL AND SourceMaLichLV IS NOT NULL;';
 
     IF EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.App_KhoaHoc') AND name = N'UX_App_KhoaHoc_SourceIdentity' AND is_disabled = 1)
-        ALTER INDEX UX_App_KhoaHoc_SourceIdentity ON dbo.App_KhoaHoc REBUILD;
+        EXEC sys.sp_executesql N'ALTER INDEX UX_App_KhoaHoc_SourceIdentity ON dbo.App_KhoaHoc REBUILD;';
     IF EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.App_GiaoVien') AND name = N'UX_App_GiaoVien_SourceIdentity' AND is_disabled = 1)
-        ALTER INDEX UX_App_GiaoVien_SourceIdentity ON dbo.App_GiaoVien REBUILD;
+        EXEC sys.sp_executesql N'ALTER INDEX UX_App_GiaoVien_SourceIdentity ON dbo.App_GiaoVien REBUILD;';
     IF EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.App_KhoaHoc_GiaoVien') AND name = N'UX_App_KhoaHoc_GiaoVien_SourceIdentity' AND is_disabled = 1)
-        ALTER INDEX UX_App_KhoaHoc_GiaoVien_SourceIdentity ON dbo.App_KhoaHoc_GiaoVien REBUILD;
+        EXEC sys.sp_executesql N'ALTER INDEX UX_App_KhoaHoc_GiaoVien_SourceIdentity ON dbo.App_KhoaHoc_GiaoVien REBUILD;';
+
+    DECLARE @KhoaHocIndexFilter nvarchar(max) = (
+        SELECT filter_definition FROM sys.indexes
+        WHERE object_id = OBJECT_ID(N'dbo.App_KhoaHoc') AND name = N'UX_App_KhoaHoc_SourceIdentity');
+    DECLARE @GiaoVienIndexFilter nvarchar(max) = (
+        SELECT filter_definition FROM sys.indexes
+        WHERE object_id = OBJECT_ID(N'dbo.App_GiaoVien') AND name = N'UX_App_GiaoVien_SourceIdentity');
+    DECLARE @RelationIndexFilter nvarchar(max) = (
+        SELECT filter_definition FROM sys.indexes
+        WHERE object_id = OBJECT_ID(N'dbo.App_KhoaHoc_GiaoVien') AND name = N'UX_App_KhoaHoc_GiaoVien_SourceIdentity');
+
+    SET @KhoaHocIndexFilter = LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(@KhoaHocIndexFilter, N''), N'[', N''), N']', N''), N'(', N''), N')', N''), N' ', N''), NCHAR(9), N''), NCHAR(10), N''), NCHAR(13), N''));
+    SET @GiaoVienIndexFilter = LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(@GiaoVienIndexFilter, N''), N'[', N''), N']', N''), N'(', N''), N')', N''), N' ', N''), NCHAR(9), N''), NCHAR(10), N''), NCHAR(13), N''));
+    SET @RelationIndexFilter = LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(@RelationIndexFilter, N''), N'[', N''), N']', N''), N'(', N''), N')', N''), N' ', N''), NCHAR(9), N''), NCHAR(10), N''), NCHAR(13), N''));
 
     IF NOT EXISTS (
         SELECT 1 FROM sys.indexes AS targetIndex
         WHERE targetIndex.object_id = OBJECT_ID(N'dbo.App_KhoaHoc')
           AND targetIndex.name = N'UX_App_KhoaHoc_SourceIdentity'
           AND targetIndex.is_unique = 1 AND targetIndex.is_disabled = 0 AND targetIndex.has_filter = 1
-          AND CHARINDEX(N'SourceProfileCode', targetIndex.filter_definition) > 0
-          AND CHARINDEX(N'SourceMaKhoaHoc', targetIndex.filter_definition) > 0
+          AND @KhoaHocIndexFilter = N'sourceprofilecodeisnotnullandsourcemakhoahocisnotnull'
           AND (SELECT COUNT(1) FROM sys.index_columns AS keyColumn WHERE keyColumn.object_id = targetIndex.object_id AND keyColumn.index_id = targetIndex.index_id AND keyColumn.key_ordinal > 0) = 2
           AND EXISTS (SELECT 1 FROM sys.index_columns AS keyColumn INNER JOIN sys.columns AS targetColumn ON targetColumn.object_id = keyColumn.object_id AND targetColumn.column_id = keyColumn.column_id WHERE keyColumn.object_id = targetIndex.object_id AND keyColumn.index_id = targetIndex.index_id AND keyColumn.key_ordinal = 1 AND targetColumn.name = N'SourceProfileCode')
           AND EXISTS (SELECT 1 FROM sys.index_columns AS keyColumn INNER JOIN sys.columns AS targetColumn ON targetColumn.object_id = keyColumn.object_id AND targetColumn.column_id = keyColumn.column_id WHERE keyColumn.object_id = targetIndex.object_id AND keyColumn.index_id = targetIndex.index_id AND keyColumn.key_ordinal = 2 AND targetColumn.name = N'SourceMaKhoaHoc'))
@@ -141,8 +249,7 @@ BEGIN TRY
         WHERE targetIndex.object_id = OBJECT_ID(N'dbo.App_GiaoVien')
           AND targetIndex.name = N'UX_App_GiaoVien_SourceIdentity'
           AND targetIndex.is_unique = 1 AND targetIndex.is_disabled = 0 AND targetIndex.has_filter = 1
-          AND CHARINDEX(N'SourceProfileCode', targetIndex.filter_definition) > 0
-          AND CHARINDEX(N'SourceMaGV', targetIndex.filter_definition) > 0
+          AND @GiaoVienIndexFilter = N'sourceprofilecodeisnotnullandsourcemagvisnotnull'
           AND (SELECT COUNT(1) FROM sys.index_columns AS keyColumn WHERE keyColumn.object_id = targetIndex.object_id AND keyColumn.index_id = targetIndex.index_id AND keyColumn.key_ordinal > 0) = 2
           AND EXISTS (SELECT 1 FROM sys.index_columns AS keyColumn INNER JOIN sys.columns AS targetColumn ON targetColumn.object_id = keyColumn.object_id AND targetColumn.column_id = keyColumn.column_id WHERE keyColumn.object_id = targetIndex.object_id AND keyColumn.index_id = targetIndex.index_id AND keyColumn.key_ordinal = 1 AND targetColumn.name = N'SourceProfileCode')
           AND EXISTS (SELECT 1 FROM sys.index_columns AS keyColumn INNER JOIN sys.columns AS targetColumn ON targetColumn.object_id = keyColumn.object_id AND targetColumn.column_id = keyColumn.column_id WHERE keyColumn.object_id = targetIndex.object_id AND keyColumn.index_id = targetIndex.index_id AND keyColumn.key_ordinal = 2 AND targetColumn.name = N'SourceMaGV'))
@@ -152,8 +259,7 @@ BEGIN TRY
         WHERE targetIndex.object_id = OBJECT_ID(N'dbo.App_KhoaHoc_GiaoVien')
           AND targetIndex.name = N'UX_App_KhoaHoc_GiaoVien_SourceIdentity'
           AND targetIndex.is_unique = 1 AND targetIndex.is_disabled = 0 AND targetIndex.has_filter = 1
-          AND CHARINDEX(N'SourceProfileCode', targetIndex.filter_definition) > 0
-          AND CHARINDEX(N'SourceMaLichLV', targetIndex.filter_definition) > 0
+          AND @RelationIndexFilter = N'sourceprofilecodeisnotnullandsourcemalichlvisnotnull'
           AND (SELECT COUNT(1) FROM sys.index_columns AS keyColumn WHERE keyColumn.object_id = targetIndex.object_id AND keyColumn.index_id = targetIndex.index_id AND keyColumn.key_ordinal > 0) = 2
           AND EXISTS (SELECT 1 FROM sys.index_columns AS keyColumn INNER JOIN sys.columns AS targetColumn ON targetColumn.object_id = keyColumn.object_id AND targetColumn.column_id = keyColumn.column_id WHERE keyColumn.object_id = targetIndex.object_id AND keyColumn.index_id = targetIndex.index_id AND keyColumn.key_ordinal = 1 AND targetColumn.name = N'SourceProfileCode')
           AND EXISTS (SELECT 1 FROM sys.index_columns AS keyColumn INNER JOIN sys.columns AS targetColumn ON targetColumn.object_id = keyColumn.object_id AND targetColumn.column_id = keyColumn.column_id WHERE keyColumn.object_id = targetIndex.object_id AND keyColumn.index_id = targetIndex.index_id AND keyColumn.key_ordinal = 2 AND targetColumn.name = N'SourceMaLichLV'))
