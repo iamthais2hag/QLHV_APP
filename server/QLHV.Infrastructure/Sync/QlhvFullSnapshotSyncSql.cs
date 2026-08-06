@@ -34,6 +34,7 @@ CREATE TABLE #QlhvFullSync_HocVien (
     NguoiThuNhanAnh   NVARCHAR(100) NULL,
     SourceOfTruth     NVARCHAR(30)  NOT NULL,
     V2RowHash         NVARCHAR(64)  NOT NULL,
+    RetainReviewedTarget BIT        NOT NULL,
     PRIMARY KEY (SourceProfileCode, SourceMaDK)
 );";
 
@@ -69,7 +70,7 @@ USING #QlhvFullSync_HocVien AS source
 ON target.SourceProfileCode = source.SourceProfileCode
 AND target.SourceMaDK = source.SourceMaDK
 
-WHEN MATCHED AND (
+WHEN MATCHED AND source.RetainReviewedTarget = 0 AND (
        target.IsDeleted = 1
     OR ISNULL(target.V2RowHash, N'') <> ISNULL(source.V2RowHash, N'')
 )

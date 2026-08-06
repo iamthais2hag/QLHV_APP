@@ -107,6 +107,14 @@ public sealed record QlhvImportFullSyncPayload(
     IReadOnlyCollection<string>? ExecutableDomains = null,
     IReadOnlyDictionary<string, string>? SkippedDomainReasons = null)
 {
+    /// <summary>
+    /// Privacy-safe identities whose exact source/target divergence has passed the
+    /// shared RT03 V9 reviewed-retained evaluator. Recovery writers must preserve
+    /// these live target rows and verification must re-evaluate them after commit.
+    /// </summary>
+    public IReadOnlySet<string> ReviewedRetainedSourceBusinessIdentityHashes { get; init; } =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
     public IReadOnlyCollection<string> DomainsToExecute =>
         ExecutableDomains ?? QlhvImportDomains.Ordered;
 

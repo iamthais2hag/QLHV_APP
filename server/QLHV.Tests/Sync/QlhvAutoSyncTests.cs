@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
@@ -7,12 +8,90 @@ using QLHV.Application.Sync;
 using QLHV.Application.Sync.Configuration;
 using QLHV.Application.Sync.Dtos;
 using QLHV.Application.SystemData;
+using QLHV.Infrastructure;
 using QLHV.Infrastructure.Sync;
 
 namespace QLHV.Tests.Sync;
 
 public sealed class QlhvAutoSyncTests
 {
+    [Fact]
+    public void Infrastructure_binding_resolves_configured_source_order_once()
+    {
+        var options = ResolveAutoSyncOptions(["OTO", "MOTO"]);
+
+        Assert.Equal(new[] { "OTO", "MOTO" }, options.SourceOrder);
+    }
+
+    [Fact]
+    public void Source_order_defaults_to_canonical_order_when_configuration_is_absent()
+    {
+        var directDefault = new QlhvAutoSyncOptions();
+        var boundDefault = ResolveAutoSyncOptions(sourceOrder: null);
+
+        Assert.Equal(new[] { "OTO", "MOTO" }, directDefault.SourceOrder);
+        Assert.Equal(new[] { "OTO", "MOTO" }, boundDefault.SourceOrder);
+    }
+
+    [Fact]
+    public void Source_order_normalizes_whitespace_and_case_without_reordering()
+    {
+        var options = ResolveAutoSyncOptions(["  oto ", " MoTo  "]);
+
+        Assert.Equal(new[] { "OTO", "MOTO" }, options.SourceOrder);
+    }
+
+    [Theory]
+    [MemberData(nameof(InvalidConfiguredSourceOrders))]
+    public void Invalid_configured_source_order_fails_closed(string[] sourceOrder)
+    {
+        Assert.Throws<OptionsValidationException>(
+            () => ResolveAutoSyncOptions(sourceOrder));
+    }
+
+    [Fact]
+    public void Api_and_hosted_worker_resolve_the_same_order_after_restart()
+    {
+        var api = ResolveAutoSyncOptions(["OTO", "MOTO"]);
+        var hostedWorker = ResolveAutoSyncOptions(["OTO", "MOTO"]);
+        var restartedApi = ResolveAutoSyncOptions(["OTO", "MOTO"]);
+
+        Assert.Equal(new[] { "OTO", "MOTO" }, api.SourceOrder);
+        Assert.Equal(api.SourceOrder, hostedWorker.SourceOrder);
+        Assert.Equal(api.SourceOrder, restartedApi.SourceOrder);
+    }
+
+    [Fact]
+    public async Task Button_service_acceptance_creates_one_durable_run_without_executing_it()
+    {
+        var options = ResolveAutoSyncOptions(["OTO", "MOTO"], enabled: true);
+        var runs = new FakeRunRepository();
+        var queue = new FakeAutoQueue();
+        var service = CreateService(runs, queue, autoSyncOptions: options);
+
+        var result = await service.QueueAsync(QlhvAutoSyncConstants.ManualTrigger);
+
+        Assert.True(result.Accepted);
+        Assert.NotNull(result.RunId);
+        Assert.Equal(QlhvAutoSyncConstants.StartedDecision, result.Decision);
+        var run = Assert.Single(runs.Created);
+        Assert.Equal(result.RunId, run.RunId);
+        Assert.Equal(new[] { "OTO", "MOTO" }, run.SourceOrder);
+        Assert.Single(queue.Items);
+    }
+
+    public static IEnumerable<object[]> InvalidConfiguredSourceOrders()
+    {
+        yield return [new[] { "MOTO" }];
+        yield return [new[] { "OTO" }];
+        yield return [new[] { "OTO", "OTO" }];
+        yield return [new[] { "MOTO", "MOTO" }];
+        yield return [new[] { "MOTO", "OTO" }];
+        yield return [new[] { "OTO", "MOTO", "OTHER" }];
+        yield return [new[] { "OTO", "OTHER" }];
+        yield return [new[] { "", "" }];
+    }
+
     [Fact]
     public async Task Concurrent_startup_triggers_create_one_run_and_join_the_other_process()
     {
@@ -116,6 +195,56 @@ public sealed class QlhvAutoSyncTests
     }
 
     [Fact]
+    public async Task Status_last_run_history_and_last_success_share_durable_run_records()
+    {
+        var runs = new FakeRunRepository();
+        var successfulRunId = Guid.NewGuid();
+        var successfulAt = DateTime.UtcNow.AddMinutes(-2);
+        runs.SeedCompleted(new QlhvAutoSyncRunRecord
+        {
+            RunId = successfulRunId,
+            TriggerType = QlhvAutoSyncConstants.StartupTrigger,
+            Actor = QlhvOperationActors.SystemAutoSync,
+            Status = QlhvAutoSyncConstants.Succeeded,
+            SourceOrder = ["OTO", "MOTO"],
+            CreatedAtUtc = successfulAt.AddSeconds(-5),
+            StartedAtUtc = successfulAt.AddSeconds(-4),
+            CompletedAtUtc = successfulAt,
+            Oto = SourceResult("OTO", QlhvAutoSyncConstants.Succeeded),
+            Moto = SourceResult("MOTO", QlhvAutoSyncConstants.Succeeded),
+        });
+        var failedRunId = Guid.NewGuid();
+        var failedCreatedAt = DateTime.UtcNow;
+        runs.SeedCompleted(new QlhvAutoSyncRunRecord
+        {
+            RunId = failedRunId,
+            TriggerType = QlhvAutoSyncConstants.ManualTrigger,
+            Actor = QlhvOperationActors.ManualAdmin,
+            Status = QlhvAutoSyncConstants.PartialFailed,
+            SourceOrder = ["OTO", "MOTO"],
+            CreatedAtUtc = failedCreatedAt,
+            StartedAtUtc = failedCreatedAt.AddSeconds(1),
+            CompletedAtUtc = failedCreatedAt.AddSeconds(2),
+            Oto = SourceResult("OTO", QlhvAutoSyncConstants.Succeeded),
+            Moto = SourceResult("MOTO", QlhvAutoSyncConstants.Failed, "MOTO failed"),
+            ErrorMessage = "MOTO failed",
+        });
+        var service = CreateService(runs, new FakeAutoQueue());
+
+        var status = await service.GetStatusAsync();
+
+        Assert.Equal(failedRunId, status.RunId);
+        Assert.Equal(failedCreatedAt, status.CreatedAtUtc);
+        Assert.Equal(successfulRunId, status.LastSuccessfulRunId);
+        Assert.Equal(successfulAt, status.LastSuccessfulSyncUtc);
+        Assert.Equal(2, status.History.Count);
+        Assert.Equal(failedRunId, status.History[0].RunId);
+        Assert.Equal(successfulRunId, status.History[1].RunId);
+        Assert.Equal(status.RunId, status.History[0].RunId);
+        Assert.Equal("partial-failed", status.State);
+    }
+
+    [Fact]
     public async Task Session_start_joins_active_startup_without_creating_a_second_run()
     {
         var runs = new FakeRunRepository();
@@ -154,6 +283,23 @@ public sealed class QlhvAutoSyncTests
         Assert.True(result.IsConflict);
         Assert.Empty(runs.Created);
         Assert.Empty(queue.Items);
+    }
+
+    [Fact]
+    public async Task Manual_trigger_does_not_overlap_an_active_system_auto_run()
+    {
+        var runs = new FakeRunRepository();
+        var queue = new FakeAutoQueue();
+        var service = CreateService(runs, queue);
+        var automatic = await service.QueueAsync(QlhvAutoSyncConstants.StartupTrigger);
+
+        var manual = await service.QueueAsync(QlhvAutoSyncConstants.ManualTrigger);
+
+        Assert.True(automatic.Accepted);
+        Assert.False(manual.Accepted);
+        Assert.True(manual.IsConflict);
+        Assert.Single(runs.Created);
+        Assert.Single(queue.Items);
     }
 
     [Fact]
@@ -492,6 +638,89 @@ public sealed class QlhvAutoSyncTests
     }
 
     [Fact]
+    public async Task Coordinator_persists_safe_oto_exception_and_still_runs_moto()
+    {
+        var runs = new FakeRunRepository();
+        var runner = new FakeSourceRunner(sourceType =>
+            sourceType == "OTO"
+                ? throw new InvalidOperationException("raw learner key must stay private")
+                : SourceResult(sourceType, QlhvAutoSyncConstants.Succeeded));
+        var coordinator = new QlhvAutoSyncCoordinator(runs, runner);
+
+        var outcome = await coordinator.ExecuteAsync(NewRun());
+
+        Assert.Equal(new[] { "OTO", "MOTO" }, runner.Calls);
+        Assert.Equal(QlhvAutoSyncConstants.PartialFailed, outcome.Status);
+        var failed = Assert.Single(
+            runs.SourceResults,
+            result => result.SourceType == "OTO");
+        Assert.Equal(QlhvAutoSyncConstants.Failed, failed.Status);
+        Assert.Contains("InvalidOperationException", failed.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("raw learner key", failed.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(QlhvAutoSyncConstants.Succeeded)]
+    [InlineData(QlhvAutoSyncConstants.PartialSuccess)]
+    [InlineData(QlhvAutoSyncConstants.Failed)]
+    public async Task Durable_status_history_exposes_every_terminal_attempt(string terminalStatus)
+    {
+        var runs = new FakeRunRepository();
+        var runId = Guid.NewGuid();
+        runs.SeedCompleted(new QlhvAutoSyncRunRecord
+        {
+            RunId = runId,
+            TriggerType = QlhvAutoSyncConstants.StartupTrigger,
+            Actor = QlhvOperationActors.SystemAutoSync,
+            Status = terminalStatus,
+            SourceOrder = ["OTO", "MOTO"],
+            CreatedAtUtc = DateTime.UtcNow,
+            CompletedAtUtc = DateTime.UtcNow,
+        });
+        var service = CreateService(runs, new FakeAutoQueue());
+
+        var status = await service.GetStatusAsync();
+
+        var history = Assert.Single(status.History);
+        Assert.Equal(runId, history.RunId);
+        Assert.Equal(terminalStatus, history.Status);
+        Assert.Equal(runId, status.RunId);
+        if (terminalStatus == QlhvAutoSyncConstants.Succeeded)
+        {
+            Assert.Equal(runId, status.LastSuccessfulRunId);
+        }
+        else
+        {
+            Assert.Null(status.LastSuccessfulRunId);
+        }
+    }
+
+    [Fact]
+    public async Task Terminal_run_with_missing_plan_is_presented_as_needs_plan()
+    {
+        var runs = new FakeRunRepository();
+        runs.SeedCompleted(new QlhvAutoSyncRunRecord
+        {
+            RunId = Guid.NewGuid(),
+            TriggerType = QlhvAutoSyncConstants.StartupTrigger,
+            Actor = QlhvOperationActors.SystemAutoSync,
+            Status = QlhvAutoSyncConstants.PartialFailed,
+            SourceOrder = ["OTO", "MOTO"],
+            CreatedAtUtc = DateTime.UtcNow,
+            CompletedAtUtc = DateTime.UtcNow,
+            Oto = SourceResult("OTO", QlhvAutoSyncConstants.NeedsPlan),
+            Moto = SourceResult("MOTO", QlhvAutoSyncConstants.Succeeded),
+        });
+        var service = CreateService(runs, new FakeAutoQueue());
+
+        var status = await service.GetStatusAsync();
+
+        Assert.Equal("needs-plan", status.State);
+        Assert.Equal(QlhvAutoSyncConstants.NeedsPlan, status.Oto?.Status);
+        Assert.Equal(QlhvAutoSyncConstants.Succeeded, status.Moto?.Status);
+    }
+
+    [Fact]
     public async Task Coordinator_reports_partial_success_when_optional_domain_is_skipped_in_one_source()
     {
         var runs = new FakeRunRepository();
@@ -714,6 +943,25 @@ public sealed class QlhvAutoSyncTests
                 Executed = true,
                 Status = QlhvImportOverallStatuses.PartialSuccess,
                 Message = "HocVien da dong bo; module tuy chon duoc bo qua.",
+                DomainResults =
+                [
+                    new QlhvImportDomainResultDto
+                    {
+                        Domain = QlhvImportDomains.GiaoVien,
+                        Status = QlhvImportDomainStatuses.Failed,
+                        Requested = true,
+                        Enabled = true,
+                        ContributesToPartial = true,
+                    },
+                ],
+                SkippedReasons = new QlhvSkippedReasonCountsDto
+                {
+                    NoChange = 7,
+                },
+                Plan = new QlhvImportPlanDto
+                {
+                    Warnings = ["fixture optional warning"],
+                },
             },
         };
         var runs = new FakeRunRepository();
@@ -747,6 +995,116 @@ public sealed class QlhvAutoSyncTests
         Assert.Equal(QlhvAutoSyncConstants.PartialSuccess, result.Status);
         Assert.Equal(import.ExecuteResult.OperationId, result.SyncOperationId);
         Assert.Equal(import.ExecuteResult.Message, result.Message);
+        Assert.Single(result.DomainResults);
+        Assert.Equal(7, result.SkippedReasons.NoChange);
+        Assert.Equal(["fixture optional warning"], result.Warnings);
+        Assert.Equal(1, import.ExecuteCalls);
+    }
+
+    [Fact]
+    public async Task Source_runner_reports_needs_plan_when_fresh_plan_is_not_executable()
+    {
+        var refreshOperationId = Guid.NewGuid();
+        var import = new FakeImportService
+        {
+            Plan = new QlhvImportPlanDto
+            {
+                SourceProfileCode = "CSDT_OTO",
+                MaCSDT = "66029",
+                BackupSnapshotToken = "snapshot-token",
+                HocVienBlockers = ["HocVien source chua san sang."],
+            },
+        };
+        var runs = new FakeRunRepository();
+        var runId = Guid.NewGuid();
+        runs.SeedRunning(runId, QlhvOperationActors.SystemAutoSync);
+        var runner = new QlhvAutoSyncSourceRunner(
+            new FakeOperationsService(refreshOperationId),
+            new FakeOperationHistory
+            {
+                ById = new QlhvOperationHistoryDto
+                {
+                    OperationId = refreshOperationId,
+                    SourceType = "OTO",
+                    OperationType = QlhvOperationTypes.RefreshBackup,
+                    Status = QlhvOperationTypes.Succeeded,
+                },
+            },
+            import,
+            runs,
+            Options.Create(new QlhvAutoSyncOptions
+            {
+                RefreshBackupBeforeSync = true,
+                OperationPollMilliseconds = 100,
+            }));
+
+        var result = await runner.RunAsync(
+            runId,
+            "OTO",
+            QlhvOperationActors.SystemAutoSync);
+
+        Assert.Equal(QlhvAutoSyncConstants.NeedsPlan, result.Status);
+        Assert.Equal(1, import.PlanCalls);
+        Assert.Equal(0, import.ExecuteCalls);
+    }
+
+    [Fact]
+    public async Task Source_runner_reports_needs_plan_when_backup_changes_before_execute()
+    {
+        var refreshOperationId = Guid.NewGuid();
+        var import = new FakeImportService
+        {
+            Plan = new QlhvImportPlanDto
+            {
+                SourceProfileCode = "CSDT_OTO",
+                MaCSDT = "66029",
+                BackupSnapshotToken = "snapshot-token",
+                ExecutableDomains = [QlhvImportDomains.HocVien],
+            },
+            ExecuteResult = new QlhvImportExecuteResultDto
+            {
+                OperationId = Guid.NewGuid(),
+                Executed = false,
+                Status = QlhvImportOverallStatuses.Failed,
+                Message = "Import bi chan vi plan co blocker.",
+                Plan = new QlhvImportPlanDto
+                {
+                    Blockers =
+                    [
+                        "Plan da cu: snapshot BAK hien tai khong khop expectedSnapshotToken; hay lap plan lai.",
+                    ],
+                },
+            },
+        };
+        var runs = new FakeRunRepository();
+        var runId = Guid.NewGuid();
+        runs.SeedRunning(runId, QlhvOperationActors.SystemAutoSync);
+        var runner = new QlhvAutoSyncSourceRunner(
+            new FakeOperationsService(refreshOperationId),
+            new FakeOperationHistory
+            {
+                ById = new QlhvOperationHistoryDto
+                {
+                    OperationId = refreshOperationId,
+                    SourceType = "OTO",
+                    OperationType = QlhvOperationTypes.RefreshBackup,
+                    Status = QlhvOperationTypes.Succeeded,
+                },
+            },
+            import,
+            runs,
+            Options.Create(new QlhvAutoSyncOptions
+            {
+                RefreshBackupBeforeSync = true,
+                OperationPollMilliseconds = 100,
+            }));
+
+        var result = await runner.RunAsync(
+            runId,
+            "OTO",
+            QlhvOperationActors.SystemAutoSync);
+
+        Assert.Equal(QlhvAutoSyncConstants.NeedsPlan, result.Status);
         Assert.Equal(1, import.ExecuteCalls);
     }
 
@@ -1063,9 +1421,10 @@ public sealed class QlhvAutoSyncTests
     }
 
     [Fact]
-    public async Task Startup_service_queues_exactly_once_after_production_readiness()
+    public async Task Startup_service_polls_repeatedly_after_production_readiness()
     {
         var autoSync = new FakeAutoSyncService();
+        var pollingState = new QlhvAutoSyncPollingState();
         using var provider = new ServiceCollection()
             .AddScoped<IRuntimeReadinessService>(_ => new ReadyReadinessService())
             .AddScoped<IQlhvAutoSyncService>(_ => autoSync)
@@ -1077,15 +1436,25 @@ public sealed class QlhvAutoSyncTests
             {
                 Enabled = true,
                 RunOnServerStartup = true,
+                PollingEnabled = true,
+                FallbackModeEnabled = true,
                 ReadinessPollSeconds = 1,
-            }));
+                PollingIntervalSeconds = 1,
+            }),
+            pollingState);
 
         await service.StartAsync(CancellationToken.None);
-        await autoSync.Queued.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await WaitForQueueCallsAsync(autoSync, expectedCalls: 2);
         await service.StopAsync(CancellationToken.None);
 
-        Assert.Equal(1, autoSync.QueueCalls);
+        Assert.True(autoSync.QueueCalls >= 2);
         Assert.Equal(QlhvAutoSyncConstants.StartupTrigger, autoSync.LastTrigger);
+        Assert.True(pollingState.Snapshot.Enabled);
+        Assert.NotNull(pollingState.Snapshot.LastPollCompletedAtUtc);
+        Assert.NotNull(pollingState.Snapshot.NextPollAtUtc);
+        Assert.Equal(
+            QlhvAutoSyncConstants.NoSyncNeededDecision,
+            pollingState.Snapshot.LastDecision);
     }
 
     [Fact]
@@ -1106,15 +1475,48 @@ public sealed class QlhvAutoSyncTests
             {
                 Enabled = true,
                 RunOnServerStartup = true,
+                PollingEnabled = true,
+                FallbackModeEnabled = true,
                 ReadinessPollSeconds = 1,
+                PollingIntervalSeconds = 1,
             }));
 
         await service.StartAsync(CancellationToken.None);
-        await autoSync.Queued.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await WaitForQueueCallsAsync(autoSync, expectedCalls: 2);
         await service.StopAsync(CancellationToken.None);
 
-        Assert.Equal(1, autoSync.QueueCalls);
+        Assert.True(autoSync.QueueCalls >= 2);
         Assert.Equal(QlhvAutoSyncConstants.StartupTrigger, autoSync.LastTrigger);
+    }
+
+    [Fact]
+    public async Task Startup_service_is_disabled_in_production_when_option_is_off()
+    {
+        var autoSync = new FakeAutoSyncService();
+        var pollingState = new QlhvAutoSyncPollingState();
+        using var provider = new ServiceCollection()
+            .AddScoped<IRuntimeReadinessService>(_ => new ReadyReadinessService())
+            .AddScoped<IQlhvAutoSyncService>(_ => autoSync)
+            .BuildServiceProvider();
+        var service = new QlhvAutoSyncStartupService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new TestHostEnvironment(Environments.Production),
+            Options.Create(new QlhvAutoSyncOptions
+            {
+                Enabled = false,
+                RunOnServerStartup = true,
+                PollingIntervalSeconds = 1,
+            }),
+            pollingState);
+
+        await service.StartAsync(CancellationToken.None);
+        await Task.Delay(100);
+        await service.StopAsync(CancellationToken.None);
+
+        Assert.Equal(0, autoSync.QueueCalls);
+        Assert.False(pollingState.Snapshot.Enabled);
+        Assert.Equal("QlhvAutoSync.Enabled=false.", pollingState.Snapshot.DisabledReason);
+        Assert.Null(pollingState.Snapshot.LastPollStartedAtUtc);
     }
 
     [Theory]
@@ -1150,7 +1552,8 @@ public sealed class QlhvAutoSyncTests
         bool enableTargetWrites = true,
         bool refreshBackupBeforeSync = true,
         FakeFreshnessService? freshness = null,
-        FakeOperationHistory? history = null)
+        FakeOperationHistory? history = null,
+        QlhvAutoSyncOptions? autoSyncOptions = null)
         => new(
             runs,
             queue,
@@ -1158,10 +1561,13 @@ public sealed class QlhvAutoSyncTests
             freshness ?? new FakeFreshnessService(),
             history ?? new FakeOperationHistory(),
             new ReadyReadinessService(),
-            Options.Create(new QlhvAutoSyncOptions
+            Options.Create(autoSyncOptions ?? new QlhvAutoSyncOptions
             {
                 Enabled = enabled,
                 RunOnServerStartup = true,
+                PollingEnabled = true,
+                IsFallbackOnly = true,
+                FallbackModeEnabled = true,
                 RefreshBackupBeforeSync = refreshBackupBeforeSync,
                 SourceOrder = ["OTO", "MOTO"],
             }),
@@ -1170,6 +1576,62 @@ public sealed class QlhvAutoSyncTests
             {
                 EnableTargetWrites = enableTargetWrites,
             }));
+
+    private static QlhvAutoSyncOptions ResolveAutoSyncOptions(
+        IReadOnlyList<string>? sourceOrder,
+        bool enabled = false)
+    {
+        var values = new Dictionary<string, string?>
+        {
+            ["QlhvAutoSync:Enabled"] = enabled.ToString(),
+            ["QlhvAutoSync:PollingEnabled"] = enabled.ToString(),
+            ["QlhvAutoSync:FallbackModeEnabled"] = enabled.ToString(),
+        };
+        if (sourceOrder is not null)
+        {
+            for (var index = 0; index < sourceOrder.Count; index++)
+            {
+                values[$"QlhvAutoSync:SourceOrder:{index}"] = sourceOrder[index];
+            }
+        }
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(values)
+            .Build();
+        using var provider = new ServiceCollection()
+            .AddInfrastructureCore(configuration, Directory.GetCurrentDirectory())
+            .BuildServiceProvider();
+        var resolved = provider
+            .GetRequiredService<IOptions<QlhvAutoSyncOptions>>()
+            .Value;
+        return new QlhvAutoSyncOptions
+        {
+            Enabled = resolved.Enabled,
+            RunOnServerStartup = resolved.RunOnServerStartup,
+            PollingEnabled = resolved.PollingEnabled,
+            IsFallbackOnly = resolved.IsFallbackOnly,
+            FallbackModeEnabled = resolved.FallbackModeEnabled,
+            RefreshBackupBeforeSync = resolved.RefreshBackupBeforeSync,
+            SourceOrder = resolved.SourceOrder.ToArray(),
+            QueueCapacity = resolved.QueueCapacity,
+            ReadinessPollSeconds = resolved.ReadinessPollSeconds,
+            PollingIntervalSeconds = resolved.PollingIntervalSeconds,
+            OperationPollMilliseconds = resolved.OperationPollMilliseconds,
+            StartupDedupeWindowSeconds = resolved.StartupDedupeWindowSeconds,
+            SessionStartDedupeWindowSeconds = resolved.SessionStartDedupeWindowSeconds,
+        };
+    }
+
+    private static async Task WaitForQueueCallsAsync(
+        FakeAutoSyncService autoSync,
+        int expectedCalls)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+        while (autoSync.QueueCalls < expectedCalls)
+        {
+            await Task.Delay(25, timeout.Token);
+        }
+    }
 
     private static QlhvImportSourceSnapshot EmptySnapshot(
         string snapshotToken,
@@ -1317,6 +1779,35 @@ public sealed class QlhvAutoSyncTests
                     .OrderByDescending(record => record.CreatedAtUtc)
                     .FirstOrDefault();
                 return Task.FromResult(latest);
+            }
+        }
+
+        public Task<QlhvAutoSyncRunRecord?> GetLatestSuccessfulAsync(
+            CancellationToken cancellationToken = default)
+        {
+            lock (_gate)
+            {
+                return Task.FromResult(_records.Values
+                    .Where(record => string.Equals(
+                        record.Status,
+                        QlhvAutoSyncConstants.Succeeded,
+                        StringComparison.Ordinal))
+                    .OrderByDescending(record => record.CompletedAtUtc)
+                    .FirstOrDefault());
+            }
+        }
+
+        public Task<IReadOnlyList<QlhvAutoSyncRunRecord>> GetRecentAsync(
+            int take,
+            CancellationToken cancellationToken = default)
+        {
+            lock (_gate)
+            {
+                IReadOnlyList<QlhvAutoSyncRunRecord> recent = _records.Values
+                    .OrderByDescending(record => record.CreatedAtUtc)
+                    .Take(take)
+                    .ToArray();
+                return Task.FromResult(recent);
             }
         }
 
@@ -1656,7 +2147,11 @@ public sealed class QlhvAutoSyncTests
                 throw QueueException;
             }
 
-            return Task.FromResult(new QlhvAutoSyncQueueResultDto { Accepted = true });
+            return Task.FromResult(new QlhvAutoSyncQueueResultDto
+            {
+                Accepted = true,
+                Decision = QlhvAutoSyncConstants.NoSyncNeededDecision,
+            });
         }
 
         public Task<QlhvAutoSyncStatusDto> GetStatusAsync(
@@ -1676,6 +2171,10 @@ public sealed class QlhvAutoSyncTests
             => throw new NotSupportedException();
 
         public Task<QlhvAutoSyncQueueResultDto> QueueEnsureFreshAsync(
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<QlhvSyncFreshnessResult> GetDiagnosticsAsync(
             CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
     }

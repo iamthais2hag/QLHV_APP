@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using QLHV.Application.Sync;
 using QLHV.Application.Sync.Dtos;
+using QLHV.Application.Sync.Rt03;
 
 namespace QLHV.Infrastructure.Sync;
 
@@ -72,6 +73,15 @@ public sealed class QlhvAutoSyncWorker : BackgroundService
                 return;
             }
 
+            if (await IsSupersededByMasterAsync(scope.ServiceProvider, stoppingToken))
+            {
+                await SafeCompleteAsync(
+                    runs,
+                    active.RunId,
+                    "Auto Sync superseded by RT03 master authority.");
+                return;
+            }
+
             if (string.Equals(active.Status, QlhvAutoSyncConstants.Running, StringComparison.Ordinal))
             {
                 var globalLock = scope.ServiceProvider.GetRequiredService<IQlhvAutoSyncGlobalLock>();
@@ -114,6 +124,15 @@ public sealed class QlhvAutoSyncWorker : BackgroundService
         var markedRunning = false;
         try
         {
+            if (await IsSupersededByMasterAsync(scope.ServiceProvider, stoppingToken))
+            {
+                await SafeCompleteAsync(
+                    runs,
+                    item.RunId,
+                    "Auto Sync superseded by RT03 master authority.");
+                return;
+            }
+
             await using var lease = await globalLock.TryAcquireAsync(stoppingToken);
             if (lease is null)
             {
@@ -140,7 +159,19 @@ public sealed class QlhvAutoSyncWorker : BackgroundService
             run = await runs.GetByIdAsync(run.RunId, stoppingToken)
                 ?? throw new InvalidOperationException("Auto Sync run vua claim khong con ton tai.");
             var coordinator = scope.ServiceProvider.GetRequiredService<QlhvAutoSyncCoordinator>();
-            var outcome = await coordinator.ExecuteAsync(run, stoppingToken);
+            using var heartbeatCancellation = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            var heartbeat = RunHeartbeatAsync(runs, run.RunId, heartbeatCancellation.Token);
+            QlhvAutoSyncOutcome outcome;
+            try
+            {
+                outcome = await coordinator.ExecuteAsync(run, stoppingToken);
+            }
+            finally
+            {
+                heartbeatCancellation.Cancel();
+                try { await heartbeat; }
+                catch (OperationCanceledException) { }
+            }
             await runs.CompleteAsync(run.RunId, outcome, CancellationToken.None);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -157,6 +188,22 @@ public sealed class QlhvAutoSyncWorker : BackgroundService
                     runs,
                     item.RunId,
                     $"Auto Sync worker failed: {ex.GetType().Name}.");
+            }
+        }
+    }
+
+    private async Task RunHeartbeatAsync(
+        IQlhvAutoSyncRunRepository runs,
+        Guid runId,
+        CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(
+            Math.Clamp(_options.HeartbeatIntervalSeconds, 5, 60)));
+        while (await timer.WaitForNextTickAsync(cancellationToken))
+        {
+            if (!await runs.TouchAsync(runId, DateTime.UtcNow, cancellationToken))
+            {
+                return;
             }
         }
     }
@@ -179,6 +226,29 @@ public sealed class QlhvAutoSyncWorker : BackgroundService
         catch
         {
             // Startup reconciliation will revisit an active row.
+        }
+    }
+
+    private static async Task<bool> IsSupersededByMasterAsync(
+        IServiceProvider services,
+        CancellationToken cancellationToken)
+    {
+        var master = services.GetService<IRt03RealtimeControlStore>();
+        if (master is null) return false;
+        try
+        {
+            await master.ReadAsync(cancellationToken);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            // Once the new runtime is composed, an unreadable master authority
+            // cannot reactivate the retired legacy writer.
+            return true;
         }
     }
 }

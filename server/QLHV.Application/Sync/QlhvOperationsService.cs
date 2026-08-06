@@ -125,6 +125,7 @@ public sealed class QlhvOperationsService : IQlhvOperationsService
             SourceType = source.SourceType,
             LiveDatabaseName = source.LiveDatabaseName,
             BackupDatabaseName = source.BackupDatabaseName,
+            TargetDatabaseName = "QLHV_APP",
             MaCSDT = source.MaCsdt,
             SourceProfileCode = source.SourceProfileCode,
             State = active is null ? ToIdleState(latest) : ToActiveState(active),

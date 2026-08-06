@@ -171,6 +171,45 @@ public sealed class QlhvImportController : ControllerBase
     }
 
     /// <summary>
+    /// Read-only, privacy-safe comparison of the fixed Live, BAK and QLHV_APP
+    /// scopes used by Auto Sync. It returns counts and aggregate content hashes,
+    /// never learner identifiers.
+    /// </summary>
+    [HttpGet("operations/auto-sync/diagnostics")]
+    [ProducesResponseType(typeof(QlhvAutoSyncDataGapDiagnosticsDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<QlhvAutoSyncDataGapDiagnosticsDto>> AutoSyncDiagnostics(
+        CancellationToken cancellationToken)
+    {
+        var currentUserRole = AppRoles.SelectPrimary(
+            User.FindAll(ClaimTypes.Role).Select(claim => claim.Value)) ?? string.Empty;
+        var writeAuthorized = User.IsInRole(AppRoles.Admin);
+        var sourceStatuses = new List<QlhvOperationsStatusDto>();
+        foreach (var sourceType in new[] { "OTO", "MOTO" })
+        {
+            sourceStatuses.Add(await _operationsService.GetStatusAsync(
+                sourceType,
+                currentUserRole,
+                writeAuthorized,
+                cancellationToken));
+        }
+
+        return Ok(new QlhvAutoSyncDataGapDiagnosticsDto
+        {
+            CapturedAtUtc = DateTime.UtcNow,
+            SourceStatuses = sourceStatuses,
+            Freshness = await _autoSyncService.GetDiagnosticsAsync(cancellationToken),
+            ScopeNotes =
+            [
+                "SourceStatuses.LiveRows/BackupRows dem toan bang vat ly; khong loc MaCSDT hoac TrangThai.",
+                "SourceStatuses.TargetActiveRows loc SourceProfileCode co dinh va IsDeleted = 0 trong QLHV_APP.",
+                "Freshness snapshots dung cung request SourceProfileCode/MaCSDT cua import de so sanh noi dung theo pham vi.",
+                "ContentToken la SHA-256 cua snapshot chuan hoa; response khong chua MaDK, ho ten hoac giay to.",
+                "Neu can ket luan row phat sinh truoc/sau refresh, phai doi chieu probe runtime voi audit timestamp cua CSDL nguon.",
+            ],
+        });
+    }
+
+    /// <summary>
     /// Checks freshness after an authorized user opens the application and queues
     /// at most one system Auto Sync run. The caller cannot select a source, force
     /// execution, or bypass the server-side cooldown.

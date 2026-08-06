@@ -23,6 +23,9 @@ public interface IQlhvAutoSyncService
     Task<QlhvAutoSyncStatusDto> GetStatusAsync(
         Guid? runId = null,
         CancellationToken cancellationToken = default);
+
+    Task<QlhvSyncFreshnessResult> GetDiagnosticsAsync(
+        CancellationToken cancellationToken = default);
 }
 
 public interface IQlhvAutoSyncRunRepository
@@ -43,6 +46,13 @@ public interface IQlhvAutoSyncRunRepository
 
     Task<QlhvAutoSyncRunRecord?> GetLatestByTriggerAsync(
         string triggerType,
+        CancellationToken cancellationToken = default);
+
+    Task<QlhvAutoSyncRunRecord?> GetLatestSuccessfulAsync(
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<QlhvAutoSyncRunRecord>> GetRecentAsync(
+        int take,
         CancellationToken cancellationToken = default);
 
     Task<bool> MarkRunningAsync(
@@ -73,6 +83,12 @@ public interface IQlhvAutoSyncRunRepository
     Task<bool> RequeueInterruptedAsync(
         Guid runId,
         CancellationToken cancellationToken = default);
+
+    Task<bool> TouchAsync(Guid runId, DateTime heartbeatAtUtc,
+        CancellationToken cancellationToken = default) => Task.FromResult(false);
+
+    Task<bool> MarkStaleFailedAsync(Guid runId, DateTime completedAtUtc,
+        CancellationToken cancellationToken = default) => Task.FromResult(false);
 }
 
 public interface IQlhvAutoSyncQueue
@@ -87,6 +103,28 @@ public interface IQlhvAutoSyncGlobalLock
     Task<IAsyncDisposable?> TryAcquireAsync(
         CancellationToken cancellationToken = default);
 }
+
+public interface IQlhvOperationsStateProbe
+{
+    Task<QlhvOperationsStateSnapshot> ReadAsync(
+        CancellationToken cancellationToken = default);
+}
+
+public sealed record QlhvOperationsStateSnapshot(
+    bool RealtimeEnabled,
+    bool RealtimeWritesEnabled,
+    string ServiceState,
+    string ProcessState,
+    string WorkerStatus,
+    string? WorkerInstanceId,
+    string? CurrentProfile,
+    bool CycleActive,
+    DateTime? LastHeartbeatUtc,
+    string? LastErrorCode,
+    bool MutexHeld,
+    int RawAutoSyncSlots,
+    int ActiveOperations,
+    IReadOnlyList<QlhvRealtimeProfileStateDto> Profiles);
 
 public interface IQlhvAutoSyncSourceRunner
 {

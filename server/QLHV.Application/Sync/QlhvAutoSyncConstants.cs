@@ -2,6 +2,8 @@ namespace QLHV.Application.Sync;
 
 public static class QlhvAutoSyncConstants
 {
+    private static readonly string[] FixedSourceOrder = ["OTO", "MOTO"];
+
     public const string StartupTrigger = "STARTUP";
     public const string ManualTrigger = "MANUAL";
     public const string SessionStartTrigger = "SESSION_START";
@@ -12,6 +14,7 @@ public static class QlhvAutoSyncConstants
     public const string Succeeded = "SUCCEEDED";
     public const string PartialSuccess = "PARTIAL_SUCCESS";
     public const string PartialFailed = "PARTIAL_FAILED";
+    public const string NeedsPlan = "NEEDS_PLAN";
     public const string Failed = "FAILED";
 
     public const string NoSyncNeededDecision = "NO_SYNC_NEEDED";
@@ -20,6 +23,10 @@ public static class QlhvAutoSyncConstants
     public const string StartedDecision = "STARTED";
     public const string NotReadyDecision = "NOT_READY";
     public const string FailedToQueueDecision = "FAILED_TO_QUEUE";
+    public const string BlockedByRealtimePrimaryWriterDecision =
+        "AUTOSYNC_BLOCKED_BY_REALTIME_PRIMARY_WRITER";
+    public const string SupersededByRealtimeMasterDecision =
+        "AUTOSYNC_SUPERSEDED_BY_REALTIME_MASTER";
 
     public const string ConnectingStage = "CONNECTING";
     public const string RefreshOtoStage = "REFRESH_OTO";
@@ -30,15 +37,25 @@ public static class QlhvAutoSyncConstants
     public const string CompletedStage = "COMPLETED";
     public const string FailedStage = "FAILED";
 
+    public static IReadOnlyList<string> CanonicalSourceOrder =>
+        Array.AsReadOnly(FixedSourceOrder);
+
+    public static string[] NormalizeSourceOrderTokens(IEnumerable<string?>? sourceOrder)
+        => (sourceOrder ?? Array.Empty<string>())
+            .Select(value => value?.Trim().ToUpperInvariant() ?? string.Empty)
+            .ToArray();
+
+    public static bool IsCanonicalSourceOrder(IEnumerable<string>? sourceOrder)
+    {
+        var result = NormalizeSourceOrderTokens(sourceOrder);
+        return result.Length == FixedSourceOrder.Length &&
+               result.SequenceEqual(FixedSourceOrder, StringComparer.Ordinal);
+    }
+
     public static IReadOnlyList<string> NormalizeSourceOrder(IEnumerable<string>? sourceOrder)
     {
-        var result = (sourceOrder ?? Array.Empty<string>())
-            .Where(value => !string.IsNullOrWhiteSpace(value))
-            .Select(value => value.Trim().ToUpperInvariant())
-            .ToArray();
-        if (result.Length != 2 ||
-            !string.Equals(result[0], "OTO", StringComparison.Ordinal) ||
-            !string.Equals(result[1], "MOTO", StringComparison.Ordinal))
+        var result = NormalizeSourceOrderTokens(sourceOrder);
+        if (!IsCanonicalSourceOrder(result))
         {
             throw new InvalidOperationException(
                 "QlhvAutoSync.SourceOrder phai la OTO roi MOTO, moi nguon dung mot lan.");

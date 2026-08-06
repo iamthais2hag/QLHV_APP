@@ -282,6 +282,7 @@ public sealed class QlhvSyncFreshnessService : IQlhvSyncFreshnessService
         {
             SourceType = sourceType,
             DatabaseName = source.SourceDatabaseName,
+            GeneratedAtUtc = source.GeneratedAtUtc,
             ContentToken = contentToken,
             BackupSnapshotToken = backup ? source.BackupSnapshotToken : null,
             Rows = new QlhvSyncEntityCountsDto

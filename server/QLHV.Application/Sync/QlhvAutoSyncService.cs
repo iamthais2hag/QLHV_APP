@@ -3,6 +3,7 @@ using QLHV.Application.Runtime;
 using QLHV.Application.Sync.Configuration;
 using QLHV.Application.Sync.Dtos;
 using QLHV.Application.SystemData;
+using QLHV.Application.Sync.Rt03;
 
 namespace QLHV.Application.Sync;
 
@@ -17,6 +18,11 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
     private readonly QlhvAutoSyncOptions _options;
     private readonly SyncOptions _syncOptions;
     private readonly SyncExecutionOptions _executionOptions;
+    private readonly IQlhvAutoSyncPollingState? _pollingState;
+    private readonly IRuntimeBuildIdentity? _buildIdentity;
+    private readonly IQlhvOperationsStateProbe? _operationsState;
+    private readonly IQlhvAutoSyncGlobalLock? _globalLock;
+    private readonly IRt03RealtimeControlStore? _realtimeControl;
 
     public QlhvAutoSyncService(
         IQlhvAutoSyncRunRepository runs,
@@ -27,7 +33,12 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
         IRuntimeReadinessService readiness,
         IOptions<QlhvAutoSyncOptions> options,
         IOptions<SyncOptions> syncOptions,
-        IOptions<SyncExecutionOptions> executionOptions)
+        IOptions<SyncExecutionOptions> executionOptions,
+        IQlhvAutoSyncPollingState? pollingState = null,
+        IRuntimeBuildIdentity? buildIdentity = null,
+        IQlhvOperationsStateProbe? operationsState = null,
+        IQlhvAutoSyncGlobalLock? globalLock = null,
+        IRt03RealtimeControlStore? realtimeControl = null)
     {
         _runs = runs;
         _queue = queue;
@@ -38,6 +49,11 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
         _options = options.Value;
         _syncOptions = syncOptions.Value;
         _executionOptions = executionOptions.Value;
+        _pollingState = pollingState;
+        _buildIdentity = buildIdentity;
+        _operationsState = operationsState;
+        _globalLock = globalLock;
+        _realtimeControl = realtimeControl;
     }
 
     public async Task<QlhvAutoSyncQueueResultDto> QueueAsync(
@@ -142,6 +158,28 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
         bool joinActiveRun,
         CancellationToken cancellationToken)
     {
+        if (_realtimeControl is not null)
+        {
+            try
+            {
+                await _realtimeControl.ReadAsync(cancellationToken);
+                return Rejected(
+                    "Auto Sync cu da duoc thay the boi cong tac Realtime tong; " +
+                    "hay dung Chay mot lan trong Trang thai he thong.",
+                    QlhvAutoSyncConstants.SupersededByRealtimeMasterDecision);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                return Unavailable(
+                    "Khong xac minh duoc authority Realtime tong; Auto Sync cu bi chan fail-closed.",
+                    QlhvAutoSyncConstants.SupersededByRealtimeMasterDecision);
+            }
+        }
+
         string trigger;
         IReadOnlyList<string> sourceOrder;
         try
@@ -156,10 +194,18 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
 
         try
         {
+            var operations = await ReadOperationsStateAsync(cancellationToken);
+            if (operations is not null && IsManualFallbackBlocked(operations))
+            {
+                return Rejected(
+                    "Auto Sync du phong bi chan: realtime primary writer dang hoat dong.",
+                    QlhvAutoSyncConstants.BlockedByRealtimePrimaryWriterDecision);
+            }
+
             if (joinActiveRun)
             {
                 var active = await _runs.GetActiveAsync(cancellationToken);
-                if (active is not null)
+                if (active is not null && ClassifyRun(active, DateTime.UtcNow).IsActive)
                 {
                     return Joined(
                         active,
@@ -197,6 +243,25 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
         if (startBlockers.Count > 0)
         {
             return Rejected(startBlockers[0], QlhvAutoSyncConstants.NotReadyDecision);
+        }
+
+        IAsyncDisposable? globalLease = null;
+        if (_globalLock is not null)
+        {
+            globalLease = await _globalLock.TryAcquireAsync(cancellationToken);
+            if (globalLease is null)
+            {
+                return Rejected(
+                    "Auto Sync du phong bi chan: realtime primary writer dang giu mutex.",
+                    QlhvAutoSyncConstants.BlockedByRealtimePrimaryWriterDecision);
+            }
+        }
+
+        await using var heldLease = globalLease;
+        var stale = await _runs.GetActiveAsync(cancellationToken);
+        if (stale is not null && !ClassifyRun(stale, DateTime.UtcNow).IsActive)
+        {
+            await _runs.MarkStaleFailedAsync(stale.RunId, DateTime.UtcNow, cancellationToken);
         }
 
         var runId = Guid.NewGuid();
@@ -315,14 +380,19 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
         }
 
         var startBlockers = GetStartBlockers();
-        var active = await _runs.GetActiveAsync(cancellationToken);
+        var rawActive = await _runs.GetActiveAsync(cancellationToken);
+        var active = ClassifyRun(rawActive, DateTime.UtcNow).IsActive
+            ? rawActive
+            : null;
         var appVersion = await GetDataVersionAsync(cancellationToken);
+        var lastSuccessful = await _runs.GetLatestSuccessfulAsync(cancellationToken);
         if (active is not null)
         {
             return CreateRunStatus(
                 active,
                 startBlockers,
                 appVersion,
+                lastSuccessful?.CompletedAtUtc,
                 lastAttemptUtc: active.CreatedAtUtc,
                 lastError: active.ErrorMessage);
         }
@@ -341,7 +411,7 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
                     State = "waiting-operation",
                     CurrentSourceType = source.SourceType,
                     AppDataVersion = appVersion,
-                    LastSuccessfulSyncUtc = appVersion?.LastSuccessfulSyncUtc,
+                    LastSuccessfulSyncUtc = lastSuccessful?.CompletedAtUtc,
                     LastAttemptUtc = manual.StartedAtUtc,
                     NeedSyncReasons = [$"{source.SourceType}:THAO_TAC_THU_CONG_DANG_CHAY"],
                     Blockers = startBlockers,
@@ -366,7 +436,7 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
                 CanStart = false,
                 State = "not-ready",
                 AppDataVersion = appVersion,
-                LastSuccessfulSyncUtc = appVersion?.LastSuccessfulSyncUtc,
+                LastSuccessfulSyncUtc = lastSuccessful?.CompletedAtUtc,
                 NeedSyncReasons = ["SERVER_CHUA_SAN_SANG"],
                 Blockers = runtimeBlockers,
                 Message = runtimeBlockers.FirstOrDefault() ?? "May chu chua san sang.",
@@ -392,7 +462,7 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
             NeedSync = freshness.NeedSync,
             CanStart = freshness.NeedSync && blockers.Count == 0,
             State = freshness.NeedSync ? "idle" : "up-to-date",
-            LastSuccessfulSyncUtc = appVersion?.LastSuccessfulSyncUtc,
+            LastSuccessfulSyncUtc = lastSuccessful?.CompletedAtUtc,
             LastAttemptUtc = latest?.CreatedAtUtc,
             LastError = latest?.ErrorMessage,
             NeedSyncReasons = freshness.Reasons,
@@ -416,6 +486,7 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
         var blockers = GetStartBlockers();
         var run = await _runs.GetByIdAsync(runId, cancellationToken);
         var appVersion = await GetDataVersionAsync(cancellationToken);
+        var lastSuccessful = await _runs.GetLatestSuccessfulAsync(cancellationToken);
         if (run is null)
         {
             return new QlhvSessionStartStatusDto
@@ -425,7 +496,7 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
                 CanStart = blockers.Count == 0,
                 State = "not-found",
                 AppDataVersion = appVersion,
-                LastSuccessfulSyncUtc = appVersion?.LastSuccessfulSyncUtc,
+                LastSuccessfulSyncUtc = lastSuccessful?.CompletedAtUtc,
                 Blockers = blockers,
                 Message = "Khong tim thay phien Auto Sync duoc yeu cau.",
             };
@@ -436,6 +507,7 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
             run,
             blockers,
             appVersion,
+            lastSuccessful?.CompletedAtUtc,
             latest?.CreatedAtUtc ?? run.CreatedAtUtc,
             latest?.ErrorMessage);
     }
@@ -444,6 +516,7 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
         QlhvAutoSyncRunRecord run,
         IReadOnlyList<string> blockers,
         SystemDataVersionDto? appVersion,
+        DateTime? lastSuccessfulSyncUtc,
         DateTime? lastAttemptUtc,
         string? lastError)
     {
@@ -470,7 +543,7 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
             IsTerminal = isTerminal,
             Succeeded = succeeded,
             CompletedAtUtc = run.CompletedAtUtc,
-            LastSuccessfulSyncUtc = appVersion?.LastSuccessfulSyncUtc,
+            LastSuccessfulSyncUtc = lastSuccessfulSyncUtc,
             LastAttemptUtc = lastAttemptUtc,
             ErrorMessage = run.ErrorMessage,
             LastError = lastError,
@@ -486,13 +559,45 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
         Guid? runId = null,
         CancellationToken cancellationToken = default)
     {
-        var active = runId.HasValue
+        var nowUtc = DateTime.UtcNow;
+        var rawActive = runId.HasValue
             ? null
             : await _runs.GetActiveAsync(cancellationToken);
+        var activeClassification = ClassifyRun(rawActive, nowUtc);
+        var active = activeClassification.IsActive ? rawActive : null;
         var latest = runId.HasValue
             ? await _runs.GetByIdAsync(runId.Value, cancellationToken)
             : active ?? await _runs.GetLatestAsync(cancellationToken);
-        var dataVersion = await GetDataVersionAsync(cancellationToken);
+        var displayedClassification = runId.HasValue
+            ? ClassifyRun(latest, nowUtc)
+            : activeClassification;
+        var lastSuccessful = await _runs.GetLatestSuccessfulAsync(cancellationToken);
+        var history = await _runs.GetRecentAsync(20, cancellationToken);
+        var operations = await ReadOperationsStateAsync(cancellationToken);
+        var realtimeBlocked = operations is null || IsManualFallbackBlocked(operations);
+        var masterAuthorityActive = await IsMasterAuthorityActiveAsync(cancellationToken);
+        var manualDecision = masterAuthorityActive
+            ? QlhvAutoSyncConstants.SupersededByRealtimeMasterDecision
+            : realtimeBlocked
+            ? QlhvAutoSyncConstants.BlockedByRealtimePrimaryWriterDecision
+            : !_options.Enabled || !_options.FallbackModeEnabled
+                ? QlhvAutoSyncConstants.NotReadyDecision
+                : active is not null
+                    ? QlhvAutoSyncConstants.ActiveOperationDecision
+                    : "MANUAL_RUN_ALLOWED";
+        var manualReason = masterAuthorityActive
+            ? "Auto Sync cu da ngung lam authority; su dung cong tac Realtime tong."
+            : operations is null
+            ? "Khong xac minh duoc trang thai realtime; fallback bi chan fail-closed."
+            : realtimeBlocked
+            ? "Realtime service/writer/mutex/cycle chua duoc tat va nha hoan toan."
+            : !_options.FallbackModeEnabled
+                ? "Che do Auto Sync du phong chua duoc bat ro rang."
+                : !_options.Enabled
+                    ? "Auto Sync du phong dang tat trong cau hinh."
+                    : active is not null
+                        ? "Mot Auto Sync du phong thuc su dang hoat dong."
+                        : "Realtime primary writer da dung; fallback co the duoc quan tri vien khoi dong.";
 
         return new QlhvAutoSyncStatusDto
         {
@@ -500,30 +605,76 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
             Enabled = _options.Enabled,
             RunOnServerStartup = _options.RunOnServerStartup,
             RefreshBackupBeforeSync = _options.RefreshBackupBeforeSync,
+            PollingIntervalSeconds = Math.Clamp(_options.PollingIntervalSeconds, 1, 3600),
+            ResolvedSourceOrder =
+                QlhvAutoSyncConstants.NormalizeSourceOrder(_options.SourceOrder),
+            // Deprecated compatibility field. The API cannot claim parity with
+            // the separately hosted Windows realtime worker from its own options graph.
+            ApiWorkerConfigParity = false,
+            Polling = _pollingState?.Snapshot ?? new QlhvAutoSyncPollingStatusDto
+            {
+                Enabled = false,
+                DisabledReason = "Polling runtime state is unavailable.",
+            },
+            Runtime = _buildIdentity?.Current ?? new RuntimeBuildIdentityDto(),
             State = !_options.Enabled
                 ? "disabled"
                 : runId.HasValue && latest is null
                     ? "not-found"
+                    : !runId.HasValue && rawActive is not null && active is null
+                        ? "inactive-stale-run"
                     : ToState(latest),
             RunId = latest?.RunId,
-            ActiveRunId = latest is not null && !IsTerminal(latest.Status)
-                ? latest.RunId
-                : active?.RunId,
+            ActiveRunId = displayedClassification.IsActive ? latest?.RunId : active?.RunId,
             TriggerType = latest?.TriggerType,
             Actor = latest?.Actor,
             CurrentSourceType = latest?.CurrentSourceType,
-            CurrentStage = active?.CurrentStage ?? latest?.CurrentStage,
+            CurrentStage = latest?.CurrentStage,
+            CreatedAtUtc = latest?.CreatedAtUtc,
             StartedAtUtc = latest?.StartedAtUtc,
             CompletedAtUtc = latest?.CompletedAtUtc,
-            LastSuccessfulSyncUtc = dataVersion?.LastSuccessfulSyncUtc,
+            LastSuccessfulSyncUtc = lastSuccessful?.CompletedAtUtc,
+            LastSuccessfulRunId = lastSuccessful?.RunId,
             Oto = latest?.Oto,
             Moto = latest?.Moto,
+            History = history.Select(ToHistoryItem).ToArray(),
             LastError = latest?.ErrorMessage ??
                 (runId.HasValue && latest is null
                     ? "Khong tim thay phien Auto Sync duoc yeu cau."
                     : null),
+            Realtime = ToRealtimeState(operations, nowUtc),
+            Configuration = new QlhvAutoSyncConfigurationStateDto
+            {
+                Enabled = _options.Enabled,
+                RunOnStartup = _options.RunOnServerStartup,
+                PollingEnabled = _options.PollingEnabled,
+                PollIntervalSeconds = Math.Clamp(_options.PollingIntervalSeconds, 1, 3600),
+                IsFallbackOnly = _options.IsFallbackOnly,
+                FallbackModeEnabled = _options.FallbackModeEnabled,
+                ManualRunAllowed = manualDecision == "MANUAL_RUN_ALLOWED",
+                ManualRunDecision = manualDecision,
+                ManualRunReason = manualReason,
+            },
+            AutoSyncRuntime = new QlhvAutoSyncRuntimeStateDto
+            {
+                IsRunActive = displayedClassification.IsActive,
+                ActiveRunId = displayedClassification.IsActive ? latest?.RunId : null,
+                Classification = latest is null ? "INACTIVE" : displayedClassification.Classification,
+                Source = displayedClassification.IsActive ? latest?.CurrentSourceType : null,
+                Step = displayedClassification.IsActive ? latest?.CurrentStage : null,
+                StartedAtUtc = displayedClassification.IsActive ? latest?.StartedAtUtc : null,
+                LastHeartbeatUtc = latest is null ? null : LastActivity(latest),
+                HeartbeatFresh = displayedClassification.HeartbeatFresh,
+                EffectiveActiveSlotCount = displayedClassification.IsActive ? 1 : 0,
+                RawActiveSlotCount = operations?.RawAutoSyncSlots ?? (rawActive is null ? 0 : 1),
+                ActiveOperationCount = operations?.ActiveOperations ?? 0,
+            },
         };
     }
+
+    public Task<QlhvSyncFreshnessResult> GetDiagnosticsAsync(
+        CancellationToken cancellationToken = default)
+        => _freshness.EvaluateAsync(cancellationToken);
 
     private async Task<SystemDataVersionDto?> GetDataVersionAsync(
         CancellationToken cancellationToken)
@@ -547,6 +698,11 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
         if (!_options.Enabled)
         {
             return ["Auto Sync dang tat trong cau hinh."];
+        }
+
+        if (!_options.IsFallbackOnly || !_options.FallbackModeEnabled)
+        {
+            return ["Auto Sync chi la fallback va FallbackModeEnabled chua duoc bat."];
         }
 
         if (!_options.RefreshBackupBeforeSync)
@@ -609,7 +765,22 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
     }
 
     private static string ToState(QlhvAutoSyncRunRecord? run)
-        => run?.Status switch
+    {
+        if (run is not null &&
+            IsTerminal(run.Status) &&
+            (string.Equals(
+                 run.Oto?.Status,
+                 QlhvAutoSyncConstants.NeedsPlan,
+                 StringComparison.Ordinal) ||
+             string.Equals(
+                 run.Moto?.Status,
+                 QlhvAutoSyncConstants.NeedsPlan,
+                 StringComparison.Ordinal)))
+        {
+            return "needs-plan";
+        }
+
+        return run?.Status switch
         {
             QlhvAutoSyncConstants.Queued => "queued",
             QlhvAutoSyncConstants.Running => "running",
@@ -619,6 +790,98 @@ public sealed class QlhvAutoSyncService : IQlhvAutoSyncService
             QlhvAutoSyncConstants.Failed => "failed",
             _ => "idle",
         };
+    }
+
+    private QlhvAutoSyncHistoryItemDto ToHistoryItem(
+        QlhvAutoSyncRunRecord run)
+    {
+        var classification = ClassifyRun(run, DateTime.UtcNow);
+        return new()
+        {
+            RunId = run.RunId,
+            TriggerType = run.TriggerType,
+            Actor = run.Actor,
+            Status = run.Status,
+            CreatedAtUtc = run.CreatedAtUtc,
+            StartedAtUtc = run.StartedAtUtc,
+            CompletedAtUtc = run.CompletedAtUtc,
+            Oto = run.Oto,
+            Moto = run.Moto,
+            ErrorMessage = run.ErrorMessage,
+            Classification = classification.Classification,
+            IsStale = classification.Classification == "INACTIVE_STALE_RUN",
+            LastHeartbeatUtc = LastActivity(run),
+        };
+    }
+
+    private async Task<QlhvOperationsStateSnapshot?> ReadOperationsStateAsync(
+        CancellationToken cancellationToken)
+    {
+        if (_operationsState is null) return null;
+        try { return await _operationsState.ReadAsync(cancellationToken); }
+        catch (OperationCanceledException) { throw; }
+        catch { return null; }
+    }
+
+    private async Task<bool> IsMasterAuthorityActiveAsync(
+        CancellationToken cancellationToken)
+    {
+        if (_realtimeControl is null) return false;
+        try
+        {
+            await _realtimeControl.ReadAsync(cancellationToken);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            // A configured master authority whose store cannot be proven is
+            // still fail-closed; legacy Auto Sync must not become a fallback.
+            return true;
+        }
+    }
+
+    private static bool IsManualFallbackBlocked(QlhvOperationsStateSnapshot state)
+        => state.RealtimeWritesEnabled || state.MutexHeld || state.CycleActive ||
+           state.ActiveOperations != 0 ||
+           string.Equals(state.ServiceState, "RUNNING", StringComparison.Ordinal) ||
+           string.Equals(state.ProcessState, "RUNNING", StringComparison.Ordinal);
+
+    private QlhvAutoSyncRunClassification ClassifyRun(
+        QlhvAutoSyncRunRecord? run, DateTime nowUtc)
+        => QlhvAutoSyncRunClassifier.Classify(
+            run, nowUtc, _options.ActiveRunHeartbeatTimeoutSeconds);
+
+    private static DateTime LastActivity(QlhvAutoSyncRunRecord run)
+        => QlhvAutoSyncRunClassifier.LastActivity(run);
+
+    private static QlhvRealtimeOperationsStateDto ToRealtimeState(
+        QlhvOperationsStateSnapshot? state, DateTime nowUtc)
+    {
+        if (state is null) return new QlhvRealtimeOperationsStateDto();
+        var fresh = state.LastHeartbeatUtc >= nowUtc.AddSeconds(-30);
+        var running = state.RealtimeEnabled && fresh &&
+            string.Equals(state.ServiceState, "RUNNING", StringComparison.Ordinal) &&
+            string.Equals(state.ProcessState, "RUNNING", StringComparison.Ordinal) &&
+            !string.Equals(state.WorkerStatus, Rt03.Rt03WorkerStatuses.Stopped, StringComparison.Ordinal);
+        return new QlhvRealtimeOperationsStateDto
+        {
+            ServiceState = state.ServiceState,
+            ProcessState = state.ProcessState,
+            OverallHealth = running ? state.WorkerStatus : "STALE",
+            WorkerInstanceId = state.WorkerInstanceId,
+            LastHeartbeatUtc = state.LastHeartbeatUtc,
+            CurrentProfile = state.CurrentProfile,
+            CycleActive = state.CycleActive,
+            WriterEnabled = state.RealtimeWritesEnabled,
+            MutexHeld = state.MutexHeld,
+            LastFailureCode = state.LastErrorCode,
+            Profiles = state.Profiles,
+        };
+    }
 
     private static bool IsTerminal(string status)
         => string.Equals(status, QlhvAutoSyncConstants.Succeeded, StringComparison.Ordinal) ||

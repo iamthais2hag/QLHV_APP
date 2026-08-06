@@ -55,6 +55,7 @@ public sealed class SqlServerRuntimeReadinessProbe : IRuntimeReadinessProbe
         var authenticationReady = false;
         var backupProfilesReady = false;
         var backupDirectoryVisibleToSql = false;
+        var reviewedRetained = new Rt03ReviewedRetainedRuntimeDiagnosticsDto();
 
         ResolvedConnection target;
         try
@@ -171,6 +172,32 @@ public sealed class SqlServerRuntimeReadinessProbe : IRuntimeReadinessProbe
                         }
                     }
 
+                    if (requiredSchemaReady &&
+                        await connection.ExecuteScalarAsync<int>(new CommandDefinition(
+                            Rt03V9SchemaReadySql,
+                            commandTimeout: CommandTimeoutSeconds,
+                            cancellationToken: cancellationToken)) == 8)
+                    {
+                        var row = await connection.QuerySingleAsync<ReviewedRetainedRow>(
+                            new CommandDefinition(
+                                ReviewedRetainedRuntimeSql,
+                                commandTimeout: CommandTimeoutSeconds,
+                                cancellationToken: cancellationToken));
+                        reviewedRetained = new Rt03ReviewedRetainedRuntimeDiagnosticsDto
+                        {
+                            ReviewedRetainedCount = row.ReviewedRetainedCount,
+                            ReviewedRetainedDomains = (row.ReviewedRetainedDomains ?? string.Empty)
+                                .Split(',', StringSplitOptions.RemoveEmptyEntries |
+                                            StringSplitOptions.TrimEntries),
+                            ActiveReviewCount = row.ActiveReviewCount,
+                            StaleReviewCount = row.StaleReviewCount,
+                            NewDriftCount = row.NewDriftCount,
+                            OldestActiveReviewUtc = row.OldestActiveReviewUtc,
+                            NewestActiveReviewUtc = row.NewestActiveReviewUtc,
+                            CycleOutcome = row.CycleOutcome ?? string.Empty,
+                        };
+                    }
+
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -221,6 +248,7 @@ public sealed class SqlServerRuntimeReadinessProbe : IRuntimeReadinessProbe
             BackupStorageReady = localBackupDirectoryReady && backupDirectoryVisibleToSql,
             FileStorageReady = fileStorageReady,
             RuntimeStorageReady = runtimeStorageReady,
+            ReviewedRetained = reviewedRetained,
             Messages = messages,
         };
     }
@@ -234,6 +262,18 @@ public sealed class SqlServerRuntimeReadinessProbe : IRuntimeReadinessProbe
             ConnectTimeout = CommandTimeoutSeconds,
         };
         return builder.ConnectionString;
+    }
+
+    private sealed class ReviewedRetainedRow
+    {
+        public int ReviewedRetainedCount { get; init; }
+        public string? ReviewedRetainedDomains { get; init; }
+        public int ActiveReviewCount { get; init; }
+        public int StaleReviewCount { get; init; }
+        public int NewDriftCount { get; init; }
+        public DateTime? OldestActiveReviewUtc { get; init; }
+        public DateTime? NewestActiveReviewUtc { get; init; }
+        public string? CycleOutcome { get; init; }
     }
 
     private async Task<BackupValidationResult> ValidateBackupProfilesAsync(
@@ -393,6 +433,26 @@ public sealed class SqlServerRuntimeReadinessProbe : IRuntimeReadinessProbe
     private sealed record BackupValidationResult(
         bool ProfilesReady,
         bool BackupDirectoryReady);
+
+    private const string Rt03V9SchemaReadySql = """
+        SELECT COUNT(*)
+        FROM sys.columns
+        WHERE object_id=OBJECT_ID(N'dbo.App_QlhvDirectRealtimeWorkerState')
+          AND name IN
+          (
+              N'ReviewedRetainedCount',N'ReviewedRetainedDomains',
+              N'ActiveReviewCount',N'StaleReviewCount',N'NewDriftCount',
+              N'OldestActiveReviewUtc',N'NewestActiveReviewUtc',N'CycleOutcome'
+          );
+        """;
+
+    private const string ReviewedRetainedRuntimeSql = """
+        SELECT ReviewedRetainedCount,ReviewedRetainedDomains,ActiveReviewCount,
+               StaleReviewCount,NewDriftCount,OldestActiveReviewUtc,
+               NewestActiveReviewUtc,CycleOutcome
+        FROM dbo.App_QlhvDirectRealtimeWorkerState
+        WHERE WorkerStateId=1;
+        """;
 
     private const string RequiredTablesSql = """
 SELECT tableRow.name

@@ -8,6 +8,7 @@ using QLHV.Application.Sync.Configuration;
 using QLHV.Application.Sync.Connections;
 using QLHV.Application.Sync.Dtos;
 using QLHV.Application.Sync.Mapping;
+using QLHV.Application.Sync.Rt03;
 using AppSyncOptions = QLHV.Application.Sync.SyncOptions;
 
 namespace QLHV.Infrastructure.Sync;
@@ -328,6 +329,144 @@ WHERE SourceProfileCode = @SourceProfileCode
             cancellationToken);
     }
 
+    public async Task<QlhvDomainWriteResult> FullSyncRecoveryDomainAsync(
+        string sourceProfileCode,
+        QlhvImportFullSyncPayload payload,
+        string domain,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureWritesEnabled();
+        ArgumentNullException.ThrowIfNull(payload);
+        var normalizedProfile =
+            NormalizeRequired(sourceProfileCode, nameof(sourceProfileCode))
+                .ToUpperInvariant();
+        if (!string.Equals(
+                normalizedProfile,
+                CsdtConnectionProfileCodes.CsdtOto,
+                StringComparison.Ordinal) &&
+            !string.Equals(
+                normalizedProfile,
+                CsdtConnectionProfileCodes.CsdtMoto,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "RT03 recovery only accepts CSDT_OTO or CSDT_MOTO.");
+        }
+
+        var normalizedDomain = NormalizeRequired(domain, nameof(domain))
+            .ToUpperInvariant();
+        if (!QlhvImportDomains.Ordered.Contains(
+                normalizedDomain,
+                StringComparer.Ordinal))
+        {
+            throw new InvalidOperationException("RT03 recovery domain is not allowed.");
+        }
+
+        var connectionString = await ResolveUsableTargetAsync(cancellationToken);
+        DomainTransactionResult transactionResult;
+        switch (normalizedDomain)
+        {
+            case QlhvImportDomains.KhoaHoc:
+                ValidateEntitySourceIdentity(
+                    normalizedProfile,
+                    payload.KhoaHocRows,
+                    row => row.SourceProfileCode,
+                    row => row.SourceMaKhoaHoc,
+                    "KhoaHoc");
+                ValidateKhoaHocRequiredValues(payload.KhoaHocRows);
+                transactionResult = await FullSyncEntityDomainCoreAsync(
+                    connectionString,
+                    normalizedProfile,
+                    QlhvImportDomains.KhoaHoc,
+                    payload.KhoaHocRows.Count,
+                    QlhvCourseTeacherFullSnapshotSyncSql.CreateKhoaHocStagingTable,
+                    QlhvCourseTeacherFullSnapshotSyncSql.KhoaHocStagingTableName,
+                    BuildKhoaHocStagingTable(payload.KhoaHocRows),
+                    QlhvCourseTeacherFullSnapshotSyncSql.KhoaHocAtomicGuard,
+                    QlhvCourseTeacherFullSnapshotSyncSql.MergeKhoaHoc,
+                    QlhvCourseTeacherFullSnapshotSyncSql.SoftDeleteKhoaHoc,
+                    QlhvCourseTeacherFullSnapshotSyncSql.DropKhoaHocStagingTable,
+                    QlhvDataVersionSql.IncrementAfterKhoaHocCommit,
+                    cancellationToken);
+                break;
+            case QlhvImportDomains.GiaoVien:
+                ValidateEntitySourceIdentity(
+                    normalizedProfile,
+                    payload.GiaoVienRows,
+                    row => row.SourceProfileCode,
+                    row => row.SourceMaGV,
+                    "GiaoVien");
+                ValidateGiaoVienRequiredValues(payload.GiaoVienRows);
+                transactionResult = await FullSyncEntityDomainCoreAsync(
+                    connectionString,
+                    normalizedProfile,
+                    QlhvImportDomains.GiaoVien,
+                    payload.GiaoVienRows.Count,
+                    QlhvCourseTeacherFullSnapshotSyncSql.CreateGiaoVienStagingTable,
+                    QlhvCourseTeacherFullSnapshotSyncSql.GiaoVienStagingTableName,
+                    BuildGiaoVienStagingTable(payload.GiaoVienRows),
+                    QlhvCourseTeacherFullSnapshotSyncSql.GiaoVienAtomicGuard,
+                    QlhvCourseTeacherFullSnapshotSyncSql.MergeGiaoVien,
+                    QlhvCourseTeacherFullSnapshotSyncSql.SoftDeleteGiaoVien,
+                    QlhvCourseTeacherFullSnapshotSyncSql.DropGiaoVienStagingTable,
+                    QlhvDataVersionSql.IncrementAfterGiaoVienCommit,
+                    cancellationToken);
+                break;
+            case QlhvImportDomains.Relation:
+                ValidateEntitySourceIdentity(
+                    normalizedProfile,
+                    payload.RelationRows,
+                    row => row.SourceProfileCode,
+                    row => row.SourceMaLichLV.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture),
+                    "KhoaHoc_GiaoVien");
+                ValidateRelationRequiredValues(payload.RelationRows);
+                transactionResult = await FullSyncEntityDomainCoreAsync(
+                    connectionString,
+                    normalizedProfile,
+                    QlhvImportDomains.Relation,
+                    payload.RelationRows.Count,
+                    QlhvCourseTeacherFullSnapshotSyncSql.CreateRelationStagingTable,
+                    QlhvCourseTeacherFullSnapshotSyncSql.RelationStagingTableName,
+                    BuildRelationStagingTable(payload.RelationRows),
+                    QlhvCourseTeacherFullSnapshotSyncSql.RelationAtomicGuard,
+                    QlhvCourseTeacherFullSnapshotSyncSql.MergeRelation,
+                    QlhvCourseTeacherFullSnapshotSyncSql.SoftDeleteRelation,
+                    QlhvCourseTeacherFullSnapshotSyncSql.DropRelationStagingTable,
+                    QlhvDataVersionSql.IncrementAfterRelationCommit,
+                    cancellationToken);
+                break;
+            case QlhvImportDomains.HocVien:
+                if (payload.HocVienRows.Count == 0)
+                {
+                    throw new InvalidOperationException(
+                        "RT03 recovery refuses an empty learner snapshot.");
+                }
+
+                ValidateFullSyncSourceIdentity(
+                    normalizedProfile,
+                    payload.HocVienRows);
+                transactionResult = await FullSyncHocVienDomainCoreAsync(
+                    connectionString,
+                    normalizedProfile,
+                    payload,
+                    new HashSet<string>(
+                        [
+                            QlhvImportDomains.KhoaHoc,
+                            QlhvImportDomains.GiaoVien,
+                            QlhvImportDomains.Relation,
+                        ],
+                        StringComparer.Ordinal),
+                    cancellationToken);
+                break;
+            default:
+                throw new InvalidOperationException(
+                    "Vehicle recovery uses the dedicated vehicle target store.");
+        }
+
+        return transactionResult.Result;
+    }
+
     private async Task<QlhvImportFullSyncWriteResult> FullSyncDomainsAsync(
         string connectionString,
         string sourceProfileCode,
@@ -488,10 +627,11 @@ WHERE SourceProfileCode = @SourceProfileCode
             return SkippedDomain(
                 domain,
                 sourceRows,
-                ResolveSkippedStatus(reason),
+                QlhvImportDomainStatuses.SkippedNotRequested,
                 string.IsNullOrWhiteSpace(reason)
                     ? $"{domain} khong duoc chon trong plan va da duoc bo qua an toan."
-                    : reason);
+                    : reason,
+                ResolvePlannedSkipStatus(reason));
         }
 
         if (sourceRows == 0)
@@ -633,7 +773,9 @@ WHERE SourceProfileCode = @SourceProfileCode
                 connection,
                 transaction,
                 QlhvFullSnapshotSyncSql.StagingTableName,
-                BuildFullSyncStagingTable(payload.HocVienRows),
+                BuildFullSyncStagingTable(
+                    payload.HocVienRows,
+                    payload.ReviewedRetainedSourceBusinessIdentityHashes),
                 cancellationToken);
 
             var guard = await connection.QuerySingleAsync<HocVienDomainGuardRow>(new CommandDefinition(
@@ -888,7 +1030,8 @@ WHERE SourceProfileCode = @SourceProfileCode
     }
 
     private static DataTable BuildFullSyncStagingTable(
-        IReadOnlyList<QlhvImportHocVienWriteModel> rows)
+        IReadOnlyList<QlhvImportHocVienWriteModel> rows,
+        IReadOnlySet<string>? reviewedRetainedBusinessIdentities = null)
     {
         var table = new DataTable();
         table.Columns.Add("SourceProfileCode", typeof(string));
@@ -914,6 +1057,7 @@ WHERE SourceProfileCode = @SourceProfileCode
         table.Columns.Add("NguoiThuNhanAnh", typeof(string));
         table.Columns.Add("SourceOfTruth", typeof(string));
         table.Columns.Add("V2RowHash", typeof(string));
+        table.Columns.Add("RetainReviewedTarget", typeof(bool));
 
         foreach (var row in rows)
         {
@@ -940,7 +1084,11 @@ WHERE SourceProfileCode = @SourceProfileCode
                 Db(row.NgayThuNhanAnh),
                 Db(row.NguoiThuNhanAnh),
                 row.SourceOfTruth,
-                row.V2RowHash);
+                row.V2RowHash,
+                reviewedRetainedBusinessIdentities?.Contains(
+                    Rt03ReviewedRetainedFingerprints.SourceBusinessIdentity(
+                        row.SourceProfileCode,
+                        row.SourceMaDK)) == true);
         }
 
         return table;
@@ -1103,13 +1251,17 @@ WHERE SourceProfileCode = @SourceProfileCode
         string domain,
         int sourceRows,
         string status,
-        string? message)
+        string? message,
+        string? requestReasonCode = null)
         => new(
             new QlhvDomainWriteResult(
                 domain,
                 status,
                 message,
-                new QlhvEntityWriteCounts(sourceRows, 0, 0, 0, 0, sourceRows)));
+                new QlhvEntityWriteCounts(sourceRows, 0, 0, 0, 0, sourceRows))
+            {
+                RequestReasonCode = requestReasonCode ?? status,
+            });
 
     private static DomainTransactionResult FailedDomain(
         string domain,
@@ -1151,14 +1303,18 @@ WHERE SourceProfileCode = @SourceProfileCode
         => string.Equals(result.Status, QlhvImportDomainStatuses.Succeeded, StringComparison.Ordinal) ||
            string.Equals(result.Status, QlhvImportDomainStatuses.NoOp, StringComparison.Ordinal);
 
-    private static string ResolveSkippedStatus(string? reason)
+    private static string ResolvePlannedSkipStatus(string? reason)
     {
-        if (reason?.Contains("SCHEMA", StringComparison.OrdinalIgnoreCase) == true)
+        if (reason?.Contains(
+                QlhvImportDomainStatuses.SkippedSchemaNotReady,
+                StringComparison.OrdinalIgnoreCase) == true)
         {
             return QlhvImportDomainStatuses.SkippedSchemaNotReady;
         }
 
-        if (reason?.Contains("DEPENDENCY", StringComparison.OrdinalIgnoreCase) == true)
+        if (reason?.Contains(
+                QlhvImportDomainStatuses.SkippedDependencyNotReady,
+                StringComparison.OrdinalIgnoreCase) == true)
         {
             return QlhvImportDomainStatuses.SkippedDependencyNotReady;
         }

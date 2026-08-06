@@ -55,7 +55,7 @@ internal sealed class QlhvRollingFileLoggerProvider : ILoggerProvider
         var exceptionSuffix = exception is null
             ? string.Empty
             : $" ExceptionType={exception.GetType().Name}";
-        var now = DateTimeOffset.Now;
+        var now = DateTimeOffset.UtcNow;
         var line = $"{now:O} [{level}] {safeCategory} {safeMessage}{exceptionSuffix}{Environment.NewLine}";
         var byteCount = Encoding.UTF8.GetByteCount(line);
 
@@ -104,7 +104,7 @@ internal sealed class QlhvRollingFileLoggerProvider : ILoggerProvider
 
     private void SelectFile(DateTimeOffset now, int nextByteCount)
     {
-        var date = DateOnly.FromDateTime(now.LocalDateTime);
+        var date = DateOnly.FromDateTime(now.UtcDateTime);
         if (_currentPath is null || date != _currentDate)
         {
             _currentDate = date;

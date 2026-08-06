@@ -1,10 +1,13 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using QLHV.Application.Auth;
+using QLHV.Application.Assignments;
 using QLHV.Application.CsdtConnections;
+using QLHV.Application.CourseCompletion;
 using QLHV.Application.HocVien;
 using QLHV.Application.HocVien.Printing;
 using QLHV.Application.Sync;
+using QLHV.Application.Sync.Realtime;
 using QLHV.Application.SystemData;
 
 namespace QLHV.Application;
@@ -19,6 +22,11 @@ public static class DependencyInjection
         services.AddScoped<IAppUserManagementService, AppUserManagementService>();
         services.AddScoped<IFirstAdminSeeder, FirstAdminSeeder>();
         services.AddScoped<IHocVienService, HocVienService>();
+        services.AddSingleton<AssignmentPreviewStore>();
+        services.AddScoped<IAssignmentService, AssignmentService>();
+        services.AddSingleton<CourseCompletionCanonicalSnapshotBuilder>();
+        services.AddSingleton<CourseCompletionPreviewStore>();
+        services.AddScoped<ICourseCompletionService, CourseCompletionService>();
         services.AddSingleton(HocVienCardTemplate.Default);
         services.AddSingleton<IHocVienCardPdfGenerator, HocVienCardPdfGenerator>();
         services.AddScoped<ICsdtConnectionProfileService, CsdtConnectionProfileService>();
@@ -32,6 +40,11 @@ public static class DependencyInjection
         services.AddScoped<QlhvAutoSyncCoordinator>();
         services.AddScoped<ISystemDataVersionService, SystemDataVersionService>();
         services.AddScoped<IMotoSyncService, MotoSyncService>();
+        services.AddOptions<CsdtRealtimeSyncOptions>();
+        services.AddSingleton<
+            Microsoft.Extensions.Options.IValidateOptions<CsdtRealtimeSyncOptions>,
+            CsdtRealtimeSyncOptionsValidator>();
+        services.AddScoped<ICsdtRealtimeService, CsdtRealtimeService>();
         return services;
     }
 }

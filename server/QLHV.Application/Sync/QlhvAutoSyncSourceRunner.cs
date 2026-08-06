@@ -105,7 +105,7 @@ public sealed class QlhvAutoSyncSourceRunner : IQlhvAutoSyncSourceRunner
             {
                 var blocker = plan.Blockers.FirstOrDefault() ??
                               plan.HocVienBlockers.FirstOrDefault();
-                return Failed(
+                return NeedsPlan(
                     source.SourceType,
                     startedAtUtc,
                     refreshOperationId,
@@ -125,12 +125,26 @@ public sealed class QlhvAutoSyncSourceRunner : IQlhvAutoSyncSourceRunner
             syncOperationId = execute.OperationId;
             if (!execute.Executed)
             {
+                if (RequiresNewPlan(execute))
+                {
+                    return NeedsPlan(
+                        source.SourceType,
+                        startedAtUtc,
+                        refreshOperationId,
+                        syncOperationId,
+                        execute.Message);
+                }
+
                 return Failed(
                     source.SourceType,
                     startedAtUtc,
                     refreshOperationId,
                     syncOperationId,
-                    execute.Message);
+                    execute.Message,
+                    execute.DomainResults,
+                    execute.PhotoProcessing,
+                    execute.SkippedReasons,
+                    execute.Plan.Warnings);
             }
 
             if (string.Equals(
@@ -160,6 +174,10 @@ public sealed class QlhvAutoSyncSourceRunner : IQlhvAutoSyncSourceRunner
                 StartedAtUtc = startedAtUtc,
                 CompletedAtUtc = DateTime.UtcNow,
                 Message = execute.Message,
+                DomainResults = execute.DomainResults,
+                PhotoProcessing = execute.PhotoProcessing,
+                SkippedReasons = execute.SkippedReasons,
+                Warnings = execute.Plan.Warnings,
             };
         }
         catch (OperationCanceledException)
@@ -207,7 +225,11 @@ public sealed class QlhvAutoSyncSourceRunner : IQlhvAutoSyncSourceRunner
         DateTime startedAtUtc,
         Guid? refreshOperationId,
         Guid? syncOperationId,
-        string message)
+        string message,
+        IReadOnlyList<QlhvImportDomainResultDto>? domainResults = null,
+        QlhvImportDomainResultDto? photoProcessing = null,
+        QlhvSkippedReasonCountsDto? skippedReasons = null,
+        IReadOnlyList<string>? warnings = null)
         => new()
         {
             SourceType = sourceType,
@@ -217,5 +239,34 @@ public sealed class QlhvAutoSyncSourceRunner : IQlhvAutoSyncSourceRunner
             StartedAtUtc = startedAtUtc,
             CompletedAtUtc = DateTime.UtcNow,
             Message = message,
+            DomainResults = domainResults ?? Array.Empty<QlhvImportDomainResultDto>(),
+            PhotoProcessing = photoProcessing,
+            SkippedReasons = skippedReasons ?? new QlhvSkippedReasonCountsDto(),
+            Warnings = warnings ?? Array.Empty<string>(),
         };
+
+    private static QlhvAutoSyncSourceResultDto NeedsPlan(
+        string sourceType,
+        DateTime startedAtUtc,
+        Guid? refreshOperationId,
+        Guid? syncOperationId,
+        string message)
+        => new()
+        {
+            SourceType = sourceType,
+            Status = QlhvAutoSyncConstants.NeedsPlan,
+            RefreshOperationId = refreshOperationId,
+            SyncOperationId = syncOperationId,
+            StartedAtUtc = startedAtUtc,
+            CompletedAtUtc = DateTime.UtcNow,
+            Message = message,
+        };
+
+    private static bool RequiresNewPlan(QlhvImportExecuteResultDto result)
+        => result.Plan.Blockers
+            .Concat(result.Plan.HocVienBlockers)
+            .Any(blocker =>
+                blocker.Contains("ExpectedSnapshotToken", StringComparison.OrdinalIgnoreCase) ||
+                blocker.Contains("Plan da cu", StringComparison.OrdinalIgnoreCase) ||
+                blocker.Contains("snapshot BAK", StringComparison.OrdinalIgnoreCase));
 }

@@ -31,7 +31,7 @@ public sealed class QlhvKhoaHocSourceRow
 }
 
 /// <summary>One teacher row read from a fixed CSDT backup database.</summary>
-public sealed class QlhvGiaoVienSourceRow
+public class QlhvGiaoVienSourceRow
 {
     public string MaGV { get; init; } = string.Empty;
     public string MaSoGTVT { get; init; } = string.Empty;
@@ -74,7 +74,7 @@ public sealed class QlhvGiaoVienSourceRow
 }
 
 /// <summary>One course-teacher assignment row from the backup snapshot.</summary>
-public sealed class QlhvKhoaHocGiaoVienSourceRow
+public class QlhvKhoaHocGiaoVienSourceRow
 {
     public int MaLichLV { get; init; }
     public string MaKH { get; init; } = string.Empty;

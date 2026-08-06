@@ -16,29 +16,19 @@ public sealed class QlhvAutoSyncPhotoClientSourceTests
         Assert.Contains("/operations/auto-sync`", api, StringComparison.Ordinal);
         Assert.Contains("method: 'POST'", api, StringComparison.Ordinal);
         Assert.Contains("isAdmin", panel, StringComparison.Ordinal);
-        Assert.Contains("Auto Sync đang chạy; không thể gửi yêu cầu lần hai.", panel, StringComparison.Ordinal);
+        Assert.Contains("status.configuration.manualRunAllowed", panel, StringComparison.Ordinal);
         Assert.Contains("disabled={disabledReason !== null}", panel, StringComparison.Ordinal);
-        Assert.Contains("aria-busy={starting || running}", panel, StringComparison.Ordinal);
-        Assert.Contains("startingRef.current", panel, StringComparison.Ordinal);
-        Assert.Contains("Chạy Auto Sync ngay", panel, StringComparison.Ordinal);
-        Assert.Contains("SYSTEM_AUTO_SYNC", panel, StringComparison.Ordinal);
-        Assert.Contains("SYSTEM_SESSION_START", panel, StringComparison.Ordinal);
-        Assert.Contains("sessionStartRunId", panel, StringComparison.Ordinal);
-        Assert.Contains("trackedSessionRunId", panel, StringComparison.Ordinal);
-        Assert.Contains("manualRunId", panel, StringComparison.Ordinal);
-        Assert.Contains("setManualRunId(result.runId)", panel, StringComparison.Ordinal);
-        Assert.Contains("const trackedRunId = manualRunId ?? trackedSessionRunId", panel, StringComparison.Ordinal);
-        Assert.Contains("currentStage", panel, StringComparison.Ordinal);
-        Assert.Contains("waitingForTrackedRun", panel, StringComparison.Ordinal);
-        Assert.Contains("const shouldPoll = running || waitingForTrackedRun", panel, StringComparison.Ordinal);
-        Assert.Contains("shouldPoll ? POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS", panel, StringComparison.Ordinal);
-        Assert.Contains("notifiedTerminalRunRef.current = trackedRunId", panel, StringComparison.Ordinal);
-        Assert.Contains("getQlhvAutoSyncStatus(requestedRunId)", panel, StringComparison.Ordinal);
+        Assert.Contains("Chạy Auto Sync dự phòng", panel, StringComparison.Ordinal);
+        Assert.DoesNotContain("sessionStartRunId", panel, StringComparison.Ordinal);
+        Assert.DoesNotContain("manualRunId", panel, StringComparison.Ordinal);
+        Assert.Contains("status.autoSyncRuntime.isRunActive", panel, StringComparison.Ordinal);
+        Assert.Contains("UI_REFRESH_INTERVAL_MS", panel, StringComparison.Ordinal);
+        Assert.Contains("getQlhvAutoSyncStatus()", panel, StringComparison.Ordinal);
         Assert.Contains("parameters.set('runId', runId)", api, StringComparison.Ordinal);
-        Assert.Contains("trackedStatus.found", panel, StringComparison.Ordinal);
-        Assert.Contains("statusQueryRunId === trackedRunId", panel, StringComparison.Ordinal);
-        Assert.Contains("requestId !== loadRequestIdRef.current", panel, StringComparison.Ordinal);
-        Assert.Contains("onBusyChange?.(busy)", panel, StringComparison.Ordinal);
+        Assert.Contains("id !== requestId.current", panel, StringComparison.Ordinal);
+        Assert.Contains("onBusyChange?.(active || starting)", panel, StringComparison.Ordinal);
+        Assert.Contains("status.history", panel, StringComparison.Ordinal);
+        Assert.DoesNotContain("operationHistory", panel, StringComparison.Ordinal);
         Assert.Contains("AUTO_SYNC_BUSY_MESSAGE", page, StringComparison.Ordinal);
         Assert.Contains("onBusyChange={handleAutoSyncBusyChange}", page, StringComparison.Ordinal);
         Assert.Contains("if (autoSyncBusy)", page, StringComparison.Ordinal);
@@ -50,6 +40,89 @@ public sealed class QlhvAutoSyncPhotoClientSourceTests
         Assert.DoesNotContain("setStatus(null)", panel, StringComparison.Ordinal);
         Assert.DoesNotContain("Operations-Key", combined, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("confirmText", combined, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Auto_sync_screen_labels_both_pipelines_to_qlhv_app_and_uses_durable_history()
+    {
+        var logic = ReadClientFile("features", "qlhv-import", "logic.ts");
+        var page = ReadClientFile("features", "qlhv-import", "QlhvImportPage.tsx");
+        var panel = ReadClientFile("features", "qlhv-import", "AutoSyncPanel.tsx");
+
+        Assert.Equal(2, CountOccurrences(logic, "targetDatabaseName: 'QLHV_APP'"));
+        Assert.Contains("<code>{source.targetDatabaseName}</code>", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("<code>{source.sourceProfileCode}</code>", page, StringComparison.Ordinal);
+        Assert.Contains("value.targetDatabaseName === 'QLHV_APP'", ReadClientFile(
+            "features", "qlhv-import", "api.ts"), StringComparison.Ordinal);
+        Assert.Contains("status.history", panel, StringComparison.Ordinal);
+        Assert.DoesNotContain("operationHistory", panel, StringComparison.Ordinal);
+        Assert.Contains("Realtime trực tiếp — đường chính", panel, StringComparison.Ordinal);
+        Assert.Contains("Auto Sync dự phòng", panel, StringComparison.Ordinal);
+        Assert.Contains("CSDL_OTO / CSDL_MOTO → QLHV_APP", panel, StringComparison.Ordinal);
+        Assert.Contains("status.realtime.profiles", panel, StringComparison.Ordinal);
+        Assert.Contains("Lịch sử stale — không hoạt động", panel, StringComparison.Ordinal);
+        Assert.Contains("Windows Service", panel, StringComparison.Ordinal);
+        Assert.Contains("HEALTHY_NO_CHANGE", panel, StringComparison.Ordinal);
+        Assert.Contains("Writer chính", panel, StringComparison.Ordinal);
+        Assert.Contains("QLHV Realtime", panel, StringComparison.Ordinal);
+        Assert.Contains("Đang bảo vệ", panel, StringComparison.Ordinal);
+        Assert.Contains("RunOnServerStartup", panel, StringComparison.Ordinal);
+        Assert.Contains("Active run / slot / operation", panel, StringComparison.Ordinal);
+        Assert.Contains("Bị khóa bởi Realtime", panel, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Auto_sync_screen_and_build_emit_runtime_identity_without_a_service_worker()
+    {
+        var panel = ReadClientFile("features", "qlhv-import", "AutoSyncPanel.tsx");
+        var api = ReadClientFile("features", "qlhv-import", "api.ts");
+        var buildIdentity = ReadClientFile("buildIdentity.ts");
+        var vite = File.ReadAllText(FindWorkspaceFile(["client", "vite.config.ts"]));
+        var program = File.ReadAllText(FindWorkspaceFile(
+            ["server", "QLHV.Api", "Program.cs"]));
+
+        Assert.Contains("FRONTEND_BUILD_ID", panel, StringComparison.Ordinal);
+        Assert.Contains("status.runtime.apiBuildId", panel, StringComparison.Ordinal);
+        Assert.Contains("status.runtime.workerBuildId", panel, StringComparison.Ordinal);
+        Assert.Contains("lastRefresh", panel, StringComparison.Ordinal);
+        Assert.Contains("isRuntimeBuildIdentity", api, StringComparison.Ordinal);
+        Assert.Contains("__QLHV_FRONTEND_BUILD_ID__", buildIdentity, StringComparison.Ordinal);
+        Assert.Contains("build-info.json", vite, StringComparison.Ordinal);
+        Assert.Contains("X-QLHV-API-Build", program, StringComparison.Ordinal);
+        Assert.Contains("no-cache, no-store, must-revalidate", program, StringComparison.Ordinal);
+        var fallback = program[program.IndexOf("app.MapMethods", StringComparison.Ordinal)..];
+        Assert.Contains("context.Response.Headers.CacheControl", fallback, StringComparison.Ordinal);
+        Assert.Contains("context.Response.SendFileAsync(indexFile)", fallback, StringComparison.Ordinal);
+        Assert.DoesNotContain("navigator.serviceWorker", panel, StringComparison.Ordinal);
+        Assert.DoesNotContain("registerSW", panel, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Manual_plan_message_is_not_presented_as_an_auto_sync_blocker()
+    {
+        var page = ReadClientFile("features", "qlhv-import", "QlhvImportPage.tsx");
+
+        Assert.Contains("<strong>Full sync ", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("<strong>Full sync:</strong>", page, StringComparison.Ordinal);
+        Assert.Contains("plan: null", page, StringComparison.Ordinal);
+        Assert.Contains("isPlanSnapshotCurrent", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Auto_sync_data_gap_probe_is_read_only_and_documents_count_scopes()
+    {
+        var controller = File.ReadAllText(FindWorkspaceFile(
+            ["server", "QLHV.Api", "Controllers", "QlhvImportController.cs"]));
+        var dtos = File.ReadAllText(FindWorkspaceFile(
+            ["server", "QLHV.Application", "Sync", "Dtos", "QlhvAutoSyncDtos.cs"]));
+
+        Assert.Contains("operations/auto-sync/diagnostics", controller, StringComparison.Ordinal);
+        Assert.Contains("CSDT_AUTO_SYNC_DATA_GAP_V1", dtos, StringComparison.Ordinal);
+        Assert.Contains("IsReadOnly", dtos, StringComparison.Ordinal);
+        Assert.Contains("LiveRows/BackupRows", controller, StringComparison.Ordinal);
+        Assert.Contains("TargetActiveRows", controller, StringComparison.Ordinal);
+        Assert.Contains("ContentToken", controller, StringComparison.Ordinal);
+        Assert.DoesNotContain("HttpPost(\"operations/auto-sync/diagnostics", controller, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -143,6 +216,9 @@ public sealed class QlhvAutoSyncPhotoClientSourceTests
     private static string ReadClientFile(params string[] pathParts)
         => File.ReadAllText(FindWorkspaceFile(
             new[] { "client", "src" }.Concat(pathParts).ToArray()));
+
+    private static int CountOccurrences(string value, string fragment)
+        => value.Split(fragment, StringSplitOptions.None).Length - 1;
 
     private static string FindWorkspaceFile(
         string[] pathParts,

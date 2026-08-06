@@ -137,22 +137,22 @@ SELECT
 
     private const string RowCountsSql = @"
 SELECT
-    CONVERT(int, COALESCE((SELECT SUM(row_count) FROM sys.dm_db_partition_stats
+    CONVERT(int, COALESCE((SELECT SUM(rows) FROM sys.partitions
         WHERE object_id = OBJECT_ID(N'dbo.NguoiLX', N'U') AND index_id IN (0, 1)), 0)) AS NguoiLX,
-    CONVERT(int, COALESCE((SELECT SUM(row_count) FROM sys.dm_db_partition_stats
+    CONVERT(int, COALESCE((SELECT SUM(rows) FROM sys.partitions
         WHERE object_id = OBJECT_ID(N'dbo.NguoiLX_HoSo', N'U') AND index_id IN (0, 1)), 0)) AS NguoiLXHoSo,
-    CONVERT(int, COALESCE((SELECT SUM(row_count) FROM sys.dm_db_partition_stats
+    CONVERT(int, COALESCE((SELECT SUM(rows) FROM sys.partitions
         WHERE object_id = OBJECT_ID(N'dbo.KhoaHoc', N'U') AND index_id IN (0, 1)), 0)) AS KhoaHoc;";
 
     private const string SnapshotMetadataSql = @"
 SELECT
     databaseRow.create_date AS CreateDate,
     CAST(snapshotProperty.value AS nvarchar(512)) AS SnapshotToken,
-    CONVERT(int, COALESCE((SELECT SUM(row_count) FROM sys.dm_db_partition_stats
+    CONVERT(int, COALESCE((SELECT SUM(rows) FROM sys.partitions
         WHERE object_id = OBJECT_ID(N'dbo.NguoiLX', N'U') AND index_id IN (0, 1)), 0)) AS NguoiLX,
-    CONVERT(int, COALESCE((SELECT SUM(row_count) FROM sys.dm_db_partition_stats
+    CONVERT(int, COALESCE((SELECT SUM(rows) FROM sys.partitions
         WHERE object_id = OBJECT_ID(N'dbo.NguoiLX_HoSo', N'U') AND index_id IN (0, 1)), 0)) AS NguoiLXHoSo,
-    CONVERT(int, COALESCE((SELECT SUM(row_count) FROM sys.dm_db_partition_stats
+    CONVERT(int, COALESCE((SELECT SUM(rows) FROM sys.partitions
         WHERE object_id = OBJECT_ID(N'dbo.KhoaHoc', N'U') AND index_id IN (0, 1)), 0)) AS KhoaHoc
 FROM sys.databases AS databaseRow
 OUTER APPLY

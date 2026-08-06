@@ -23,13 +23,16 @@ public sealed class AuthService : IAuthService
 
     private readonly IAppUserRepository _users;
     private readonly IPasswordHasher<AppUserCredential> _passwordHasher;
+    private readonly TimeProvider _timeProvider;
 
     public AuthService(
         IAppUserRepository users,
-        IPasswordHasher<AppUserCredential> passwordHasher)
+        IPasswordHasher<AppUserCredential> passwordHasher,
+        TimeProvider? timeProvider = null)
     {
         _users = users;
         _passwordHasher = passwordHasher;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public async Task<AuthLoginResult> AuthenticateAsync(
@@ -59,7 +62,7 @@ public sealed class AuthService : IAuthService
             return AuthLoginResult.InvalidCredentials();
         }
 
-        var now = DateTime.UtcNow;
+        var now = _timeProvider.GetUtcNow().UtcDateTime;
         if (user.FailedLoginCount >= MaxFailedLoginAttempts &&
             (user.LastFailedLoginAtUtc ?? user.UpdatedAtUtc) is { } lastFailureAtUtc &&
             lastFailureAtUtc > now.Subtract(LockoutDuration))

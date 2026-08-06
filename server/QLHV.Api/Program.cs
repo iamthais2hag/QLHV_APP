@@ -11,10 +11,16 @@ using QLHV.Api.Auth;
 using QLHV.Api.Runtime;
 using QLHV.Application;
 using QLHV.Application.Auth;
+using QLHV.Application.Assignments;
+using QLHV.Application.CourseCompletion;
 using QLHV.Application.Runtime;
 using QLHV.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Host.UseWindowsService(options =>
+{
+    options.ServiceName = "QLHV_APP_Api";
+});
 var runtimeConfigurationState = ProductionLocalConfigurationLoader.Load(
     builder.Configuration,
     builder.Environment,
@@ -101,6 +107,42 @@ builder.Services.AddAuthorization(options =>
         policy
             .RequireRole(AppRoles.Admin)
             .RequireClaim(AppClaimTypes.MustChangePassword, bool.FalseString.ToLowerInvariant()));
+    options.AddPolicy(AssignmentPolicies.ViewCatalogs, policy =>
+        policy.RequireRole(AppRoles.Admin, AppRoles.Employee, AppRoles.Viewer)
+            .RequireClaim(AppClaimTypes.MustChangePassword, bool.FalseString.ToLowerInvariant()));
+    options.AddPolicy(AssignmentPolicies.ManageDossierReceivers, policy =>
+        policy.RequireRole(AppRoles.Admin, AppRoles.Employee)
+            .RequireClaim(AppClaimTypes.MustChangePassword, bool.FalseString.ToLowerInvariant()));
+    options.AddPolicy(AssignmentPolicies.ManageGroups, policy =>
+        policy.RequireRole(AppRoles.Admin, AppRoles.Employee)
+            .RequireClaim(AppClaimTypes.MustChangePassword, bool.FalseString.ToLowerInvariant()));
+    options.AddPolicy(AssignmentPolicies.AssignSingle, policy =>
+        policy.RequireRole(AppRoles.Admin, AppRoles.Employee)
+            .RequireClaim(AppClaimTypes.MustChangePassword, bool.FalseString.ToLowerInvariant()));
+    options.AddPolicy(AssignmentPolicies.AssignBulk, policy =>
+        policy.RequireRole(AppRoles.Admin, AppRoles.Employee)
+            .RequireClaim(AppClaimTypes.MustChangePassword, bool.FalseString.ToLowerInvariant()));
+    options.AddPolicy(AssignmentPolicies.ImportPreview, policy =>
+        policy.RequireRole(AppRoles.Admin, AppRoles.Employee)
+            .RequireClaim(AppClaimTypes.MustChangePassword, bool.FalseString.ToLowerInvariant()));
+    options.AddPolicy(AssignmentPolicies.ImportConfirm, policy =>
+        policy.RequireRole(AppRoles.Admin)
+            .RequireClaim(AppClaimTypes.MustChangePassword, bool.FalseString.ToLowerInvariant()));
+    options.AddPolicy(AssignmentPolicies.Export, policy =>
+        policy.RequireRole(AppRoles.Admin, AppRoles.Employee)
+            .RequireClaim(AppClaimTypes.MustChangePassword, bool.FalseString.ToLowerInvariant()));
+    options.AddPolicy(AssignmentPolicies.ViewHistory, policy =>
+        policy.RequireRole(AppRoles.Admin, AppRoles.Employee, AppRoles.Viewer)
+            .RequireClaim(AppClaimTypes.MustChangePassword, bool.FalseString.ToLowerInvariant()));
+    options.AddPolicy(CourseCompletionPolicies.ViewStatus, policy =>
+        policy.RequireRole(AppRoles.Admin, AppRoles.Employee, AppRoles.Viewer)
+            .RequireClaim(AppClaimTypes.MustChangePassword, bool.FalseString.ToLowerInvariant()));
+    options.AddPolicy(CourseCompletionPolicies.Preview, policy =>
+        policy.RequireRole(AppRoles.Admin)
+            .RequireClaim(AppClaimTypes.MustChangePassword, bool.FalseString.ToLowerInvariant()));
+    options.AddPolicy(CourseCompletionPolicies.Complete, policy =>
+        policy.RequireRole(AppRoles.Admin)
+            .RequireClaim(AppClaimTypes.MustChangePassword, bool.FalseString.ToLowerInvariant()));
 });
 
 // In-memory cache for lookups
@@ -150,6 +192,7 @@ builder.Services.AddSwaggerGen(options =>
 });
 
 var app = builder.Build();
+var runtimeBuildIdentity = app.Services.GetRequiredService<IRuntimeBuildIdentity>().Current;
 
 if (FirstAdminSeedCommand.IsRequested(args))
 {
@@ -172,8 +215,31 @@ if (enableHttpsRedirection)
     app.UseHttpsRedirection();
 }
 
+app.Use(async (context, next) =>
+{
+    context.Response.Headers["X-QLHV-API-Build"] = runtimeBuildIdentity.ApiBuildId;
+    context.Response.Headers["X-QLHV-Instance"] = runtimeBuildIdentity.InstanceId;
+    context.Response.Headers["X-QLHV-Frontend-Build"] = runtimeBuildIdentity.FrontendBuildId;
+    await next();
+});
 app.UseDefaultFiles();
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = context =>
+    {
+        if (string.Equals(context.File.Name, "index.html", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(context.File.Name, "build-info.json", StringComparison.OrdinalIgnoreCase))
+        {
+            context.Context.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+            context.Context.Response.Headers.Pragma = "no-cache";
+            context.Context.Response.Headers.Expires = "0";
+        }
+        else if (context.Context.Request.Path.StartsWithSegments("/assets"))
+        {
+            context.Context.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
+        }
+    },
+});
 // Keep endpoint selection after the static middleware so the catch-all SPA
 // endpoint cannot pre-empt real files under wwwroot.
 app.UseRouting();
@@ -194,6 +260,10 @@ app.Use(async (context, next) =>
 app.UseCors(FrontendCors);
 app.UseAuthentication();
 app.UseAuthorization();
+if (app.Environment.IsProduction())
+{
+    app.UseMiddleware<TimeAuthorityWriteGuardMiddleware>();
+}
 
 // Liveness proves only that the process and HTTP pipeline are responding.
 app.MapGet("/health/live", () => Results.Ok(new { status = "live" }))
@@ -244,6 +314,9 @@ app.MapMethods("/{**path}", [HttpMethods.Get, HttpMethods.Head], async context =
         }
 
         context.Response.ContentType = "text/html; charset=utf-8";
+        context.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+        context.Response.Headers.Pragma = "no-cache";
+        context.Response.Headers.Expires = "0";
         await context.Response.SendFileAsync(indexFile);
     })
     .AllowAnonymous()

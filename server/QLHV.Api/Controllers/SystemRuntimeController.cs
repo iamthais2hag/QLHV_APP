@@ -14,13 +14,38 @@ public sealed class SystemRuntimeController : ControllerBase
 {
     private readonly IRuntimeReadinessService _readiness;
     private readonly ISystemDataVersionService _dataVersion;
+    private readonly ITimeAuthorityService _timeAuthority;
 
     public SystemRuntimeController(
         IRuntimeReadinessService readiness,
-        ISystemDataVersionService dataVersion)
+        ISystemDataVersionService dataVersion,
+        ITimeAuthorityService timeAuthority)
     {
         _readiness = readiness;
         _dataVersion = dataVersion;
+        _timeAuthority = timeAuthority;
+    }
+
+    [AllowAnonymous]
+    [HttpGet("time-health")]
+    [ProducesResponseType(typeof(TimeHealthContractDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(
+        typeof(TimeHealthContractDto),
+        StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<TimeHealthContractDto>> GetTimeHealth(
+        CancellationToken cancellationToken)
+    {
+        var health = await _timeAuthority.GetHealthAsync(cancellationToken);
+        var contract = new TimeHealthContractDto
+        {
+            TimeContractVersion = TimeHealthContract.Version,
+            Time = health,
+        };
+        return StatusCode(
+            TimeAuthorityPolicy.IsMutationAllowed(health)
+                ? StatusCodes.Status200OK
+                : StatusCodes.Status503ServiceUnavailable,
+            contract);
     }
 
     [AllowAnonymous]

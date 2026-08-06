@@ -32,6 +32,8 @@ public sealed class QlhvOperationsStatusDto
 
     public string BackupDatabaseName { get; init; } = string.Empty;
 
+    public string TargetDatabaseName { get; init; } = "QLHV_APP";
+
     public string MaCSDT { get; init; } = string.Empty;
 
     public string SourceProfileCode { get; init; } = string.Empty;

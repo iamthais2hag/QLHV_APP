@@ -245,9 +245,11 @@ public sealed class SingleProcessHostingTests
                 services.RemoveAll<IAuthService>();
                 services.RemoveAll<IAppUserRepository>();
                 services.RemoveAll<IRuntimeReadinessService>();
+                services.RemoveAll<ITimeAuthorityService>();
                 services.AddSingleton<IAuthService, TestAuthService>();
                 services.AddSingleton<IAppUserRepository>(_users);
                 services.AddSingleton<IRuntimeReadinessService, ReadyReadinessService>();
+                services.AddSingleton<ITimeAuthorityService, HealthyTimeAuthorityService>();
                 services.RemoveAll<IHostedService>();
             });
         }
@@ -295,6 +297,37 @@ public sealed class SingleProcessHostingTests
             CheckedAtUtc = DateTime.UtcNow,
             Messages = ["ready"],
         });
+    }
+
+    private sealed class HealthyTimeAuthorityService : ITimeAuthorityService
+    {
+        public Task<TimeHealthDto> GetHealthAsync(
+            CancellationToken cancellationToken = default)
+        {
+            var now = DateTimeOffset.UtcNow;
+            return Task.FromResult(new TimeHealthDto
+            {
+                TimeHealth = TimeHealthStatuses.Healthy,
+                ReasonCode = TimeHealthReasonCodes.None,
+                WritesAllowed = true,
+                DatabaseClockAvailable = true,
+                ServerUtcNow = now,
+                DatabaseUtcNow = now,
+                ClockSkewMilliseconds = 0,
+                MonotonicQueryMilliseconds = 0,
+                TimeZone = "UTC",
+                WindowsTimeServiceState = TimeHealthContract.RunningServiceState,
+                ConfiguredPeer = TimeHealthContract.ApprovedPeer,
+                CurrentSource = TimeHealthContract.ApprovedPeer,
+                LastSuccessfulSyncUtc = now,
+                LastSyncError = 0,
+                PhaseOffsetMilliseconds = 0,
+                LastSuccessfulSyncAgeSeconds = 0,
+                EffectivePollIntervalSeconds = 300,
+                EvaluatedAtUtc = now,
+                Messages = Array.Empty<string>(),
+            });
+        }
     }
 
     private sealed class TestAuthService : IAuthService

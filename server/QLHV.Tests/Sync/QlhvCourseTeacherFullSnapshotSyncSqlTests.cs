@@ -314,7 +314,7 @@ public sealed class QlhvCourseTeacherFullSnapshotSyncSqlTests
                     QlhvEntityWriteCounts.Empty),
                 new QlhvDomainWriteResult(
                     QlhvImportDomains.GiaoVien,
-                    QlhvImportDomainStatuses.SkippedSchemaNotReady,
+                    QlhvImportDomainStatuses.SkippedNotRequested,
                     "schema not ready",
                     QlhvEntityWriteCounts.Empty),
             ],
@@ -323,6 +323,13 @@ public sealed class QlhvCourseTeacherFullSnapshotSyncSqlTests
         Assert.False(result.RequiredDomainFailed);
         Assert.False(result.HasConflicts);
         Assert.Equal(2, result.DomainResults.Count);
+        var notRequested = Assert.Single(
+            result.DomainResults,
+            item => item.Status == QlhvImportDomainStatuses.SkippedNotRequested);
+        Assert.False(notRequested.Requested);
+        Assert.False(notRequested.Attempted);
+        Assert.False(notRequested.Committed);
+        Assert.False(notRequested.ContributesToPartial);
 
         var requiredFailure = result with
         {

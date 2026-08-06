@@ -700,16 +700,16 @@ SELECT
 SELECT
     databaseRow.create_date AS CreateDate,
     CAST(snapshotProperty.value AS nvarchar(512)) AS SnapshotToken,
-    CONVERT(int, COALESCE((SELECT SUM(row_count) FROM sys.dm_db_partition_stats
-        WHERE object_id = OBJECT_ID(N'dbo.NguoiLX', N'U') AND index_id IN (0, 1)), 0)) AS NguoiLXRows,
-    CONVERT(int, COALESCE((SELECT SUM(row_count) FROM sys.dm_db_partition_stats
-        WHERE object_id = OBJECT_ID(N'dbo.NguoiLX_HoSo', N'U') AND index_id IN (0, 1)), 0)) AS NguoiLXHoSoRows,
-    CONVERT(int, COALESCE((SELECT SUM(row_count) FROM sys.dm_db_partition_stats
-        WHERE object_id = OBJECT_ID(N'dbo.KhoaHoc', N'U') AND index_id IN (0, 1)), 0)) AS KhoaHocRows,
-    CONVERT(int, COALESCE((SELECT SUM(row_count) FROM sys.dm_db_partition_stats
-        WHERE object_id = OBJECT_ID(N'dbo.GiaoVien', N'U') AND index_id IN (0, 1)), 0)) AS GiaoVienRows,
-    CONVERT(int, COALESCE((SELECT SUM(row_count) FROM sys.dm_db_partition_stats
-        WHERE object_id = OBJECT_ID(N'dbo.KhoaHoc_GiaoVien', N'U') AND index_id IN (0, 1)), 0)) AS KhoaHocGiaoVienRows
+    CONVERT(int, COALESCE((SELECT SUM(partitionRow.rows) FROM sys.partitions partitionRow
+        WHERE partitionRow.object_id = OBJECT_ID(N'dbo.NguoiLX', N'U') AND partitionRow.index_id IN (0, 1)), 0)) AS NguoiLXRows,
+    CONVERT(int, COALESCE((SELECT SUM(partitionRow.rows) FROM sys.partitions partitionRow
+        WHERE partitionRow.object_id = OBJECT_ID(N'dbo.NguoiLX_HoSo', N'U') AND partitionRow.index_id IN (0, 1)), 0)) AS NguoiLXHoSoRows,
+    CONVERT(int, COALESCE((SELECT SUM(partitionRow.rows) FROM sys.partitions partitionRow
+        WHERE partitionRow.object_id = OBJECT_ID(N'dbo.KhoaHoc', N'U') AND partitionRow.index_id IN (0, 1)), 0)) AS KhoaHocRows,
+    CONVERT(int, COALESCE((SELECT SUM(partitionRow.rows) FROM sys.partitions partitionRow
+        WHERE partitionRow.object_id = OBJECT_ID(N'dbo.GiaoVien', N'U') AND partitionRow.index_id IN (0, 1)), 0)) AS GiaoVienRows,
+    CONVERT(int, COALESCE((SELECT SUM(partitionRow.rows) FROM sys.partitions partitionRow
+        WHERE partitionRow.object_id = OBJECT_ID(N'dbo.KhoaHoc_GiaoVien', N'U') AND partitionRow.index_id IN (0, 1)), 0)) AS KhoaHocGiaoVienRows
 FROM sys.databases AS databaseRow
 OUTER APPLY
 (

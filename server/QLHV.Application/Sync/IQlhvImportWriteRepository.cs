@@ -24,6 +24,19 @@ public interface IQlhvImportWriteRepository
         string sourceProfileCode,
         IReadOnlyList<QlhvImportHocVienWriteModel> rows,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// RT03 V5 recovery-only domain entry point. The caller owns the global,
+    /// profile and source read-barrier leases and must invoke domains in the
+    /// sealed order COURSE, TEACHER, VEHICLE, LEARNER, RELATION.
+    /// </summary>
+    Task<QlhvDomainWriteResult> FullSyncRecoveryDomainAsync(
+        string sourceProfileCode,
+        QlhvImportFullSyncPayload payload,
+        string domain,
+        CancellationToken cancellationToken = default)
+        => throw new NotSupportedException(
+            "This repository does not implement RT03 V5 domain recovery.");
 }
 
 public sealed record QlhvImportFullSyncWriteResult(
@@ -104,7 +117,100 @@ public sealed record QlhvDomainWriteResult(
     string Domain,
     string Status,
     string? Message,
-    QlhvEntityWriteCounts Counts);
+    QlhvEntityWriteCounts Counts)
+{
+    public string? RequestReasonCode { get; init; }
+
+    public bool Requested =>
+        !string.Equals(Status, QlhvImportDomainStatuses.SkippedNotRequested, StringComparison.Ordinal) &&
+        !string.Equals(Status, QlhvImportDomainStatuses.SkippedDisabled, StringComparison.Ordinal);
+
+    public bool Enabled =>
+        !string.Equals(Status, QlhvImportDomainStatuses.SkippedDisabled, StringComparison.Ordinal);
+
+    public bool Required =>
+        string.Equals(Domain, QlhvImportDomains.HocVien, StringComparison.Ordinal);
+
+    public string SnapshotState => (RequestReasonCode ?? Status) switch
+    {
+        QlhvImportDomainStatuses.SkippedNotRequested => "NOT_REQUESTED",
+        QlhvImportDomainStatuses.SkippedDisabled => "NOT_REQUESTED",
+        QlhvImportDomainStatuses.SkippedSourceNotReady => "NOT_READY",
+        QlhvImportDomainStatuses.SkippedDependencyNotReady => "NOT_READY",
+        QlhvImportDomainStatuses.SkippedSchemaNotReady => "UNKNOWN",
+        _ => "READY",
+    };
+
+    public string SchemaState => (RequestReasonCode ?? Status) switch
+    {
+        QlhvImportDomainStatuses.SkippedSchemaNotReady => "NOT_READY",
+        QlhvImportDomainStatuses.SkippedNotRequested => "NOT_REQUESTED",
+        QlhvImportDomainStatuses.SkippedDisabled => "NOT_REQUESTED",
+        _ => "READY",
+    };
+
+    public bool Attempted =>
+        string.Equals(Status, QlhvImportDomainStatuses.Succeeded, StringComparison.Ordinal) ||
+        string.Equals(Status, QlhvImportDomainStatuses.NoOp, StringComparison.Ordinal) ||
+        string.Equals(Status, QlhvImportDomainStatuses.Failed, StringComparison.Ordinal);
+
+    public bool Committed =>
+        string.Equals(Status, QlhvImportDomainStatuses.Succeeded, StringComparison.Ordinal) ||
+        string.Equals(Status, QlhvImportDomainStatuses.NoOp, StringComparison.Ordinal);
+
+    public bool Skipped => Status.StartsWith("SKIPPED_", StringComparison.Ordinal);
+
+    public bool ContributesToPartial =>
+        !Required &&
+        Requested &&
+        !string.Equals(Status, QlhvImportDomainStatuses.Succeeded, StringComparison.Ordinal) &&
+        !string.Equals(Status, QlhvImportDomainStatuses.NoOp, StringComparison.Ordinal);
+
+    public string? FailureCode =>
+        string.Equals(Status, QlhvImportDomainStatuses.Failed, StringComparison.Ordinal) ||
+        (Requested && Skipped)
+            ? Status
+            : null;
+
+    public string? Reason => Message;
+
+    public QlhvSkippedReasonCounts SkippedReasons
+    {
+        get
+        {
+            var skipped = Math.Max(0, Counts.Skipped);
+            if (skipped == 0)
+            {
+                return QlhvSkippedReasonCounts.Empty;
+            }
+
+            return Status switch
+            {
+                QlhvImportDomainStatuses.Succeeded or QlhvImportDomainStatuses.NoOp =>
+                    new QlhvSkippedReasonCounts(skipped, 0, 0, 0, 0),
+                QlhvImportDomainStatuses.SkippedNotRequested =>
+                    new QlhvSkippedReasonCounts(0, skipped, 0, 0, 0),
+                QlhvImportDomainStatuses.SkippedDisabled =>
+                    new QlhvSkippedReasonCounts(0, 0, skipped, 0, 0),
+                QlhvImportDomainStatuses.Failed =>
+                    new QlhvSkippedReasonCounts(0, 0, 0, skipped, 0),
+                _ => new QlhvSkippedReasonCounts(0, 0, 0, 0, skipped),
+            };
+        }
+    }
+}
+
+public sealed record QlhvSkippedReasonCounts(
+    int NoChange,
+    int NotRequested,
+    int Disabled,
+    int ValidationRejected,
+    int Other)
+{
+    public static QlhvSkippedReasonCounts Empty { get; } = new(0, 0, 0, 0, 0);
+
+    public int Total => NoChange + NotRequested + Disabled + ValidationRejected + Other;
+}
 
 public sealed record QlhvEntityWriteCounts(
     int SourceRows,

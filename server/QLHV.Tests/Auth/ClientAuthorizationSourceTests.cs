@@ -52,20 +52,36 @@ public sealed class ClientAuthorizationSourceTests
         var hocVien = ReadClientFile("features", "hoc-vien", "HocVienPage.tsx");
         var page = ReadClientFile("features", "qlhv-import", "QlhvImportPage.tsx");
         var autoSyncPanel = ReadClientFile("features", "qlhv-import", "AutoSyncPanel.tsx");
+        var realtimePage = ReadClientFile(
+            "features",
+            "csdt-realtime",
+            "CsdtRealtimeSyncPage.tsx");
 
         Assert.Contains("export type AppUserRole = 'Admin' | 'Employee' | 'Viewer'", types, StringComparison.Ordinal);
         Assert.Contains("value.role !== 'Employee'", authApi, StringComparison.Ordinal);
         Assert.Contains("role === 'Employee'", permissions, StringComparison.Ordinal);
-        Assert.Contains("permission === 'CanViewBusinessData' || permission === 'CanEditBusinessData'", permissions, StringComparison.Ordinal);
+        var employeePermissionStart = permissions.IndexOf("if (role === 'Employee')", StringComparison.Ordinal);
+        var viewerPermissionStart = permissions.IndexOf(
+            "return permission === 'CanViewBusinessData'",
+            employeePermissionStart,
+            StringComparison.Ordinal);
+        Assert.True(employeePermissionStart >= 0 && viewerPermissionStart > employeePermissionStart);
+        var employeePermissions = permissions[employeePermissionStart..viewerPermissionStart];
+        Assert.Contains("'CanViewBusinessData'", employeePermissions, StringComparison.Ordinal);
+        Assert.Contains("'CanEditBusinessData'", employeePermissions, StringComparison.Ordinal);
         Assert.Contains("<Route index element={<Dashboard />} />", app, StringComparison.Ordinal);
         Assert.Contains("path=\"/hoc-vien\" element={<HocVienPage />}", app, StringComparison.Ordinal);
         Assert.Contains("canOperateBusiness ? <HocVienCardPrintPage />", app, StringComparison.Ordinal);
-        Assert.Contains("canSynchronize ? <MotoSyncPage />", app, StringComparison.Ordinal);
+        Assert.Contains(
+            "path=\"/dong-bo-v2\" element={<CsdtRealtimeSyncPage />}",
+            app,
+            StringComparison.Ordinal);
         Assert.Contains("path=\"/admin/users\"", app, StringComparison.Ordinal);
         Assert.Contains("canManageAccounts", app, StringComparison.Ordinal);
         Assert.Contains("path: '/admin/users'", menu, StringComparison.Ordinal);
         Assert.Contains("requiredPermission: 'CanManageUsers'", menu, StringComparison.Ordinal);
-        Assert.Contains("requiredPermission: 'CanSynchronizeCSDT'", menu, StringComparison.Ordinal);
+        Assert.Contains("Đồng bộ dữ liệu CSĐT V1 ↔ V2", menu, StringComparison.Ordinal);
+        Assert.Contains("requiredPermission: 'CanViewBusinessData'", menu, StringComparison.Ordinal);
         Assert.Contains("requiredPermission: 'CanEditBusinessData'", menu, StringComparison.Ordinal);
         Assert.Contains("canExportAndPrint", hocVien, StringComparison.Ordinal);
         Assert.Contains("const isAdmin = user?.role === 'Admin'", page, StringComparison.Ordinal);
@@ -76,8 +92,13 @@ public sealed class ClientAuthorizationSourceTests
         Assert.Contains("refreshReason={!isAdmin", page, StringComparison.Ordinal);
         Assert.Contains("executeReason={!isAdmin", page, StringComparison.Ordinal);
         Assert.Contains("if (!isAdmin)", page, StringComparison.Ordinal);
-        Assert.Contains("if (!isAdmin) return 'Bạn không có quyền thực hiện: cần vai trò Admin.'", autoSyncPanel, StringComparison.Ordinal);
+        Assert.Contains("? 'Cần quyền Quản trị viên.'", autoSyncPanel, StringComparison.Ordinal);
         Assert.Contains("disabled={disabledReason !== null}", autoSyncPanel, StringComparison.Ordinal);
+        Assert.Contains("const isAdmin = user?.role === 'Admin'", realtimePage, StringComparison.Ordinal);
+        Assert.Contains(
+            "Bạn đang ở chế độ chỉ xem.",
+            realtimePage,
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -111,23 +132,22 @@ public sealed class ClientAuthorizationSourceTests
     }
 
     [Fact]
-    public void Authenticated_admin_or_employee_ensures_fresh_without_blocking_or_accepting_force_fields()
+    public void Authenticated_session_does_not_auto_start_fallback_sync()
     {
         var authContext = ReadClientFile("features", "auth", "AuthContext.tsx");
         var qlhvApi = ReadClientFile("features", "qlhv-import", "api.ts");
         var panel = ReadClientFile("features", "qlhv-import", "AutoSyncPanel.tsx");
         var ensureFresh = ExtractFunction(qlhvApi, "export async function ensureQlhvFresh");
 
-        Assert.Contains("user.role === 'Viewer'", authContext, StringComparison.Ordinal);
-        Assert.Contains("ensureQlhvFresh()", authContext, StringComparison.Ordinal);
-        Assert.Contains(".catch(() => undefined)", authContext, StringComparison.Ordinal);
-        Assert.Contains("ensuredFreshUserIdRef.current === user.id", authContext, StringComparison.Ordinal);
+        Assert.DoesNotContain("ensureQlhvFresh", authContext, StringComparison.Ordinal);
+        Assert.DoesNotContain("ensuredFreshUserIdRef", authContext, StringComparison.Ordinal);
         Assert.Contains("/operations/ensure-fresh", ensureFresh, StringComparison.Ordinal);
         Assert.Contains("method: 'POST'", ensureFresh, StringComparison.Ordinal);
         Assert.DoesNotContain("body:", ensureFresh, StringComparison.Ordinal);
         Assert.DoesNotContain("force", ensureFresh, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("sourceType", ensureFresh, StringComparison.Ordinal);
-        Assert.Contains("SYSTEM_APP_OPEN", panel, StringComparison.Ordinal);
+        Assert.Contains("status.history", panel, StringComparison.Ordinal);
+        Assert.Contains("status.configuration.manualRunAllowed", panel, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -41,6 +41,27 @@ public sealed class QlhvSqlAutoSyncGlobalLock : IQlhvAutoSyncGlobalLock
                 return null;
             }
 
+            var realtimeFeatureTablePresent = await connection.ExecuteScalarAsync<bool>(
+                new CommandDefinition(
+                    DirectRealtimeFeatureTablePresentSql,
+                    commandTimeout: 30,
+                    cancellationToken: cancellationToken));
+            var realtimeCutoverActive = realtimeFeatureTablePresent &&
+                await connection.ExecuteScalarAsync<bool>(new CommandDefinition(
+                    RejectWhenDirectRealtimeActiveSql,
+                    commandTimeout: 30,
+                    cancellationToken: cancellationToken));
+            if (realtimeCutoverActive)
+            {
+                await connection.ExecuteAsync(new CommandDefinition(
+                    ReleaseSql,
+                    new { Resource = LockResource },
+                    commandTimeout: 30,
+                    cancellationToken: cancellationToken));
+                await connection.DisposeAsync();
+                return null;
+            }
+
             return new Lease(connection);
         }
         catch
@@ -111,6 +132,23 @@ EXEC @LockResult = sys.sp_getapplock
     @LockTimeout = 0,
     @DbPrincipal = N'public';
 SELECT @LockResult;";
+
+    internal const string DirectRealtimeFeatureTablePresentSql = @"
+SELECT CAST(CASE WHEN OBJECT_ID(N'dbo.App_QlhvDirectRealtimeFeatureState', N'U') IS NULL
+    THEN 0 ELSE 1 END AS bit);";
+
+    internal const string RejectWhenDirectRealtimeActiveSql = @"
+SELECT CAST(CASE WHEN EXISTS
+    (
+        SELECT 1
+        FROM dbo.App_QlhvDirectRealtimeFeatureState
+        WHERE FeatureStateId = 1
+          AND EnableProductionRealtime = 1
+          AND EnableProductionWrites = 1
+          AND EnableControlledCutover = 1
+          AND EnableProductionDeletes = 0
+    )
+    THEN 1 ELSE 0 END AS bit);";
 
     private const string ReleaseSql = @"
 EXEC sys.sp_releaseapplock

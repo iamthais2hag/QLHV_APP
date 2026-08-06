@@ -202,5 +202,9 @@ public sealed class QlhvSessionStartControllerTests
             Guid? runId = null,
             CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
+
+        public Task<QlhvSyncFreshnessResult> GetDiagnosticsAsync(
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
     }
 }

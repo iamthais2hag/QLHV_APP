@@ -671,6 +671,71 @@ public sealed class QlhvImportServiceTests
     }
 
     [Fact]
+    public async Task Execute_does_not_report_partial_when_optional_domains_were_not_requested()
+    {
+        var history = new FakeOperationHistoryRepository();
+        var khoaHocCounts = new QlhvEntityWriteCounts(1, 0, 0, 0, 0, 1);
+        var hocVienCounts = new QlhvEntityWriteCounts(1, 0, 0, 0, 0, 1);
+        var target = new FakeTargetRepository
+        {
+            FullSyncResult = new QlhvImportFullSyncWriteResult(
+                khoaHocCounts,
+                QlhvEntityWriteCounts.Empty,
+                QlhvEntityWriteCounts.Empty,
+                hocVienCounts,
+                0, 0, 0, 0, 0, 0)
+            {
+                DomainResults =
+                [
+                    new QlhvDomainWriteResult(
+                        QlhvImportDomains.KhoaHoc,
+                        QlhvImportDomainStatuses.NoOp,
+                        "fixture no change",
+                        khoaHocCounts),
+                    new QlhvDomainWriteResult(
+                        QlhvImportDomains.GiaoVien,
+                        QlhvImportDomainStatuses.SkippedNotRequested,
+                        "fixture empty optional source",
+                        QlhvEntityWriteCounts.Empty),
+                    new QlhvDomainWriteResult(
+                        QlhvImportDomains.Relation,
+                        QlhvImportDomainStatuses.SkippedNotRequested,
+                        "fixture dependency not requested",
+                        QlhvEntityWriteCounts.Empty),
+                    new QlhvDomainWriteResult(
+                        QlhvImportDomains.HocVien,
+                        QlhvImportDomainStatuses.NoOp,
+                        "fixture no change",
+                        hocVienCounts),
+                ],
+            },
+        };
+        var service = CreateService(
+            OneOtoRow(new QlhvImportTargetSnapshot()),
+            target,
+            dryRun: false,
+            enableWrites: true,
+            operationHistory: history);
+
+        var result = await service.ExecuteAsync(ExecuteRequest());
+
+        Assert.True(result.Executed);
+        Assert.Equal(QlhvImportOverallStatuses.NoOp, result.Status);
+        Assert.Equal(QlhvOperationTypes.Succeeded, Assert.Single(history.Completed).Value.Status);
+        Assert.Equal(2, result.SkippedReasons.NoChange);
+        Assert.Equal(0, result.SkippedReasons.NotRequested);
+        Assert.All(
+            result.DomainResults.Where(domain =>
+                domain.Status == QlhvImportDomainStatuses.SkippedNotRequested),
+            domain =>
+            {
+                Assert.False(domain.Requested);
+                Assert.False(domain.ContributesToPartial);
+                Assert.Null(domain.FailureCode);
+            });
+    }
+
+    [Fact]
     public async Task Execute_reports_and_audits_failed_hoc_vien_after_optional_domain_commits()
     {
         var history = new FakeOperationHistoryRepository();

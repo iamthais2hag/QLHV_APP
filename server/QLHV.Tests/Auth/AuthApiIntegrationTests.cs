@@ -132,6 +132,37 @@ public sealed class AuthApiIntegrationTests : IClassFixture<AuthApiFactory>
     }
 
     [Fact]
+    public async Task Admin_auto_sync_button_request_returns_accepted_durable_run_id()
+    {
+        var autoSync = new RecordingAutoSyncService();
+        using var factory = _factory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<IQlhvAutoSyncService>();
+                services.AddSingleton<IQlhvAutoSyncService>(autoSync);
+            }));
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false,
+            HandleCookies = true,
+        });
+        await LoginAsync(client, "admin", AuthApiFactory.AdminPassword);
+
+        var response = await client.PostAsync(
+            "/api/dong-bo-v2/qlhv/operations/auto-sync",
+            null);
+        var result = await response.Content
+            .ReadFromJsonAsync<QlhvAutoSyncQueueResultDto>();
+
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        Assert.NotNull(result);
+        Assert.True(result.Accepted);
+        Assert.Equal(autoSync.ManualRunId, result.RunId);
+        Assert.Equal(QlhvAutoSyncConstants.StartedDecision, result.Decision);
+        Assert.Equal(1, autoSync.ManualQueueCalls);
+    }
+
+    [Fact]
     public async Task Employee_can_login_and_me_reports_the_Employee_role()
     {
         using var factory = new AuthApiFactory();
@@ -861,10 +892,16 @@ public sealed class AuthApiIntegrationTests : IClassFixture<AuthApiFactory>
                 State = "failed",
                 LastError = "Auto Sync test failure.",
             });
+
+        public Task<QlhvSyncFreshnessResult> GetDiagnosticsAsync(
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new QlhvSyncFreshnessResult());
     }
 
     private sealed class RecordingAutoSyncService : IQlhvAutoSyncService
     {
+        public Guid ManualRunId { get; } = Guid.NewGuid();
+
         public int EnsureFreshCalls { get; private set; }
 
         public int ManualQueueCalls { get; private set; }
@@ -886,7 +923,14 @@ public sealed class AuthApiIntegrationTests : IClassFixture<AuthApiFactory>
             CancellationToken cancellationToken = default)
         {
             ManualQueueCalls++;
-            throw new NotSupportedException();
+            return Task.FromResult(new QlhvAutoSyncQueueResultDto
+            {
+                Accepted = true,
+                RunId = ManualRunId,
+                Status = QlhvAutoSyncConstants.Queued,
+                Decision = QlhvAutoSyncConstants.StartedDecision,
+                Message = "accepted",
+            });
         }
 
         public Task<QlhvAutoSyncQueueResultDto> QueueSessionStartAsync(
@@ -902,6 +946,10 @@ public sealed class AuthApiIntegrationTests : IClassFixture<AuthApiFactory>
 
         public Task<QlhvAutoSyncStatusDto> GetStatusAsync(
             Guid? runId = null,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<QlhvSyncFreshnessResult> GetDiagnosticsAsync(
             CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
     }

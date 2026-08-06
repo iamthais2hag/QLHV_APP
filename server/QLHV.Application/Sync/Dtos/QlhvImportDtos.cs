@@ -157,6 +157,10 @@ public sealed class QlhvImportExecuteResultDto
 
     public IReadOnlyList<QlhvImportDomainResultDto> DomainResults { get; init; } =
         Array.Empty<QlhvImportDomainResultDto>();
+
+    public QlhvImportDomainResultDto? PhotoProcessing { get; init; }
+
+    public QlhvSkippedReasonCountsDto SkippedReasons { get; init; } = new();
 }
 
 public sealed class QlhvImportDomainResultDto
@@ -168,6 +172,47 @@ public sealed class QlhvImportDomainResultDto
     public string? Message { get; init; }
 
     public QlhvEntitySyncCountsDto Counts { get; init; } = new();
+
+    public bool Requested { get; init; }
+
+    public bool Enabled { get; init; }
+
+    public bool Required { get; init; }
+
+    public string SnapshotState { get; init; } = string.Empty;
+
+    public string SchemaState { get; init; } = string.Empty;
+
+    public bool Attempted { get; init; }
+
+    public bool Committed { get; init; }
+
+    public bool Skipped { get; init; }
+
+    public bool ContributesToPartial { get; init; }
+
+    public string? FailureCode { get; init; }
+
+    public string? RequestReasonCode { get; init; }
+
+    public string? Reason { get; init; }
+
+    public QlhvSkippedReasonCountsDto SkippedReasons { get; init; } = new();
+}
+
+public sealed class QlhvSkippedReasonCountsDto
+{
+    public int NoChange { get; init; }
+
+    public int NotRequested { get; init; }
+
+    public int Disabled { get; init; }
+
+    public int ValidationRejected { get; init; }
+
+    public int Other { get; init; }
+
+    public int Total => NoChange + NotRequested + Disabled + ValidationRejected + Other;
 }
 
 public sealed class QlhvEntitySyncCountsDto

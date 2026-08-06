@@ -29,6 +29,7 @@ public sealed class QlhvImportService : IQlhvImportService
     private readonly IQlhvSourceOperationLock _operationLock;
     private readonly IQlhvOperationHistoryRepository _operationHistory;
     private readonly IHocVienPhotoProcessingService? _photoProcessing;
+    private readonly HocVienPhotoProcessingOptions _photoProcessingOptions;
 
     public QlhvImportService(
         IQlhvImportReadRepository readRepository,
@@ -38,7 +39,8 @@ public sealed class QlhvImportService : IQlhvImportService
         IOptions<SyncExecutionOptions> executionOptions,
         IQlhvSourceOperationLock operationLock,
         IQlhvOperationHistoryRepository operationHistory,
-        IHocVienPhotoProcessingService? photoProcessing = null)
+        IHocVienPhotoProcessingService? photoProcessing = null,
+        IOptions<HocVienPhotoProcessingOptions>? photoProcessingOptions = null)
     {
         _readRepository = readRepository;
         _targetRepository = targetRepository;
@@ -48,6 +50,7 @@ public sealed class QlhvImportService : IQlhvImportService
         _operationLock = operationLock;
         _operationHistory = operationHistory;
         _photoProcessing = photoProcessing;
+        _photoProcessingOptions = photoProcessingOptions?.Value ?? new HocVienPhotoProcessingOptions();
     }
 
     public async Task<QlhvImportPlanDto> GetPlanAsync(
@@ -308,6 +311,7 @@ public sealed class QlhvImportService : IQlhvImportService
                     failedPlan,
                     write,
                     photoQueue: null,
+                    photoProcessing: null,
                     QlhvImportOverallStatuses.Failed,
                     safeError);
                 return new QlhvImportExecuteResultDto
@@ -331,6 +335,7 @@ public sealed class QlhvImportService : IQlhvImportService
                     GiaoVien = ToDto(write.GiaoVien),
                     KhoaHocGiaoVien = ToDto(write.Relation),
                     DomainResults = write.DomainResults.Select(ToDto).ToArray(),
+                    SkippedReasons = AggregateSkippedReasons(write.DomainResults),
                 };
             }
 
@@ -400,10 +405,7 @@ public sealed class QlhvImportService : IQlhvImportService
 
             var domainResults = write.DomainResults.Select(ToDto).ToArray();
             var optionalIssues = write.DomainResults
-                .Where(result =>
-                    !string.Equals(result.Domain, QlhvImportDomains.HocVien, StringComparison.Ordinal) &&
-                    !string.Equals(result.Status, QlhvImportDomainStatuses.Succeeded, StringComparison.Ordinal) &&
-                    !string.Equals(result.Status, QlhvImportDomainStatuses.NoOp, StringComparison.Ordinal))
+                .Where(result => result.ContributesToPartial)
                 .ToArray();
             var overallStatus = optionalIssues.Length > 0
                 ? QlhvImportOverallStatuses.PartialSuccess
@@ -421,6 +423,10 @@ public sealed class QlhvImportService : IQlhvImportService
             var (photoQueue, photoWarning) = await QueuePhotosAfterCommitSafelyAsync(
                 context.Payload.HocVienRows,
                 operationActor);
+            var photoProcessing = BuildPhotoProcessingResult(
+                context.Payload.HocVienRows.Count,
+                photoQueue,
+                photoWarning);
             var completedPlan = photoWarning is null
                 ? resultPlan
                 : AddWarning(resultPlan, photoWarning);
@@ -430,6 +436,7 @@ public sealed class QlhvImportService : IQlhvImportService
                 completedPlan,
                 write,
                 photoQueue,
+                photoProcessing,
                 overallStatus,
                 safeError: null);
             return new QlhvImportExecuteResultDto
@@ -458,6 +465,8 @@ public sealed class QlhvImportService : IQlhvImportService
                 KhoaHocGiaoVien = ToDto(write.Relation),
                 PhotoQueue = photoQueue,
                 DomainResults = domainResults,
+                PhotoProcessing = photoProcessing,
+                SkippedReasons = AggregateSkippedReasons(write.DomainResults),
             };
         }
         catch (OperationCanceledException)
@@ -1228,6 +1237,40 @@ public sealed class QlhvImportService : IQlhvImportService
             Status = result.Status,
             Message = result.Message,
             Counts = ToDto(result.Counts),
+            Requested = result.Requested,
+            Enabled = result.Enabled,
+            Required = result.Required,
+            SnapshotState = result.SnapshotState,
+            SchemaState = result.SchemaState,
+            Attempted = result.Attempted,
+            Committed = result.Committed,
+            Skipped = result.Skipped,
+            ContributesToPartial = result.ContributesToPartial,
+            FailureCode = result.FailureCode,
+            RequestReasonCode = result.RequestReasonCode,
+            Reason = result.Reason,
+            SkippedReasons = ToDto(result.SkippedReasons),
+        };
+
+    private static QlhvSkippedReasonCountsDto ToDto(QlhvSkippedReasonCounts counts)
+        => new()
+        {
+            NoChange = counts.NoChange,
+            NotRequested = counts.NotRequested,
+            Disabled = counts.Disabled,
+            ValidationRejected = counts.ValidationRejected,
+            Other = counts.Other,
+        };
+
+    private static QlhvSkippedReasonCountsDto AggregateSkippedReasons(
+        IReadOnlyList<QlhvDomainWriteResult> results)
+        => new()
+        {
+            NoChange = results.Sum(result => result.SkippedReasons.NoChange),
+            NotRequested = results.Sum(result => result.SkippedReasons.NotRequested),
+            Disabled = results.Sum(result => result.SkippedReasons.Disabled),
+            ValidationRejected = results.Sum(result => result.SkippedReasons.ValidationRejected),
+            Other = results.Sum(result => result.SkippedReasons.Other),
         };
 
     private static IReadOnlyList<string> Validate(QlhvImportRequest request)
@@ -1389,11 +1432,116 @@ public sealed class QlhvImportService : IQlhvImportService
         }
     }
 
+    private QlhvImportDomainResultDto BuildPhotoProcessingResult(
+        int sourceRows,
+        HocVienPhotoQueueBatchResult? queue,
+        string? warning)
+    {
+        var requestedRows = queue?.Requested ?? Math.Max(0, sourceRows);
+        if (_photoProcessing is null || !_photoProcessingOptions.Enabled)
+        {
+            return new QlhvImportDomainResultDto
+            {
+                Domain = QlhvImportDomains.PhotoProcessing,
+                Status = QlhvImportDomainStatuses.SkippedDisabled,
+                Message = "Xu ly anh the dang tat; day la canh bao doc lap, khong anh huong ket qua full sync DB.",
+                Requested = false,
+                Enabled = false,
+                Required = false,
+                SnapshotState = "NOT_REQUESTED",
+                SchemaState = "NOT_APPLICABLE",
+                Attempted = false,
+                Committed = false,
+                Skipped = true,
+                ContributesToPartial = false,
+                RequestReasonCode = QlhvImportDomainStatuses.SkippedDisabled,
+                Reason = "PhotoProcessing.Enabled=false.",
+                Counts = new QlhvEntitySyncCountsDto
+                {
+                    SourceRows = requestedRows,
+                    Skip = requestedRows,
+                },
+                SkippedReasons = new QlhvSkippedReasonCountsDto
+                {
+                    Disabled = requestedRows,
+                },
+            };
+        }
+
+        if (!_photoProcessingOptions.AutoProcessAfterSync)
+        {
+            return new QlhvImportDomainResultDto
+            {
+                Domain = QlhvImportDomains.PhotoProcessing,
+                Status = QlhvImportDomainStatuses.SkippedNotRequested,
+                Message = "Xu ly anh the tu dong sau sync khong duoc yeu cau.",
+                Requested = false,
+                Enabled = true,
+                Required = false,
+                SnapshotState = "NOT_REQUESTED",
+                SchemaState = "NOT_APPLICABLE",
+                Attempted = false,
+                Committed = false,
+                Skipped = true,
+                ContributesToPartial = false,
+                RequestReasonCode = QlhvImportDomainStatuses.SkippedNotRequested,
+                Reason = "PhotoProcessing.AutoProcessAfterSync=false.",
+                Counts = new QlhvEntitySyncCountsDto
+                {
+                    SourceRows = requestedRows,
+                    Skip = requestedRows,
+                },
+                SkippedReasons = new QlhvSkippedReasonCountsDto
+                {
+                    NotRequested = requestedRows,
+                },
+            };
+        }
+
+        var failed = queue is null || queue.Failed > 0;
+        var skippedRows = queue?.Skipped ?? 0;
+        return new QlhvImportDomainResultDto
+        {
+            Domain = QlhvImportDomains.PhotoProcessing,
+            Status = failed
+                ? QlhvImportDomainStatuses.Failed
+                : queue!.Queued > 0
+                    ? QlhvImportDomainStatuses.Succeeded
+                    : QlhvImportDomainStatuses.NoOp,
+            Message = warning,
+            Requested = true,
+            Enabled = true,
+            Required = false,
+            SnapshotState = "READY",
+            SchemaState = "NOT_APPLICABLE",
+            Attempted = true,
+            Committed = !failed,
+            Skipped = skippedRows > 0,
+            // Photo processing is intentionally post-commit and independently reported.
+            ContributesToPartial = false,
+            FailureCode = failed ? "PHOTO_QUEUE_FAILED" : null,
+            RequestReasonCode = failed ? "PHOTO_QUEUE_FAILED" : null,
+            Reason = warning,
+            Counts = new QlhvEntitySyncCountsDto
+            {
+                SourceRows = requestedRows,
+                Insert = queue?.Queued ?? 0,
+                Skip = skippedRows,
+            },
+            SkippedReasons = new QlhvSkippedReasonCountsDto
+            {
+                ValidationRejected = queue?.Failed ?? 0,
+                Other = skippedRows,
+            },
+        };
+    }
+
     private async Task<string?> TryCompleteWriteHistoryAsync(
         Guid operationId,
         QlhvImportPlanDto plan,
         QlhvImportFullSyncWriteResult write,
         HocVienPhotoQueueBatchResult? photoQueue,
+        QlhvImportDomainResultDto? photoProcessing,
         string overallStatus,
         string? safeError)
     {
@@ -1433,7 +1581,9 @@ public sealed class QlhvImportService : IQlhvImportService
                 GiaoVien = write.GiaoVien,
                 KhoaHocGiaoVien = write.Relation,
                 DomainResults = write.DomainResults,
+                SkippedReasons = AggregateSkippedReasons(write.DomainResults),
                 PhotoQueue = photoQueue,
+                PhotoProcessing = photoProcessing,
                 TargetActiveHocVienRows = Math.Max(
                     0,
                     plan.CurrentAppHocVienRows + write.Inserted + write.Reactivated - write.SoftDeleted),

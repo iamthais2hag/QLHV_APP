@@ -100,6 +100,36 @@ public sealed class QlhvAutoSyncRunRepository : IQlhvAutoSyncRunRepository
             cancellationToken);
     }
 
+    public Task<QlhvAutoSyncRunRecord?> GetLatestSuccessfulAsync(
+        CancellationToken cancellationToken = default)
+        => GetSingleAsync(LatestSuccessfulSql, null, cancellationToken);
+
+    public async Task<IReadOnlyList<QlhvAutoSyncRunRecord>> GetRecentAsync(
+        int take,
+        CancellationToken cancellationToken = default)
+    {
+        var boundedTake = Math.Clamp(take, 1, 100);
+        var connectionString = await ResolveTargetAsync(cancellationToken);
+        try
+        {
+            await using var connection = new SqlConnection(connectionString);
+            var rows = await connection.QueryAsync<RunRow>(
+                new CommandDefinition(
+                    RecentSql,
+                    new { Take = boundedTake },
+                    cancellationToken: cancellationToken));
+            return rows.Select(Map).ToArray();
+        }
+        catch (SqlException ex) when (IsMissingStore(ex))
+        {
+            throw StoreUnavailable(ex);
+        }
+        catch (SqlException ex)
+        {
+            throw StoreUnavailable(ex, "Tam thoi khong doc duoc Auto Sync history.");
+        }
+    }
+
     public Task<bool> MarkRunningAsync(
         Guid runId,
         DateTime startedAtUtc,
@@ -211,6 +241,24 @@ public sealed class QlhvAutoSyncRunRepository : IQlhvAutoSyncRunRepository
             new { RunId = runId, UpdatedAtUtc = DateTime.UtcNow },
             cancellationToken);
 
+    public Task<bool> TouchAsync(
+        Guid runId,
+        DateTime heartbeatAtUtc,
+        CancellationToken cancellationToken = default)
+        => ExecuteTransitionAsync(
+            TouchSql,
+            new { RunId = runId, UpdatedAtUtc = heartbeatAtUtc },
+            cancellationToken);
+
+    public Task<bool> MarkStaleFailedAsync(
+        Guid runId,
+        DateTime completedAtUtc,
+        CancellationToken cancellationToken = default)
+        => ExecuteTransitionAsync(
+            MarkStaleFailedSql,
+            new { RunId = runId, CompletedAtUtc = completedAtUtc },
+            cancellationToken);
+
     private async Task<QlhvAutoSyncRunRecord?> GetSingleAsync(
         string sql,
         object? parameters,
@@ -294,6 +342,8 @@ public sealed class QlhvAutoSyncRunRepository : IQlhvAutoSyncRunRepository
             CreatedAtUtc = row.CreatedAtUtc,
             StartedAtUtc = row.StartedAtUtc,
             CompletedAtUtc = row.CompletedAtUtc,
+            UpdatedAtUtc = row.UpdatedAtUtc,
+            ActiveSlot = row.ActiveSlot.HasValue,
             Oto = Deserialize<QlhvAutoSyncSourceResultDto>(row.OtoResultJson),
             Moto = Deserialize<QlhvAutoSyncSourceResultDto>(row.MotoResultJson),
             ErrorMessage = row.ErrorMessage,
@@ -345,7 +395,9 @@ StartedAtUtc,
 CompletedAtUtc,
 OtoResultJson,
 MotoResultJson,
-ErrorMessage";
+ErrorMessage,
+UpdatedAtUtc,
+ActiveSlot";
 
     private const string ActiveExistsSql = @"
 SELECT COUNT(1)
@@ -387,6 +439,15 @@ ORDER BY CreatedAtUtc DESC, Id DESC;";
     private const string LatestByTriggerSql = "SELECT TOP (1) " + Projection + @"
 FROM dbo.App_QlhvAutoSyncRun
 WHERE TriggerType = @TriggerType
+ORDER BY CreatedAtUtc DESC, Id DESC;";
+
+    private const string LatestSuccessfulSql = "SELECT TOP (1) " + Projection + @"
+FROM dbo.App_QlhvAutoSyncRun
+WHERE Status = N'SUCCEEDED'
+ORDER BY CompletedAtUtc DESC, Id DESC;";
+
+    private const string RecentSql = "SELECT TOP (@Take) " + Projection + @"
+FROM dbo.App_QlhvAutoSyncRun
 ORDER BY CreatedAtUtc DESC, Id DESC;";
 
     private const string MarkRunningSql = @"
@@ -461,6 +522,22 @@ WHERE RunId = @RunId
   AND Status = N'RUNNING'
   AND ActiveSlot = 1;";
 
+    private const string TouchSql = @"
+UPDATE dbo.App_QlhvAutoSyncRun
+SET UpdatedAtUtc = @UpdatedAtUtc
+WHERE RunId = @RunId
+  AND Status = N'RUNNING'
+  AND ActiveSlot = 1;";
+
+    private const string MarkStaleFailedSql = @"
+UPDATE dbo.App_QlhvAutoSyncRun
+SET Status = N'FAILED', ActiveSlot = NULL, CurrentSourceType = NULL,
+    CurrentStage = N'FAILED', CompletedAtUtc = @CompletedAtUtc,
+    UpdatedAtUtc = @CompletedAtUtc,
+    ErrorMessage = N'INACTIVE_STALE_RUN: no fresh heartbeat or active operation.'
+WHERE RunId = @RunId AND ActiveSlot = 1
+  AND Status IN (N'QUEUED', N'RUNNING');";
+
     private sealed class RunRow
     {
         public Guid RunId { get; init; }
@@ -476,5 +553,7 @@ WHERE RunId = @RunId
         public string? OtoResultJson { get; init; }
         public string? MotoResultJson { get; init; }
         public string? ErrorMessage { get; init; }
+        public DateTime UpdatedAtUtc { get; init; }
+        public int? ActiveSlot { get; init; }
     }
 }

@@ -104,7 +104,8 @@ public sealed class RuntimeHardeningTests
             probe,
             ProductionEnvironment(),
             Options.Create(new QlhvRuntimeOptions { ReadinessCacheSeconds = 10 }),
-            new RuntimeReadinessCache());
+            new RuntimeReadinessCache(),
+            timeAuthority: new StaticTimeAuthorityService(HealthyTimeStatus()));
 
         var statuses = await Task.WhenAll(
             Enumerable.Range(0, 12).Select(_ => service.GetStatusAsync()));
@@ -305,6 +306,63 @@ public sealed class RuntimeHardeningTests
     }
 
     [Fact]
+    public async Task Runtime_status_exports_the_versioned_healthy_time_contract()
+    {
+        var status = ReadyStatus();
+        await using var factory = new RuntimeApiFactory(
+            new StaticReadinessService(status));
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync("/api/system/runtime-status");
+        var json = await response.Content.ReadAsStringAsync();
+        var validation = TimeHealthContractValidator.ValidateRuntimeStatusJson(
+            json,
+            status.Time.EvaluatedAtUtc);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(TimeHealthContract.Version, status.TimeContractVersion);
+        Assert.True(validation.IsHealthy);
+        Assert.Equal(
+            TimeHealthPreflightClassifications.TimeHealthy,
+            validation.Classification);
+    }
+
+    [Fact]
+    public async Task Runtime_build_headers_are_stable_for_the_process_instance()
+    {
+        await using var factory = new RuntimeApiFactory(new StaticReadinessService(ReadyStatus()));
+        using var client = factory.CreateClient();
+
+        var first = await client.GetAsync("/api/system/runtime-status");
+        var second = await client.GetAsync("/health/live");
+
+        var firstApiBuild = Assert.Single(first.Headers.GetValues("X-QLHV-API-Build"));
+        var secondApiBuild = Assert.Single(second.Headers.GetValues("X-QLHV-API-Build"));
+        var firstInstance = Assert.Single(first.Headers.GetValues("X-QLHV-Instance"));
+        var secondInstance = Assert.Single(second.Headers.GetValues("X-QLHV-Instance"));
+        Assert.Equal(firstApiBuild, secondApiBuild);
+        Assert.Equal(64, firstApiBuild.Length);
+        Assert.Equal(firstInstance, secondInstance);
+        Assert.Equal(32, firstInstance.Length);
+    }
+
+    [Fact]
+    public void Runtime_build_identity_is_fixed_after_construction()
+    {
+        var identity = new RuntimeBuildIdentity(ProductionEnvironment());
+
+        var first = identity.Current;
+        var second = identity.Current;
+
+        Assert.Same(first, second);
+        Assert.Equal(first.ApiBuildId, second.ApiBuildId);
+        Assert.Equal(first.WorkerBuildId, first.ApiBuildId);
+        Assert.Equal(64, first.ApiBuildId.Length);
+        Assert.NotEqual("unknown", first.InstanceId);
+        Assert.True(first.ProcessStartedAtUtc <= DateTime.UtcNow);
+    }
+
+    [Fact]
     public async Task Login_returns_safe_503_with_correlation_id_when_runtime_is_not_ready()
     {
         await using var factory = new RuntimeApiFactory(new StaticReadinessService(NotReadyStatus()));
@@ -354,7 +412,8 @@ public sealed class RuntimeHardeningTests
         RuntimeReadinessProbeResult probe) => new(
             configuration,
             new StaticProbe(probe),
-            ProductionEnvironment());
+            ProductionEnvironment(),
+            timeAuthority: new StaticTimeAuthorityService(HealthyTimeStatus()));
 
     private static RuntimeConfigurationState ValidConfiguration() =>
         new(@"D:\QLHV_APP_RUNTIME\config\appsettings.Production.Local.json", true, true, true);
@@ -454,9 +513,36 @@ public sealed class RuntimeHardeningTests
         BackupStorageReady = true,
         FileStorageReady = true,
         RuntimeStorageReady = true,
+        Time = HealthyTimeStatus(),
         CheckedAtUtc = DateTime.UtcNow,
         Messages = ["Hệ thống sẵn sàng."],
     };
+
+    private static TimeHealthDto HealthyTimeStatus()
+    {
+        var now = DateTimeOffset.UtcNow;
+        return new TimeHealthDto
+        {
+            TimeHealth = TimeHealthStatuses.Healthy,
+            ReasonCode = TimeHealthReasonCodes.None,
+            DatabaseClockAvailable = true,
+            ServerUtcNow = now,
+            DatabaseUtcNow = now,
+            DatabaseUtcQueryMilliseconds = 1,
+            ClockSkewMilliseconds = 0,
+            TimeZone = "SE Asia Standard Time",
+            WindowsTimeServiceState = TimeHealthContract.RunningServiceState,
+            ConfiguredPeer = TimeHealthContract.ApprovedPeer,
+            CurrentSource = TimeHealthContract.ApprovedPeer,
+            LastSuccessfulSyncUtc = now.AddMinutes(-1),
+            LastSyncError = 0,
+            PhaseOffsetMilliseconds = 100,
+            LastSuccessfulSyncAgeSeconds = 60,
+            EffectivePollIntervalSeconds = 300,
+            EvaluatedAtUtc = now,
+            WritesAllowed = true,
+        };
+    }
 
     private sealed class StaticProbe : IRuntimeReadinessProbe
     {
@@ -503,6 +589,20 @@ public sealed class RuntimeHardeningTests
 
         public Task<RuntimeStatusDto> GetStatusAsync(
             CancellationToken cancellationToken = default) => Task.FromResult(_status);
+    }
+
+    private sealed class StaticTimeAuthorityService : ITimeAuthorityService
+    {
+        private readonly TimeHealthDto _health;
+
+        public StaticTimeAuthorityService(TimeHealthDto health)
+        {
+            _health = health;
+        }
+
+        public Task<TimeHealthDto> GetHealthAsync(
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(_health);
     }
 
     private sealed class ThrowingAuthService : IAuthService

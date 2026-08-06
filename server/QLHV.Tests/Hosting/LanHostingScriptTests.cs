@@ -13,6 +13,7 @@ public sealed class LanHostingScriptTests
         "Start-QLHV-App.ps1",
         "Start-QLHV-App.cmd",
         "Stop-QLHV-App.ps1",
+        "RealtimeWorkerService.ps1",
         "Update-QLHV-App.ps1",
         "Uninstall-QLHV-App.ps1",
         "README.md",
@@ -164,6 +165,7 @@ public sealed class LanHostingScriptTests
         var allowlist = installer[allowlistStart..allowlistEnd];
         Assert.DoesNotContain("Logging", allowlist, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Cors", allowlist, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("CsdtRealtimeSync", allowlist, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotMatch(
             new Regex(@"Copy-Item[^\r\n]*appsettings\.Development", RegexOptions.IgnoreCase),
             installer);
@@ -200,7 +202,7 @@ public sealed class LanHostingScriptTests
     }
 
     [Fact]
-    public void Launcher_validates_config_then_waits_for_live_and_ready_before_browser()
+    public void Launcher_validates_official_api_identity_before_browser_and_keeps_dev_start_health_checks()
     {
         var launcher = Read("Start-QLHV-App.ps1");
 
@@ -212,7 +214,11 @@ public sealed class LanHostingScriptTests
         Assert.Contains("/health/ready", launcher, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("/api/system/runtime-status", launcher, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Stop-QlhvProcessById", launcher, StringComparison.Ordinal);
-        Assert.Contains("TCP port 8088 is already used by another process", launcher, StringComparison.Ordinal);
+        Assert.Contains("PORT_IN_USE_BY_UNKNOWN_PROCESS", launcher, StringComparison.Ordinal);
+        Assert.Contains("QLHV_API_IDENTITY_MISMATCH", launcher, StringComparison.Ordinal);
+        Assert.Contains("timeContractVersion", launcher, StringComparison.Ordinal);
+        Assert.Contains("QLHV.Api", launcher, StringComparison.Ordinal);
+        Assert.Contains("frontendBuildId", launcher, StringComparison.Ordinal);
         Assert.Contains("StartedThisRun", launcher, StringComparison.Ordinal);
         Assert.Contains("-TimeoutSeconds 45", launcher, StringComparison.Ordinal);
 
@@ -241,14 +247,16 @@ public sealed class LanHostingScriptTests
     }
 
     [Fact]
-    public void Launcher_detects_orphaned_exact_runtime_processes_without_stopping_them()
+    public void Launcher_never_stops_an_existing_or_unknown_listener()
     {
         var launcher = Read("Start-QLHV-App.ps1");
 
         Assert.Contains("Get-QlhvRuntimeProcessIds", launcher, StringComparison.Ordinal);
         Assert.Contains("Get-CimInstance -ClassName Win32_Process", launcher, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("orphanedRuntimeId", launcher, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("No process was stopped or started", launcher, StringComparison.Ordinal);
+        var mainStart = launcher.LastIndexOf("# Main launcher lifecycle:", StringComparison.Ordinal);
+        var main = launcher[mainStart..];
+        Assert.DoesNotContain("Stop-QlhvProcessById -ProcessId", main, StringComparison.Ordinal);
         Assert.DoesNotContain("taskkill", launcher, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotMatch(new Regex(@"Stop-Process[^\r\n]*-Name", RegexOptions.IgnoreCase), launcher);
     }
@@ -391,8 +399,11 @@ public sealed class LanHostingScriptTests
             Assert.Equal(321, root.GetProperty("Sync").GetProperty("BatchSize").GetInt32());
             Assert.True(root.GetProperty("SyncExecution").GetProperty("EnableTargetWrites").GetBoolean());
             Assert.True(root.GetProperty("SyncExecution").GetProperty("RequireManualConfirmation").GetBoolean());
-            Assert.True(root.GetProperty("QlhvAutoSync").GetProperty("Enabled").GetBoolean());
-            Assert.True(root.GetProperty("QlhvAutoSync").GetProperty("RunOnServerStartup").GetBoolean());
+            Assert.False(root.GetProperty("QlhvAutoSync").GetProperty("Enabled").GetBoolean());
+            Assert.False(root.GetProperty("QlhvAutoSync").GetProperty("RunOnServerStartup").GetBoolean());
+            Assert.False(root.GetProperty("QlhvAutoSync").GetProperty("PollingEnabled").GetBoolean());
+            Assert.True(root.GetProperty("QlhvAutoSync").GetProperty("IsFallbackOnly").GetBoolean());
+            Assert.False(root.GetProperty("QlhvAutoSync").GetProperty("FallbackModeEnabled").GetBoolean());
             Assert.True(root.GetProperty("QlhvAutoSync").GetProperty("RefreshBackupBeforeSync").GetBoolean());
             Assert.Equal(
                 ["OTO", "MOTO"],
@@ -400,6 +411,22 @@ public sealed class LanHostingScriptTests
                     .EnumerateArray()
                     .Select(item => item.GetString())
                     .ToArray());
+            var realtime = root.GetProperty("CsdtRealtimeSync");
+            Assert.False(realtime.GetProperty("Enabled").GetBoolean());
+            Assert.Equal(1, realtime.GetProperty("PollIntervalSeconds").GetInt32());
+            Assert.Equal(5, realtime.GetProperty("ReconcileIntervalMinutes").GetInt32());
+            Assert.Equal(7, realtime.GetProperty("ChangeRetentionDays").GetInt32());
+            Assert.False(realtime.GetProperty("UseBackupProfiles").GetBoolean());
+            var oto = realtime.GetProperty("Streams").GetProperty("Oto");
+            Assert.False(oto.GetProperty("Enabled").GetBoolean());
+            Assert.Equal("OTO_V2", oto.GetProperty("SourceProfile").GetString());
+            Assert.Equal("OTO_V1", oto.GetProperty("TargetProfile").GetString());
+            Assert.Equal("66029", oto.GetProperty("MaCSDT").GetString());
+            var moto = realtime.GetProperty("Streams").GetProperty("Moto");
+            Assert.False(moto.GetProperty("Enabled").GetBoolean());
+            Assert.Equal("MOTO_V2", moto.GetProperty("SourceProfile").GetString());
+            Assert.Equal("MOTO_V1", moto.GetProperty("TargetProfile").GetString());
+            Assert.Equal("66030", moto.GetProperty("MaCSDT").GetString());
             Assert.False(root.GetProperty("PhotoProcessing").GetProperty("Enabled").GetBoolean());
             Assert.Equal(
                 @"D:\IM_GPLX",
@@ -427,6 +454,210 @@ public sealed class LanHostingScriptTests
             Assert.Equal(
                 sentinel,
                 backupDocument.RootElement.GetProperty("CustomLocal").GetProperty("Sentinel").GetString());
+        }
+        finally
+        {
+            Directory.Delete(temporaryDirectory, recursive: true);
+        }
+    }
+    [Fact]
+    public void Updater_preserves_existing_realtime_backup_configuration()
+    {
+        var temporaryDirectory = Path.Combine(Path.GetTempPath(), "qlhv-realtime-backup-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temporaryDirectory);
+        var configurationPath = Path.Combine(temporaryDirectory, "appsettings.Production.Local.json");
+        try
+        {
+            File.WriteAllText(configurationPath, """
+                {
+                  "ConnectionStrings": { "QLHV_APP": "fixture" },
+                  "Sync": { "DryRun": false },
+                  "SyncExecution": { "EnableTargetWrites": true },
+                  "CsdtRealtimeSync": {
+                    "Enabled": true,
+                    "UseBackupProfiles": true,
+                    "PollIntervalSeconds": 11,
+                    "ReconcileIntervalMinutes": 17,
+                    "ChangeRetentionDays": 13,
+                    "Streams": {
+                      "Oto": {
+                        "Enabled": true,
+                        "StreamCode": "OTO_V2_TO_V1",
+                        "SourceProfile": "OTO_V2_BAK",
+                        "TargetProfile": "OTO_V1_BAK",
+                        "MaCSDT": "66029"
+                      },
+                      "Moto": {
+                        "Enabled": false,
+                        "StreamCode": "MOTO_V2_TO_V1",
+                        "SourceProfile": "MOTO_V2_BAK",
+                        "TargetProfile": "MOTO_V1_BAK",
+                        "MaCSDT": "66030"
+                      }
+                    }
+                  }
+                }
+                """);
+
+            _ = InvokeProductionFlagNormalizer("Update-QLHV-App.ps1", configurationPath);
+
+            using var document = JsonDocument.Parse(File.ReadAllText(configurationPath));
+            var realtime = document.RootElement.GetProperty("CsdtRealtimeSync");
+            Assert.True(realtime.GetProperty("Enabled").GetBoolean());
+            Assert.True(realtime.GetProperty("UseBackupProfiles").GetBoolean());
+            Assert.Equal(11, realtime.GetProperty("PollIntervalSeconds").GetInt32());
+            Assert.Equal(17, realtime.GetProperty("ReconcileIntervalMinutes").GetInt32());
+            Assert.Equal(13, realtime.GetProperty("ChangeRetentionDays").GetInt32());
+            var streams = realtime.GetProperty("Streams");
+            var oto = streams.GetProperty("Oto");
+            Assert.True(oto.GetProperty("Enabled").GetBoolean());
+            Assert.Equal("OTO_V2_BAK", oto.GetProperty("SourceProfile").GetString());
+            Assert.Equal("OTO_V1_BAK", oto.GetProperty("TargetProfile").GetString());
+            var moto = streams.GetProperty("Moto");
+            Assert.False(moto.GetProperty("Enabled").GetBoolean());
+            Assert.Equal("MOTO_V2_BAK", moto.GetProperty("SourceProfile").GetString());
+            Assert.Equal("MOTO_V1_BAK", moto.GetProperty("TargetProfile").GetString());
+        }
+        finally
+        {
+            Directory.Delete(temporaryDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Updater_preserves_existing_realtime_disabled_flags()
+    {
+        var temporaryDirectory = Path.Combine(Path.GetTempPath(), "qlhv-realtime-disabled-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temporaryDirectory);
+        var configurationPath = Path.Combine(temporaryDirectory, "appsettings.Production.Local.json");
+        try
+        {
+            File.WriteAllText(configurationPath, """
+                {
+                  "ConnectionStrings": { "QLHV_APP": "fixture" },
+                  "Sync": { "DryRun": false },
+                  "SyncExecution": { "EnableTargetWrites": true },
+                  "CsdtRealtimeSync": {
+                    "Enabled": false,
+                    "UseBackupProfiles": false,
+                    "Streams": {
+                      "Oto": {
+                        "Enabled": false,
+                        "StreamCode": "OTO_V2_TO_V1",
+                        "SourceProfile": "OTO_V2",
+                        "TargetProfile": "OTO_V1",
+                        "MaCSDT": "66029"
+                      },
+                      "Moto": {
+                        "Enabled": true,
+                        "StreamCode": "MOTO_V2_TO_V1",
+                        "SourceProfile": "MOTO_V2",
+                        "TargetProfile": "MOTO_V1",
+                        "MaCSDT": "66030"
+                      }
+                    }
+                  }
+                }
+                """);
+
+            _ = InvokeProductionFlagNormalizer("Update-QLHV-App.ps1", configurationPath);
+
+            using var document = JsonDocument.Parse(File.ReadAllText(configurationPath));
+            var realtime = document.RootElement.GetProperty("CsdtRealtimeSync");
+            var streams = realtime.GetProperty("Streams");
+            Assert.False(realtime.GetProperty("Enabled").GetBoolean());
+            Assert.False(streams.GetProperty("Oto").GetProperty("Enabled").GetBoolean());
+            Assert.True(streams.GetProperty("Moto").GetProperty("Enabled").GetBoolean());
+        }
+        finally
+        {
+            Directory.Delete(temporaryDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Installer_creates_disabled_realtime_defaults_when_section_is_missing()
+    {
+        var temporaryDirectory = Path.Combine(Path.GetTempPath(), "qlhv-realtime-install-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temporaryDirectory);
+        var configurationPath = Path.Combine(temporaryDirectory, "appsettings.Production.Local.json");
+        try
+        {
+            File.WriteAllText(configurationPath, """
+                {
+                  "ConnectionStrings": { "QLHV_APP": "fixture" },
+                  "Sync": { "DryRun": false },
+                  "SyncExecution": { "EnableTargetWrites": true }
+                }
+                """);
+
+            _ = InvokeProductionFlagNormalizer("Install-QLHV-App.ps1", configurationPath);
+
+            using var document = JsonDocument.Parse(File.ReadAllText(configurationPath));
+            var realtime = document.RootElement.GetProperty("CsdtRealtimeSync");
+            Assert.False(realtime.GetProperty("Enabled").GetBoolean());
+            Assert.False(realtime.GetProperty("UseBackupProfiles").GetBoolean());
+            Assert.False(realtime.GetProperty("Streams").GetProperty("Oto").GetProperty("Enabled").GetBoolean());
+            Assert.False(realtime.GetProperty("Streams").GetProperty("Moto").GetProperty("Enabled").GetBoolean());
+        }
+        finally
+        {
+            Directory.Delete(temporaryDirectory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("Install-QLHV-App.ps1")]
+    [InlineData("Update-QLHV-App.ps1")]
+    public void Production_normalizer_adds_missing_realtime_keys_without_changing_existing_values(
+        string scriptName)
+    {
+        var temporaryDirectory = Path.Combine(Path.GetTempPath(), "qlhv-realtime-merge-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temporaryDirectory);
+        var configurationPath = Path.Combine(temporaryDirectory, "appsettings.Production.Local.json");
+        try
+        {
+            File.WriteAllText(configurationPath, """
+                {
+                  "ConnectionStrings": { "QLHV_APP": "fixture" },
+                  "Sync": { "DryRun": false },
+                  "SyncExecution": { "EnableTargetWrites": true },
+                  "CustomLocal": { "Sentinel": "keep-this" },
+                  "CsdtRealtimeSync": {
+                    "Enabled": false,
+                    "UseBackupProfiles": true,
+                    "Streams": {
+                      "Oto": {
+                        "Enabled": true,
+                        "SourceProfile": "OTO_V2_BAK"
+                      }
+                    }
+                  }
+                }
+                """);
+
+            _ = InvokeProductionFlagNormalizer(scriptName, configurationPath);
+
+            using var document = JsonDocument.Parse(File.ReadAllText(configurationPath));
+            var root = document.RootElement;
+            Assert.Equal("keep-this", root.GetProperty("CustomLocal").GetProperty("Sentinel").GetString());
+            var realtime = root.GetProperty("CsdtRealtimeSync");
+            Assert.False(realtime.GetProperty("Enabled").GetBoolean());
+            Assert.True(realtime.GetProperty("UseBackupProfiles").GetBoolean());
+            Assert.Equal(1, realtime.GetProperty("PollIntervalSeconds").GetInt32());
+            Assert.Equal(5, realtime.GetProperty("ReconcileIntervalMinutes").GetInt32());
+            Assert.Equal(7, realtime.GetProperty("ChangeRetentionDays").GetInt32());
+            var streams = realtime.GetProperty("Streams");
+            var oto = streams.GetProperty("Oto");
+            Assert.True(oto.GetProperty("Enabled").GetBoolean());
+            Assert.Equal("OTO_V2_BAK", oto.GetProperty("SourceProfile").GetString());
+            Assert.Equal("OTO_V1_BAK", oto.GetProperty("TargetProfile").GetString());
+            Assert.Equal("OTO_V2_TO_V1", oto.GetProperty("StreamCode").GetString());
+            Assert.Equal("66029", oto.GetProperty("MaCSDT").GetString());
+            var moto = streams.GetProperty("Moto");
+            Assert.False(moto.GetProperty("Enabled").GetBoolean());
+            Assert.Equal("MOTO_V2_BAK", moto.GetProperty("SourceProfile").GetString());
+            Assert.Equal("MOTO_V1_BAK", moto.GetProperty("TargetProfile").GetString());
         }
         finally
         {
@@ -602,8 +833,11 @@ public sealed class LanHostingScriptTests
 
             using var document = JsonDocument.Parse(File.ReadAllText(configurationPath));
             var autoSync = document.RootElement.GetProperty("QlhvAutoSync");
-            Assert.True(autoSync.GetProperty("Enabled").GetBoolean());
-            Assert.True(autoSync.GetProperty("RunOnServerStartup").GetBoolean());
+            Assert.False(autoSync.GetProperty("Enabled").GetBoolean());
+            Assert.False(autoSync.GetProperty("RunOnServerStartup").GetBoolean());
+            Assert.False(autoSync.GetProperty("PollingEnabled").GetBoolean());
+            Assert.True(autoSync.GetProperty("IsFallbackOnly").GetBoolean());
+            Assert.False(autoSync.GetProperty("FallbackModeEnabled").GetBoolean());
             Assert.True(autoSync.GetProperty("RefreshBackupBeforeSync").GetBoolean());
             Assert.Equal(
                 ["OTO", "MOTO"],
@@ -797,8 +1031,8 @@ public sealed class LanHostingScriptTests
 
         Assert.Contains("Initialize-LauncherProgress", main, StringComparison.Ordinal);
         Assert.Contains("/qlhv-import", main, StringComparison.Ordinal);
-        Assert.Contains("May chu da san sang. Dang mo ung dung", main, StringComparison.Ordinal);
-        Assert.Contains("No process was stopped or started", main, StringComparison.Ordinal);
+        Assert.Contains("QLHV_API_READY", main, StringComparison.Ordinal);
+        Assert.Contains("Wait-ForQlhvApiIdentity", main, StringComparison.Ordinal);
         Assert.DoesNotContain("Stop-QlhvProcessById -ProcessId", main, StringComparison.Ordinal);
         Assert.DoesNotContain("/operations/refresh-backup", launcher, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("/import-execute", launcher, StringComparison.OrdinalIgnoreCase);
@@ -808,10 +1042,8 @@ public sealed class LanHostingScriptTests
         Assert.DoesNotContain("Wait-ForSessionSync", launcher, StringComparison.Ordinal);
         Assert.DoesNotContain("sessionStartRunId", launcher, StringComparison.Ordinal);
 
-        var existingServer = main.IndexOf("$existingId = $qlhvOwners[0]", StringComparison.Ordinal);
-        var existingServerWait = main.IndexOf(
-            "Wait-ForEndpoint -ProcessId $existingId -Url $ReadyUrl",
-            existingServer,
+        var existingServer = main.IndexOf("$portOwners = @(Get-PortOwnerIds)", StringComparison.Ordinal);
+        var existingServerWait = main.IndexOf("$identity = Wait-ForQlhvApiIdentity", existingServer,
             StringComparison.Ordinal);
         var releaseLauncherLock = main.IndexOf(
             "Exit-LauncherCoordinationLocks",
@@ -824,29 +1056,90 @@ public sealed class LanHostingScriptTests
     }
 
     [Fact]
-    public void Desktop_launcher_starts_one_missing_server_then_opens_application()
+    public void Production_launcher_is_connect_only_and_development_mode_starts_one_missing_server()
     {
         var launcher = Read("Start-QLHV-App.ps1");
+        var commandLauncher = Read("Start-QLHV-App.cmd");
         var mainStart = launcher.LastIndexOf("# Main launcher lifecycle:", StringComparison.Ordinal);
         var main = launcher[mainStart..];
 
-        Assert.Contains("if ($null -eq $script:StartedProcessId)", main, StringComparison.Ordinal);
-        Assert.Contains("Start-QlhvRuntime", main, StringComparison.Ordinal);
-        Assert.Contains("Wait-ForEndpoint -ProcessId $script:StartedProcessId -Url $LiveUrl", main, StringComparison.Ordinal);
-        Assert.Contains("Wait-ForEndpoint -ProcessId $script:StartedProcessId -Url $ReadyUrl", main, StringComparison.Ordinal);
+        Assert.Contains("[ValidateSet('ProductionService', 'DevelopmentLocalHost')]", launcher,
+            StringComparison.Ordinal);
+        Assert.Contains("[string]$StartupMode = 'ProductionService'", launcher, StringComparison.Ordinal);
+        Assert.Contains("-StartupMode ProductionService", commandLauncher, StringComparison.Ordinal);
 
-        var start = main.LastIndexOf("Start-QlhvRuntime", StringComparison.Ordinal);
-        var ready = main.LastIndexOf(
+        var productionStart = main.IndexOf("elseif ($StartupMode -eq 'ProductionService')", StringComparison.Ordinal);
+        var developmentStart = main.IndexOf("# DevelopmentLocalHost is explicit opt-in", productionStart,
+            StringComparison.Ordinal);
+        Assert.True(productionStart >= 0 && developmentStart > productionStart);
+        var productionBranch = main[productionStart..developmentStart];
+        Assert.Contains("connect-only", productionBranch, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Wait-ForQlhvApiIdentity", productionBranch, StringComparison.Ordinal);
+        Assert.DoesNotContain("Start-QlhvRuntime", productionBranch, StringComparison.Ordinal);
+
+        var connectedGuard = main.IndexOf("if ($null -eq $script:ConnectedProcessId)", developmentStart,
+            StringComparison.Ordinal);
+        var developmentBranch = main[developmentStart..connectedGuard];
+        Assert.Contains("Start-QlhvRuntime", developmentBranch, StringComparison.Ordinal);
+        Assert.Contains("Wait-ForEndpoint -ProcessId $script:StartedProcessId -Url $LiveUrl", developmentBranch,
+            StringComparison.Ordinal);
+        Assert.Contains("Wait-ForEndpoint -ProcessId $script:StartedProcessId -Url $ReadyUrl", developmentBranch,
+            StringComparison.Ordinal);
+
+        var start = developmentBranch.LastIndexOf("Start-QlhvRuntime", StringComparison.Ordinal);
+        var ready = developmentBranch.LastIndexOf(
             "Wait-ForEndpoint -ProcessId $script:StartedProcessId -Url $ReadyUrl",
             StringComparison.Ordinal);
-        var browser = main.IndexOf("Start-Process $browserUrl", ready, StringComparison.Ordinal);
         Assert.Single(
             Regex.Matches(
-                main,
+                developmentBranch,
                 @"(?m)^\s*Start-QlhvRuntime\s*$",
                 RegexOptions.CultureInvariant).Cast<Match>());
-        Assert.True(start >= 0 && ready > start && browser > ready,
-            "A missing server must be started once and pass readiness before the app opens.");
+        Assert.True(start >= 0 && ready > start,
+            "DevelopmentLocalHost may start one missing API and must verify readiness afterwards.");
+    }
+
+    [Fact]
+    public void Existing_listener_identity_is_endpoint_based_pid_independent_and_fails_closed()
+    {
+        var launcher = Read("Start-QLHV-App.ps1");
+        var identityStart = launcher.IndexOf("function Invoke-QlhvApiIdentityProbe", StringComparison.Ordinal);
+        var identityEnd = launcher.IndexOf("function Write-LauncherEvent", identityStart, StringComparison.Ordinal);
+        var identity = launcher[identityStart..identityEnd];
+
+        Assert.Contains("StatusCode -ne 200", identity, StringComparison.Ordinal);
+        Assert.Contains("isReady", identity, StringComparison.Ordinal);
+        Assert.Contains("^1\\.", identity, StringComparison.Ordinal);
+        Assert.Contains("timeContractVersion -ne '2.0'", identity, StringComparison.Ordinal);
+        Assert.Contains("hostProcess -ne 'QLHV.Api'", identity, StringComparison.Ordinal);
+        Assert.Contains("frontendBuildId -notmatch '^qlhv-ui-'", identity, StringComparison.Ordinal);
+        Assert.DoesNotContain("Test-IsQlhvRuntimeProcess", identity, StringComparison.Ordinal);
+
+        var waitStart = launcher.IndexOf("function Wait-ForQlhvApiIdentity", StringComparison.Ordinal);
+        var waitEnd = launcher.IndexOf("function Wait-ForEndpoint", waitStart, StringComparison.Ordinal);
+        var wait = launcher[waitStart..waitEnd];
+        Assert.Contains("pid=$($lastOwners -join ',')", wait, StringComparison.Ordinal);
+        Assert.Contains("healthFailure=", wait, StringComparison.Ordinal);
+        Assert.Contains("logs=$LogDirectory", wait, StringComparison.Ordinal);
+        Assert.Contains("SERVER_UNAVAILABLE", wait, StringComparison.Ordinal);
+        Assert.DoesNotContain("Stop-Process", wait, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Launcher_has_bounded_retry_diagnostics_and_three_user_actions()
+    {
+        var launcher = Read("Start-QLHV-App.ps1");
+
+        Assert.Contains("[int]$HealthTimeoutSeconds = 90", launcher, StringComparison.Ordinal);
+        Assert.Contains("Start-Sleep -Milliseconds 500", launcher, StringComparison.Ordinal);
+        Assert.Contains("API_IDENTITY_PROBE", launcher, StringComparison.Ordinal);
+        Assert.Contains("LAUNCHER_FAILED", launcher, StringComparison.Ordinal);
+        Assert.Contains("mode=$StartupMode", launcher, StringComparison.Ordinal);
+        Assert.Contains("api=$ApplicationUrl", launcher, StringComparison.Ordinal);
+        Assert.Contains("VGjhu60gbOG6oWk=", launcher, StringComparison.Ordinal); // Thử lại
+        Assert.Contains("WGVtIGNoaSB0aeG6v3Q=", launcher, StringComparison.Ordinal); // Xem chi tiết
+        Assert.Contains("VGhvw6F0", launcher, StringComparison.Ordinal); // Thoát
+        Assert.Contains("Start-LauncherRetry", launcher, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -867,7 +1160,8 @@ public sealed class LanHostingScriptTests
         Assert.Contains("Start-Process $browserUrl", launcher, StringComparison.Ordinal);
 
         var existingPid = launcher.IndexOf(
-            "$script:StartedProcessId = $existingId",
+            "$script:ConnectedProcessId = [int]$identity.ProcessId",
+            mainStart,
             StringComparison.Ordinal);
         var configurationValidation = launcher.IndexOf(
             "Assert-ProductionConfiguration",
@@ -879,15 +1173,10 @@ public sealed class LanHostingScriptTests
 
         var catchStart = launcher.LastIndexOf("catch {", StringComparison.Ordinal);
         var catchBody = launcher[catchStart..];
-        var boundedLiveProbe = catchBody.IndexOf(
-            "Invoke-HealthProbe -Url $LiveUrl -TimeoutSeconds 4",
+        Assert.Contains("Show-LauncherError", catchBody, StringComparison.Ordinal);
+        Assert.Contains("Start-LauncherRetry", catchBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("Start-Process \"$ApplicationUrl/qlhv-import\"", catchBody,
             StringComparison.Ordinal);
-        var fallbackBrowser = catchBody.IndexOf(
-            "Start-Process \"$ApplicationUrl/qlhv-import\"",
-            StringComparison.Ordinal);
-        Assert.True(
-            boundedLiveProbe >= 0 && fallbackBrowser > boundedLiveProbe,
-            "A bounded readiness failure must still open a server that remains live.");
     }
 
     [Fact]
