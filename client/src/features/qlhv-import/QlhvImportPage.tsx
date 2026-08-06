@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { useDataVersionRefresh } from '../data-version/useDataVersionRefresh';
 import {
@@ -112,10 +111,7 @@ function createEmptySourceState(): SourceViewState {
 
 export default function QlhvImportPage() {
   const { user } = useAuth();
-  const [searchParams] = useSearchParams();
   const isAdmin = user?.role === 'Admin';
-  const sessionStartRunId = searchParams.get('sessionStartRunId');
-  const sessionStartRequestFailed = searchParams.get('sessionStartState') === 'failed';
   const [activeSource, setActiveSource] = useState<QlhvImportSourceKind>('OTO');
   const [sources, setSources] = useState<Record<QlhvImportSourceKind, SourceViewState>>({
     OTO: createEmptySourceState(),
@@ -490,14 +486,6 @@ export default function QlhvImportPage() {
         activeBusy,
       );
   const autoSyncOperationBlocker = getAutoSyncOperationBlocker(sources);
-  const combinedHistory = useMemo(
-    () => [...sources.OTO.history, ...sources.MOTO.history]
-      .filter((row, index, all) =>
-        all.findIndex((candidate) => candidate.operationId === row.operationId) === index)
-      .sort((left, right) =>
-        (right.startedAtUtc ?? '').localeCompare(left.startedAtUtc ?? '')),
-    [sources.MOTO.history, sources.OTO.history],
-  );
 
   return (
     <div className="qlhv-import-page">
@@ -531,14 +519,11 @@ export default function QlhvImportPage() {
       <AutoSyncPanel
         isAdmin={isAdmin}
         operationBlocker={autoSyncOperationBlocker}
-        operationHistory={combinedHistory}
         reloadToken={contentReloadToken}
         onBusyChange={handleAutoSyncBusyChange}
         onAccepted={async () => {
           await dataVersion.reload();
         }}
-        sessionStartRunId={sessionStartRunId}
-        sessionStartRequestFailed={sessionStartRequestFailed}
       />
 
       <section className="qlhv-import-source-cards" aria-label="Nguồn dữ liệu CSĐT">
@@ -584,7 +569,7 @@ export default function QlhvImportPage() {
       <section className="panel qlhv-import-active-source">
         <SectionHeading
           title={`${activeSourceDefinition.label}: ${activeSourceDefinition.liveDatabaseName} → ${activeSourceDefinition.backupDatabaseName}`}
-          hint={`CSĐT ${activeSourceDefinition.maCSDT} · phân vùng ${activeSourceDefinition.sourceProfileCode}`}
+          hint={`CSĐT ${activeSourceDefinition.maCSDT} · phân vùng ${activeSourceDefinition.label}`}
         />
         <div className="qlhv-import-source-summary">
           Client chỉ gửi loại nguồn <strong>{activeSource}</strong>. Database, mã CSĐT và profile được cố định phía server.
@@ -592,7 +577,7 @@ export default function QlhvImportPage() {
         {active.status && <OperationsStatusView status={active.status} />}
         <div className="qlhv-import-full-sync-warning" role="note">
           Full sync chỉ cập nhật đường dẫn và metadata ảnh trong database; không sao chép file <code>.jp2</code> vật lý.
-          Chỉ module có snapshot hợp lệ mới được cập nhật và xóa mềm trong phân vùng {activeSourceDefinition.sourceProfileCode};
+          Chỉ module có snapshot hợp lệ mới được cập nhật và xóa mềm trong phân vùng {activeSourceDefinition.label};
           module tạm bỏ qua sẽ không bị thêm, sửa hoặc xóa.
         </div>
         {active.operationNotice && <SuccessBanner message={active.operationNotice} />}
@@ -742,14 +727,14 @@ function SourceCard({
         <span aria-hidden="true">→</span>
         <code>{source.backupDatabaseName}</code>
         <span aria-hidden="true">→</span>
-        <code>{source.sourceProfileCode}</code>
+        <code>{source.targetDatabaseName}</code>
       </div>
       {state.statusError && <ErrorBanner message={state.statusError} />}
       {status && !mappingValid && <ErrorBanner message="Mapping backend không khớp cấu hình cố định." />}
       <div className="qlhv-operation-card__stats">
-        <CompactStat label="Live / NguoiLX" value={status ? formatNumber(status.liveRows.nguoiLX) : '—'} />
-        <CompactStat label="BAK / NguoiLX" value={status ? formatNumber(status.backupRows.nguoiLX) : '—'} />
-        <CompactStat label="QLHV active" value={status ? formatNumber(status.targetActiveRows) : '—'} />
+        <CompactStat label="Live / NguoiLX toàn DB" value={status ? formatNumber(status.liveRows.nguoiLX) : '—'} />
+        <CompactStat label="BAK / NguoiLX toàn DB" value={status ? formatNumber(status.backupRows.nguoiLX) : '—'} />
+        <CompactStat label="QLHV active / profile" value={status ? formatNumber(status.targetActiveRows) : '—'} />
         <CompactStat label="Refresh gần nhất" value={formatDate(status?.backupLastRefreshTimeUtc)} />
       </div>
       <div className="qlhv-operation-card__actions">
@@ -772,7 +757,7 @@ function SourceCard({
       {(refreshReason || executeReason) && (
         <div className="qlhv-operation-card__disabled-reasons" role="status">
           {refreshReason && <p><strong>Làm mới BAK:</strong> {refreshReason}</p>}
-          {executeReason && <p><strong>Full sync:</strong> {executeReason}</p>}
+          {executeReason && <p><strong>Full sync thủ công:</strong> {executeReason}</p>}
         </div>
       )}
     </article>
@@ -955,6 +940,10 @@ function formatDomainReadinessStatus(status: QlhvImportDomainStatus): string {
       return 'Sẵn sàng đồng bộ';
     case 'BLOCKED':
       return 'Bị chặn';
+    case 'SKIPPED_NOT_REQUESTED':
+      return 'Không được yêu cầu';
+    case 'SKIPPED_DISABLED':
+      return 'Đang tắt';
     case 'SKIPPED_SCHEMA_NOT_READY':
       return 'Tạm bỏ qua – schema chưa sẵn sàng';
     case 'SKIPPED_SOURCE_NOT_READY':
@@ -1189,12 +1178,12 @@ function StatusBadge({ status, loading }: { status: QlhvOperationsStatus | null;
   if (loading && !status) return <span className="qlhv-operation-state is-loading">Đang tải</span>;
   if (!status) return <span className="qlhv-operation-state is-failed">Chưa có trạng thái</span>;
   const labels: Record<QlhvOperationsStatus['state'], string> = {
-    idle: 'Sẵn sàng',
-    refreshing: 'Đang refresh BAK',
-    syncing: 'Đang full sync',
-    succeeded: 'Thành công',
-    'partial-success': 'Thành công một phần',
-    failed: 'Có lỗi',
+    idle: 'Nguồn sẵn sàng',
+    refreshing: 'Nguồn đang refresh BAK',
+    syncing: 'Nguồn đang full sync',
+    succeeded: 'Thao tác nguồn thành công',
+    'partial-success': 'Thao tác nguồn đã nhập một phần',
+    failed: 'Thao tác nguồn có lỗi',
   };
   return <span className={`qlhv-operation-state is-${status.state}`}>{labels[status.state]}</span>;
 }
@@ -1238,11 +1227,17 @@ function ReadOnlySummary({ sourceDatabaseName, profile, maCSDT }: { sourceDataba
     <div className="qlhv-import-readonly-summary">
       <span className="is-ok">GET chỉ đọc</span>
       <span>DB nguồn: {sourceDatabaseName}</span>
-      <span>{profile}</span>
+      <span>Phân vùng: {formatSourceProfileLabel(profile)}</span>
       <span>CSĐT {maCSDT}</span>
       <span>Toàn bộ khóa</span>
     </div>
   );
+}
+
+function formatSourceProfileLabel(profile: string): string {
+  if (profile === QLHV_IMPORT_SOURCES.OTO.sourceProfileCode) return 'Ô tô';
+  if (profile === QLHV_IMPORT_SOURCES.MOTO.sourceProfileCode) return 'Mô tô';
+  return 'Không xác định';
 }
 
 type MetricTone = 'default' | 'ok' | 'warning' | 'blocked';

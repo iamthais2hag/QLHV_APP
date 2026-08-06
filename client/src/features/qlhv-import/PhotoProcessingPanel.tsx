@@ -164,8 +164,8 @@ export default function PhotoProcessingPanel({
               setSourceProfileCode(event.target.value as QlhvImportSourceProfileCode | ''))}
           >
             <option value="">Tất cả OTO/MOTO</option>
-            <option value="CSDT_OTO">Ô tô · CSDT_OTO</option>
-            <option value="CSDT_MOTO">Mô tô · CSDT_MOTO</option>
+            <option value="CSDT_OTO">Ô tô</option>
+            <option value="CSDT_MOTO">Mô tô</option>
           </select>
         </label>
         <label>
@@ -245,7 +245,7 @@ export default function PhotoProcessingPanel({
                   <PhotoPreview title="Ảnh nền xanh" url={outputUrl} emptyText="Chưa có ảnh dẫn xuất" />
                 </div>
                 <dl>
-                  <dt>Nguồn</dt><dd>{item.sourceProfileCode}</dd>
+                  <dt>Nguồn</dt><dd>{formatSourceProfileLabel(item.sourceProfileCode)}</dd>
                   <dt>Khóa</dt><dd>{item.maKhoaHoc ?? '—'}</dd>
                   <dt>Đường dẫn gốc</dt>
                   <dd>{formatSourcePath(item.sourcePathStatus, item.sourcePathKind)}</dd>
@@ -321,6 +321,12 @@ export default function PhotoProcessingPanel({
       )}
     </section>
   );
+}
+
+function formatSourceProfileLabel(profile: string): string {
+  if (profile === 'CSDT_OTO') return 'Ô tô';
+  if (profile === 'CSDT_MOTO') return 'Mô tô';
+  return 'Không xác định';
 }
 
 const PHOTO_STATUSES: readonly QlhvPhotoProcessingStatus[] = [

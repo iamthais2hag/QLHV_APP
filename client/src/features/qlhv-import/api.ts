@@ -416,6 +416,7 @@ function isOperationsStatus(value: unknown): value is QlhvOperationsStatus {
 
   return typeof value.liveDatabaseName === 'string'
     && typeof value.backupDatabaseName === 'string'
+    && value.targetDatabaseName === 'QLHV_APP'
     && typeof value.maCSDT === 'string'
     && isSourceProfileCode(value.sourceProfileCode)
     && isOperationState(value.state)
@@ -479,18 +480,127 @@ function isAutoSyncStatus(value: unknown): value is QlhvAutoSyncStatus {
     && typeof value.found === 'boolean'
     && typeof value.runOnServerStartup === 'boolean'
     && typeof value.refreshBackupBeforeSync === 'boolean'
+    && typeof value.pollingIntervalSeconds === 'number'
+    && Array.isArray(value.resolvedSourceOrder)
+    && value.resolvedSourceOrder.length === 2
+    && value.resolvedSourceOrder.every(isSourceKind)
+    && typeof value.apiWorkerConfigParity === 'boolean'
+    && isAutoSyncPollingStatus(value.polling)
+    && isRuntimeBuildIdentity(value.runtime)
     && isAutoSyncState(value.state)
     && isNullableString(value.runId)
     && isNullableString(value.activeRunId)
     && isNullableString(value.triggerType)
     && isNullableString(value.actor)
     && (value.currentSourceType === null || isSourceKind(value.currentSourceType))
+    && isNullableString(value.createdAtUtc)
     && isNullableString(value.startedAtUtc)
     && isNullableString(value.completedAtUtc)
     && isNullableString(value.lastSuccessfulSyncUtc)
+    && isNullableString(value.lastSuccessfulRunId)
     && (value.oto === null || isAutoSyncSourceResult(value.oto))
     && (value.moto === null || isAutoSyncSourceResult(value.moto))
+    && Array.isArray(value.history)
+    && value.history.every(isAutoSyncHistoryItem)
+    && isNullableString(value.lastError)
+    && isRealtimeOperationsState(value.realtime)
+    && isAutoSyncConfigurationState(value.configuration)
+    && isAutoSyncRuntimeState(value.autoSyncRuntime);
+}
+
+function isRealtimeOperationsState(value: unknown): boolean {
+  return isRecord(value)
+    && typeof value.serviceState === 'string'
+    && typeof value.processState === 'string'
+    && typeof value.overallHealth === 'string'
+    && isNullableString(value.workerInstanceId)
+    && isNullableString(value.lastHeartbeatUtc)
+    && isNullableString(value.currentProfile)
+    && typeof value.cycleActive === 'boolean'
+    && typeof value.writerEnabled === 'boolean'
+    && typeof value.mutexHeld === 'boolean'
+    && isNullableString(value.lastFailureCode)
+    && Array.isArray(value.profiles)
+    && value.profiles.every((profile) => isRecord(profile)
+      && typeof profile.profileCode === 'string'
+      && typeof profile.enabled === 'boolean'
+      && typeof profile.health === 'string'
+      && isFiniteNumber(profile.checkpointVersion)
+      && isNullableString(profile.lastCycleCompletedAtUtc));
+}
+
+function isAutoSyncConfigurationState(value: unknown): boolean {
+  return isRecord(value)
+    && typeof value.enabled === 'boolean'
+    && typeof value.runOnStartup === 'boolean'
+    && typeof value.pollingEnabled === 'boolean'
+    && isFiniteNumber(value.pollIntervalSeconds)
+    && typeof value.isFallbackOnly === 'boolean'
+    && typeof value.fallbackModeEnabled === 'boolean'
+    && typeof value.manualRunAllowed === 'boolean'
+    && typeof value.manualRunDecision === 'string'
+    && typeof value.manualRunReason === 'string';
+}
+
+function isAutoSyncRuntimeState(value: unknown): boolean {
+  return isRecord(value)
+    && typeof value.isRunActive === 'boolean'
+    && isNullableString(value.activeRunId)
+    && typeof value.classification === 'string'
+    && isNullableString(value.source)
+    && isNullableString(value.step)
+    && isNullableString(value.startedAtUtc)
+    && isNullableString(value.lastHeartbeatUtc)
+    && typeof value.heartbeatFresh === 'boolean'
+    && hasFiniteNumbers(value, [
+      'effectiveActiveSlotCount', 'rawActiveSlotCount', 'activeOperationCount',
+    ]);
+}
+
+function isAutoSyncPollingStatus(value: unknown): boolean {
+  return isRecord(value)
+    && typeof value.enabled === 'boolean'
+    && typeof value.isPolling === 'boolean'
+    && isNullableString(value.disabledReason)
+    && typeof value.processStartedAtUtc === 'string'
+    && isNullableString(value.lastPollStartedAtUtc)
+    && isNullableString(value.lastPollCompletedAtUtc)
+    && isNullableString(value.nextPollAtUtc)
+    && isNullableString(value.lastDecision)
     && isNullableString(value.lastError);
+}
+
+function isRuntimeBuildIdentity(value: unknown): boolean {
+  return isRecord(value)
+    && typeof value.applicationVersion === 'string'
+    && isNullableString(value.commitSha)
+    && typeof value.apiBuildId === 'string'
+    && typeof value.workerBuildId === 'string'
+    && isNullableString(value.apiBuiltAtUtc)
+    && typeof value.processStartedAtUtc === 'string'
+    && typeof value.instanceId === 'string'
+    && typeof value.hostProcess === 'string'
+    && typeof value.environment === 'string'
+    && typeof value.workerInstanceId === 'string'
+    && typeof value.frontendBuildId === 'string'
+    && isNullableString(value.frontendBuiltAtUtc);
+}
+
+function isAutoSyncHistoryItem(value: unknown): boolean {
+  return isRecord(value)
+    && typeof value.runId === 'string'
+    && typeof value.triggerType === 'string'
+    && typeof value.actor === 'string'
+    && typeof value.status === 'string'
+    && typeof value.createdAtUtc === 'string'
+    && isNullableString(value.startedAtUtc)
+    && isNullableString(value.completedAtUtc)
+    && (value.oto === null || isAutoSyncSourceResult(value.oto))
+    && (value.moto === null || isAutoSyncSourceResult(value.moto))
+    && isNullableString(value.errorMessage)
+    && typeof value.classification === 'string'
+    && typeof value.isStale === 'boolean'
+    && isNullableString(value.lastHeartbeatUtc);
 }
 
 function isAutoSyncSourceResult(value: unknown): value is QlhvAutoSyncSourceResult {
@@ -501,7 +611,12 @@ function isAutoSyncSourceResult(value: unknown): value is QlhvAutoSyncSourceResu
     && isNullableString(value.syncOperationId)
     && isNullableString(value.startedAtUtc)
     && isNullableString(value.completedAtUtc)
-    && isNullableString(value.message);
+    && isNullableString(value.message)
+    && Array.isArray(value.domainResults)
+    && value.domainResults.every(isImportDomainResult)
+    && (value.photoProcessing === null || isImportDomainResult(value.photoProcessing))
+    && isSkippedReasonCounts(value.skippedReasons)
+    && isStringArray(value.warnings);
 }
 
 function isAutoSyncRunResult(value: unknown): value is QlhvAutoSyncRunResult {
@@ -522,6 +637,8 @@ function isAutoSyncState(value: unknown): value is QlhvAutoSyncStatus['state'] {
     || value === 'idle'
     || value === 'queued'
     || value === 'running'
+    || value === 'inactive-stale-run'
+    || value === 'needs-plan'
     || value === 'succeeded'
     || value === 'partial-success'
     || value === 'partial-failed'
@@ -596,6 +713,10 @@ function isExecuteResult(value: unknown): value is QlhvImportExecuteResult {
     && entityCountsAreValid
     && Array.isArray(value.domainResults)
     && value.domainResults.every(isImportDomainResult)
+    && (value.photoProcessing === undefined
+      || value.photoProcessing === null
+      || isImportDomainResult(value.photoProcessing))
+    && (value.skippedReasons === undefined || isSkippedReasonCounts(value.skippedReasons))
     && (value.photo === undefined || isImportPhotoCounts(value.photo))
     && hasFiniteNumbers(value, [
       'insertedHocVienRows',
@@ -720,10 +841,35 @@ function isImportEntityCounts(value: unknown): value is QlhvImportEntityCounts {
 
 function isImportDomainResult(value: unknown): value is QlhvImportDomainResult {
   return isRecord(value)
-    && isImportDomain(value.domain)
+    && isImportResultDomain(value.domain)
     && typeof value.status === 'string'
     && isNullableString(value.message)
-    && isImportEntityCounts(value.counts);
+    && isImportEntityCounts(value.counts)
+    && typeof value.requested === 'boolean'
+    && typeof value.enabled === 'boolean'
+    && typeof value.required === 'boolean'
+    && typeof value.snapshotState === 'string'
+    && typeof value.schemaState === 'string'
+    && typeof value.attempted === 'boolean'
+    && typeof value.committed === 'boolean'
+    && typeof value.skipped === 'boolean'
+    && typeof value.contributesToPartial === 'boolean'
+    && isNullableString(value.failureCode)
+    && isNullableString(value.requestReasonCode)
+    && isNullableString(value.reason)
+    && isSkippedReasonCounts(value.skippedReasons);
+}
+
+function isSkippedReasonCounts(value: unknown): boolean {
+  return isRecord(value)
+    && hasFiniteNumbers(value, [
+      'noChange',
+      'notRequested',
+      'disabled',
+      'validationRejected',
+      'other',
+      'total',
+    ]);
 }
 
 function isImportDomainArray(value: unknown): value is QlhvImportDomain[] {
@@ -737,9 +883,15 @@ function isImportDomain(value: unknown): value is QlhvImportDomain {
     || value === 'KHOA_HOC_GIAO_VIEN';
 }
 
+function isImportResultDomain(value: unknown): boolean {
+  return isImportDomain(value) || value === 'PHOTO_PROCESSING';
+}
+
 function isImportDomainStatus(value: unknown): value is QlhvImportDomainStatus {
   return value === 'EXECUTABLE'
     || value === 'BLOCKED'
+    || value === 'SKIPPED_NOT_REQUESTED'
+    || value === 'SKIPPED_DISABLED'
     || value === 'SKIPPED_SCHEMA_NOT_READY'
     || value === 'SKIPPED_SOURCE_NOT_READY'
     || value === 'SKIPPED_DEPENDENCY_NOT_READY'

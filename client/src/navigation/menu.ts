@@ -44,20 +44,23 @@ export const MENU_ITEMS: MenuItem[] = [
   {
     path: '/khoa-hoc',
     label: 'Khóa học',
-    description: 'Quản lý các khóa học và lịch đào tạo.',
+    description: 'Tra cứu khóa nguồn và quản lý nhóm, giáo viên, xe, phân công học viên.',
     icon: '📚',
+    requiredPermission: 'CanViewAssignmentCatalogs',
   },
   {
     path: '/giao-vien',
     label: 'Giáo viên',
-    description: 'Quản lý giáo viên và phân công giảng dạy.',
+    description: 'Tra cứu giáo viên nguồn và quản lý người nhận hồ sơ.',
     icon: '👩‍🏫',
+    requiredPermission: 'CanViewAssignmentCatalogs',
   },
   {
     path: '/xe-tap-lai',
     label: 'Xe tập lái',
-    description: 'Quản lý phương tiện và phân bổ xe tập lái.',
+    description: 'Tra cứu xe nguồn OTO/MOTO và tình trạng sử dụng trong phân công.',
     icon: '🚗',
+    requiredPermission: 'CanViewAssignmentCatalogs',
   },
   {
     path: '/kiem-tra-du-lieu',
@@ -106,11 +109,10 @@ export const MENU_ITEMS: MenuItem[] = [
   },
   {
     path: '/dong-bo-v2',
-    label: 'Đồng bộ dữ liệu',
-    description: 'Đồng bộ dữ liệu Moto giữa CSDT_V1 và CSDT_V2.',
+    label: 'Đồng bộ dữ liệu CSĐT V1 ↔ V2',
+    description: 'Theo dõi realtime Ô tô/Mô tô và lập kế hoạch đồng bộ thủ công V1 → V2.',
     icon: '🔄',
-    requiredRole: 'Admin',
-    requiredPermission: 'CanSynchronizeCSDT',
+    requiredPermission: 'CanViewBusinessData',
   },
   {
     path: '/qlhv-import',

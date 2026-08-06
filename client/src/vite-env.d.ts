@@ -8,3 +8,6 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+declare const __QLHV_FRONTEND_BUILD_ID__: string;
+declare const __QLHV_FRONTEND_BUILT_AT_UTC__: string;

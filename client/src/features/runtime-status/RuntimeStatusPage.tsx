@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getRuntimeStatus } from './api';
-import { isRuntimeReady, type RuntimeStatus } from './types';
+import { isRuntimeReady, isTimeMutationAllowed, type RuntimeStatus } from './types';
+import RealtimeMasterControlPanel from './RealtimeMasterControlPanel';
 
 interface StatusItem {
   label: string;
@@ -39,6 +40,10 @@ export default function RuntimeStatusPage() {
   }, [loadStatus]);
 
   const items = status ? buildStatusItems(status) : [];
+  const browserNow = status ? new Date() : null;
+  const browserSkewMilliseconds = status && browserNow
+    ? browserNow.getTime() - new Date(status.time.serverUtcNow).getTime()
+    : null;
 
   return (
     <div className="runtime-status-page">
@@ -81,6 +86,8 @@ export default function RuntimeStatusPage() {
 
       {status && (
         <>
+          <RealtimeMasterControlPanel />
+
           <section className="runtime-status-grid" aria-label="Kết quả kiểm tra trạng thái">
             {items.map((item) => (
               <article className={`runtime-status-card ${item.ready ? 'is-ready' : 'is-not-ready'}`} key={item.label}>
@@ -92,6 +99,44 @@ export default function RuntimeStatusPage() {
               </article>
             ))}
           </section>
+
+          {browserNow && (
+            <section className="panel runtime-status-details" aria-label="Thẩm quyền thời gian">
+              <div className="runtime-status-details__heading">
+                <div>
+                  <h3>Thẩm quyền thời gian</h3>
+                  <p>Audit dùng UTC của SQL/API; ngày nghiệp vụ là trường người dùng chọn riêng.</p>
+                </div>
+                <strong>{status.time.health}</strong>
+              </div>
+              <dl>
+                <div><dt>Giờ máy chủ</dt><dd>{formatTime(new Date(status.time.serverUtcNow))}</dd></div>
+                <div><dt>Giờ cơ sở dữ liệu</dt><dd>{formatOptionalTime(status.time.databaseUtcNow)}</dd></div>
+                <div><dt>Giờ trình duyệt</dt><dd>{formatTime(browserNow)}</dd></div>
+                <div><dt>Lệch API/SQL</dt><dd>{formatSkew(status.time.clockSkewMilliseconds)}</dd></div>
+                <div><dt>Lệch trình duyệt/máy chủ</dt><dd>{formatSkew(browserSkewMilliseconds)}</dd></div>
+                <div><dt>Windows Time</dt><dd>{status.time.windowsTimeServiceState}</dd></div>
+                <div><dt>Peer cấu hình</dt><dd>{status.time.configuredPeer}</dd></div>
+                <div><dt>Nguồn hiện tại</dt><dd>{status.time.currentSource}</dd></div>
+                <div><dt>Đồng bộ thành công gần nhất</dt><dd>{formatOptionalTime(status.time.lastSuccessfulSyncUtc)}</dd></div>
+                <div><dt>Last Sync Error</dt><dd>{status.time.lastSyncError}</dd></div>
+                <div><dt>Phase offset</dt><dd>{formatSkew(status.time.phaseOffsetMilliseconds)}</dd></div>
+                <div><dt>Tuổi lần sync tốt</dt><dd>{formatSeconds(status.time.lastSuccessfulSyncAgeSeconds)}</dd></div>
+                <div><dt>Chu kỳ poll hiệu lực</dt><dd>{formatSeconds(status.time.effectivePollIntervalSeconds)}</dd></div>
+                <div><dt>SQL clock sẵn sàng</dt><dd>{status.time.databaseClockAvailable ? 'Có' : 'Không'}</dd></div>
+                <div><dt>TimeHealth</dt><dd>{status.time.health}</dd></div>
+                <div><dt>Reason code</dt><dd>{status.time.reasonCode}</dd></div>
+                <div><dt>Đánh giá lúc</dt><dd>{formatTime(new Date(status.time.evaluatedAtUtc))}</dd></div>
+              </dl>
+              {browserSkewMilliseconds !== null && Math.abs(browserSkewMilliseconds) > 5_000 && (
+                <p className="runtime-status-details__empty" role="status">
+                  Cảnh báo: giờ máy đang mở trình duyệt lệch đáng kể so với máy chủ.
+                </p>
+              )}
+              <p><strong>Giờ máy người dùng chỉ dùng để hiển thị và so sánh, không phải thời gian có thẩm quyền của hệ thống.</strong></p>
+              <p>Giờ máy người dùng không được dùng làm thời điểm ghi nhận hệ thống.</p>
+            </section>
+          )}
 
           <section className="panel runtime-status-details">
             <div className="runtime-status-details__heading">
@@ -118,6 +163,13 @@ export default function RuntimeStatusPage() {
 function buildStatusItems(status: RuntimeStatus): StatusItem[] {
   const databaseNameIsValid = status.databaseName?.toLocaleUpperCase('en-US') === 'QLHV_APP';
   const items: StatusItem[] = [
+    {
+      label: 'SQL UTC có thẩm quyền',
+      ready: isTimeMutationAllowed(status.time),
+      detail: isTimeMutationAllowed(status.time)
+        ? 'SQL Server trả SYSUTCDATETIME(); W32Time/NTP chỉ dùng để chẩn đoán.'
+        : 'Không đọc được SYSUTCDATETIME() từ SQL Server; thao tác ghi bị chặn.',
+    },
     ...(status.configurationReady === undefined ? [] : [{
       label: 'Cấu hình Production',
       ready: status.configurationReady,
@@ -192,5 +244,24 @@ function formatTime(value: Date): string {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
+    timeZone: 'Asia/Ho_Chi_Minh',
   }).format(value);
+}
+
+function formatOptionalTime(value: string | null): string {
+  return value ? formatTime(new Date(value)) : 'Không đọc được';
+}
+
+function formatSkew(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) {
+    return 'Không đọc được';
+  }
+  return `${Math.round(value)} ms`;
+}
+
+function formatSeconds(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) {
+    return 'Không đọc được';
+  }
+  return `${Math.round(value)} giây`;
 }

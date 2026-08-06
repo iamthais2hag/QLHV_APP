@@ -29,6 +29,7 @@ import type {
 } from './types';
 import { formatGioiTinh, formatNgaySinh } from './utils';
 import { useDataVersionRefresh } from '../data-version/useDataVersionRefresh';
+import SearchLookup from '../../components/SearchLookup';
 
 const PAGE_SIZE = 20;
 const TITLE_MAX_LENGTH = 100;
@@ -560,16 +561,10 @@ export default function HocVienCardPrintPage() {
   const [keyword, setKeyword] = useState('');
   const [khoaInput, setKhoaInput] = useState('');
   const [selectedKhoa, setSelectedKhoa] = useState<HocVienKhoaLookup | null>(null);
-  const [khoaSuggestions, setKhoaSuggestions] = useState<HocVienKhoaLookup[]>([]);
-  const [showKhoaSuggestions, setShowKhoaSuggestions] = useState(false);
-  const [khoaLookupStatus, setKhoaLookupStatus] = useState<Status>('idle');
   const [khoaWarning, setKhoaWarning] = useState('');
 
   const [hangHocInput, setHangHocInput] = useState('');
   const [selectedHangHoc, setSelectedHangHoc] = useState<HocVienHangHocLookup | null>(null);
-  const [hangHocSuggestions, setHangHocSuggestions] = useState<HocVienHangHocLookup[]>([]);
-  const [showHangHocSuggestions, setShowHangHocSuggestions] = useState(false);
-  const [hangLookupStatus, setHangLookupStatus] = useState<Status>('idle');
   const [hangWarning, setHangWarning] = useState('');
 
   const [gioiTinh, setGioiTinh] = useState('');
@@ -658,65 +653,9 @@ export default function HocVienCardPrintPage() {
     if (pdfUrlRef.current) URL.revokeObjectURL(pdfUrlRef.current);
   }, []);
 
-  useEffect(() => {
-    const value = khoaInput.trim();
-    if (!value || selectedKhoa?.label === value) {
-      setKhoaSuggestions([]);
-      setShowKhoaSuggestions(false);
-      setKhoaLookupStatus('idle');
-      return;
-    }
-    const controller = new AbortController();
-    setKhoaLookupStatus('loading');
-    const timer = window.setTimeout(async () => {
-      try {
-        const result = await getHocVienKhoaLookups(
-          value, 20, selectedHangHoc?.maHangDT, controller.signal,
-        );
-        setKhoaSuggestions(result);
-        setShowKhoaSuggestions(true);
-        setKhoaLookupStatus('success');
-      } catch {
-        if (!controller.signal.aborted) {
-          setKhoaSuggestions([]);
-          setKhoaLookupStatus('error');
-        }
-      }
-    }, 200);
-    return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [khoaInput, selectedKhoa, selectedHangHoc]);
-
-  useEffect(() => {
-    const value = hangHocInput.trim();
-    if (!value || selectedHangHoc?.label === value) {
-      setHangHocSuggestions([]);
-      setShowHangHocSuggestions(false);
-      setHangLookupStatus('idle');
-      return;
-    }
-    const controller = new AbortController();
-    setHangLookupStatus('loading');
-    const timer = window.setTimeout(async () => {
-      try {
-        const result = await getHocVienHangHocLookups(value, 20, controller.signal);
-        setHangHocSuggestions(result);
-        setShowHangHocSuggestions(true);
-        setHangLookupStatus('success');
-      } catch {
-        if (!controller.signal.aborted) {
-          setHangHocSuggestions([]);
-          setHangLookupStatus('error');
-        }
-      }
-    }, 200);
-    return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [hangHocInput, selectedHangHoc]);
-
   function clearKhoa() {
     setKhoaInput('');
     setSelectedKhoa(null);
-    setKhoaSuggestions([]);
-    setShowKhoaSuggestions(false);
     setKhoaWarning('');
   }
 
@@ -740,8 +679,6 @@ export default function HocVienCardPrintPage() {
     clearKhoa();
     setHangHocInput('');
     setSelectedHangHoc(null);
-    setHangHocSuggestions([]);
-    setShowHangHocSuggestions(false);
     setHangWarning('');
     setGioiTinh('');
     setSelectedIds(new Set());
@@ -1097,61 +1034,48 @@ export default function HocVienCardPrintPage() {
             />
           </div>
 
-          <div className="field field--autocomplete">
-            <label className="field__label" htmlFor="print-khoa">Khóa</label>
-            <input
-              id="print-khoa" className="field__input" value={khoaInput}
-              onChange={(event) => {
-                setKhoaInput(event.target.value); setSelectedKhoa(null); setKhoaWarning('');
+          <div className="lookup-field-shell">
+            <SearchLookup
+              id="print-khoa"
+              label="Khóa"
+              value={selectedKhoa}
+              inputValue={khoaInput}
+              onInputValueChange={(value) => { setKhoaInput(value); setKhoaWarning(''); }}
+              onChange={(option) => {
+                setSelectedKhoa(option);
+                setKhoaWarning('');
               }}
-              onFocus={() => khoaSuggestions.length > 0 && setShowKhoaSuggestions(true)}
-              onBlur={() => window.setTimeout(() => setShowKhoaSuggestions(false), 120)}
+              loadOptions={(value, signal) => getHocVienKhoaLookups(value, 20, selectedHangHoc?.maHangDT, signal)}
+              getKey={(option) => option.maKhoa}
+              getLabel={(option) => option.label}
+              getDescription={(option) => option.tenKhoa ? `Mã khóa: ${option.maKhoa}` : null}
               placeholder="Tên khóa hoặc mã khóa"
-              autoComplete="off"
+              emptyText="Không có gợi ý Khóa"
+              errorText="Không tải được gợi ý Khóa."
             />
-            {khoaLookupStatus === 'loading' && <span className="field__hint">Đang tìm...</span>}
-            {khoaLookupStatus === 'error' && <span className="field__warning">Không tải được gợi ý Khóa.</span>}
-            {showKhoaSuggestions && (
-              <div className="autocomplete-list">
-                {khoaSuggestions.length === 0 ? <div className="autocomplete-list__empty">Không có gợi ý</div> :
-                  khoaSuggestions.map((option) => (
-                    <button type="button" key={option.maKhoa} onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => {
-                        setSelectedKhoa(option); setKhoaInput(option.label);
-                        setKhoaSuggestions([]); setShowKhoaSuggestions(false); setKhoaWarning('');
-                      }}>{option.label}</button>
-                  ))}
-              </div>
-            )}
             {khoaWarning && <div className="field__warning">{khoaWarning}</div>}
           </div>
 
-          <div className="field field--autocomplete">
-            <label className="field__label" htmlFor="print-hang">Hạng học</label>
-            <input
-              id="print-hang" className="field__input" value={hangHocInput}
-              onChange={(event) => {
-                setHangHocInput(event.target.value); setSelectedHangHoc(null);
-                clearKhoa(); setHangWarning('');
+          <div className="lookup-field-shell">
+            <SearchLookup
+              id="print-hang"
+              label="Hạng học"
+              value={selectedHangHoc}
+              inputValue={hangHocInput}
+              onInputValueChange={(value) => { setHangHocInput(value); setHangWarning(''); }}
+              onChange={(option) => {
+                setSelectedHangHoc(option);
+                clearKhoa();
+                setHangWarning('');
               }}
-              onFocus={() => hangHocSuggestions.length > 0 && setShowHangHocSuggestions(true)}
-              onBlur={() => window.setTimeout(() => setShowHangHocSuggestions(false), 120)}
-              placeholder="AM, A1M..." autoComplete="off"
+              loadOptions={(value, signal) => getHocVienHangHocLookups(value, 20, signal)}
+              getKey={(option) => option.maHangDT}
+              getLabel={(option) => option.label}
+              getDescription={(option) => option.hangGplxHoc ? `Mã hạng: ${option.maHangDT}` : null}
+              placeholder="AM, A1M..."
+              emptyText="Không có gợi ý Hạng học"
+              errorText="Không tải được gợi ý Hạng học."
             />
-            {hangLookupStatus === 'loading' && <span className="field__hint">Đang tìm...</span>}
-            {hangLookupStatus === 'error' && <span className="field__warning">Không tải được gợi ý Hạng học.</span>}
-            {showHangHocSuggestions && (
-              <div className="autocomplete-list">
-                {hangHocSuggestions.length === 0 ? <div className="autocomplete-list__empty">Không có gợi ý</div> :
-                  hangHocSuggestions.map((option) => (
-                    <button type="button" key={option.maHangDT} onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => {
-                        setSelectedHangHoc(option); setHangHocInput(option.label); clearKhoa();
-                        setHangHocSuggestions([]); setShowHangHocSuggestions(false); setHangWarning('');
-                      }}>{option.label}</button>
-                  ))}
-              </div>
-            )}
             {hangWarning && <div className="field__warning">{hangWarning}</div>}
           </div>
 

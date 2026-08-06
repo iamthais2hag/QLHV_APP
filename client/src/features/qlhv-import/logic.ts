@@ -15,6 +15,7 @@ export const QLHV_IMPORT_SOURCES = {
     label: 'Ô tô',
     liveDatabaseName: 'CSDL_OTO',
     backupDatabaseName: 'CSDL_OTO_BAK',
+    targetDatabaseName: 'QLHV_APP',
     sourceProfileCode: 'CSDT_OTO',
     maCSDT: '66029',
   },
@@ -22,6 +23,7 @@ export const QLHV_IMPORT_SOURCES = {
     label: 'Mô tô',
     liveDatabaseName: 'CSDL_MOTO',
     backupDatabaseName: 'CSDL_MOTO_BAK',
+    targetDatabaseName: 'QLHV_APP',
     sourceProfileCode: 'CSDT_MOTO',
     maCSDT: '66030',
   },
@@ -67,6 +69,7 @@ export function statusMatchesSource(
   return status.sourceType === sourceKind
     && status.liveDatabaseName === source.liveDatabaseName
     && status.backupDatabaseName === source.backupDatabaseName
+    && status.targetDatabaseName === source.targetDatabaseName
     && status.sourceProfileCode === source.sourceProfileCode
     && status.maCSDT === source.maCSDT;
 }

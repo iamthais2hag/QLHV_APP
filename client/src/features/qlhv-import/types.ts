@@ -8,9 +8,13 @@ export type QlhvImportDomain =
   | 'GIAO_VIEN'
   | 'KHOA_HOC_GIAO_VIEN';
 
+export type QlhvImportResultDomain = QlhvImportDomain | 'PHOTO_PROCESSING';
+
 export type QlhvImportDomainStatus =
   | 'EXECUTABLE'
   | 'BLOCKED'
+  | 'SKIPPED_NOT_REQUESTED'
+  | 'SKIPPED_DISABLED'
   | 'SKIPPED_SCHEMA_NOT_READY'
   | 'SKIPPED_SOURCE_NOT_READY'
   | 'SKIPPED_DEPENDENCY_NOT_READY'
@@ -61,10 +65,32 @@ export interface QlhvImportPhotoCounts {
 }
 
 export interface QlhvImportDomainResult {
-  domain: QlhvImportDomain;
+  domain: QlhvImportResultDomain;
   status: string;
   message: string | null;
   counts: QlhvImportEntityCounts;
+  requested: boolean;
+  enabled: boolean;
+  required: boolean;
+  snapshotState: string;
+  schemaState: string;
+  attempted: boolean;
+  committed: boolean;
+  skipped: boolean;
+  contributesToPartial: boolean;
+  failureCode: string | null;
+  requestReasonCode: string | null;
+  reason: string | null;
+  skippedReasons: QlhvSkippedReasonCounts;
+}
+
+export interface QlhvSkippedReasonCounts {
+  noChange: number;
+  notRequested: number;
+  disabled: number;
+  validationRejected: number;
+  other: number;
+  total: number;
 }
 
 export interface QlhvImportDiagnostics {
@@ -177,6 +203,8 @@ export interface QlhvImportExecuteResult {
   giaoVien?: QlhvImportEntityCounts;
   khoaHocGiaoVien?: QlhvImportEntityCounts;
   domainResults: QlhvImportDomainResult[];
+  photoProcessing?: QlhvImportDomainResult | null;
+  skippedReasons?: QlhvSkippedReasonCounts;
   photo?: QlhvImportPhotoCounts;
 }
 
@@ -199,6 +227,7 @@ export interface QlhvOperationsStatus {
   sourceType: QlhvImportSourceKind;
   liveDatabaseName: string;
   backupDatabaseName: string;
+  targetDatabaseName: 'QLHV_APP';
   maCSDT: string;
   sourceProfileCode: QlhvImportSourceProfileCode;
   state: QlhvOperationState;
@@ -256,6 +285,8 @@ export type QlhvAutoSyncState =
   | 'idle'
   | 'queued'
   | 'running'
+  | 'inactive-stale-run'
+  | 'needs-plan'
   | 'succeeded'
   | 'partial-success'
   | 'partial-failed'
@@ -269,6 +300,10 @@ export interface QlhvAutoSyncSourceResult {
   message: string | null;
   startedAtUtc: string | null;
   completedAtUtc: string | null;
+  domainResults: QlhvImportDomainResult[];
+  photoProcessing: QlhvImportDomainResult | null;
+  skippedReasons: QlhvSkippedReasonCounts;
+  warnings: string[];
 }
 
 export interface QlhvAutoSyncStatus {
@@ -276,6 +311,11 @@ export interface QlhvAutoSyncStatus {
   enabled: boolean;
   runOnServerStartup: boolean;
   refreshBackupBeforeSync: boolean;
+  pollingIntervalSeconds: number;
+  resolvedSourceOrder: QlhvImportSourceKind[];
+  apiWorkerConfigParity: boolean;
+  polling: QlhvAutoSyncPollingStatus;
+  runtime: RuntimeBuildIdentity;
   state: QlhvAutoSyncState;
   runId: string | null;
   activeRunId: string | null;
@@ -283,12 +323,109 @@ export interface QlhvAutoSyncStatus {
   actor: string | null;
   currentSourceType: QlhvImportSourceKind | null;
   currentStage: string | null;
+  createdAtUtc: string | null;
   startedAtUtc: string | null;
   completedAtUtc: string | null;
   lastSuccessfulSyncUtc: string | null;
+  lastSuccessfulRunId: string | null;
   oto: QlhvAutoSyncSourceResult | null;
   moto: QlhvAutoSyncSourceResult | null;
+  history: QlhvAutoSyncHistoryItem[];
   lastError: string | null;
+  realtime: QlhvRealtimeOperationsState;
+  configuration: QlhvAutoSyncConfigurationState;
+  autoSyncRuntime: QlhvAutoSyncRuntimeState;
+}
+
+export interface QlhvRealtimeProfileState {
+  profileCode: string;
+  enabled: boolean;
+  health: string;
+  checkpointVersion: number;
+  lastCycleCompletedAtUtc: string | null;
+}
+
+export interface QlhvRealtimeOperationsState {
+  serviceState: string;
+  processState: string;
+  overallHealth: string;
+  workerInstanceId: string | null;
+  lastHeartbeatUtc: string | null;
+  currentProfile: string | null;
+  cycleActive: boolean;
+  writerEnabled: boolean;
+  mutexHeld: boolean;
+  lastFailureCode: string | null;
+  profiles: QlhvRealtimeProfileState[];
+}
+
+export interface QlhvAutoSyncConfigurationState {
+  enabled: boolean;
+  runOnStartup: boolean;
+  pollingEnabled: boolean;
+  pollIntervalSeconds: number;
+  isFallbackOnly: boolean;
+  fallbackModeEnabled: boolean;
+  manualRunAllowed: boolean;
+  manualRunDecision: string;
+  manualRunReason: string;
+}
+
+export interface QlhvAutoSyncRuntimeState {
+  isRunActive: boolean;
+  activeRunId: string | null;
+  classification: string;
+  source: string | null;
+  step: string | null;
+  startedAtUtc: string | null;
+  lastHeartbeatUtc: string | null;
+  heartbeatFresh: boolean;
+  effectiveActiveSlotCount: number;
+  rawActiveSlotCount: number;
+  activeOperationCount: number;
+}
+
+export interface QlhvAutoSyncPollingStatus {
+  enabled: boolean;
+  isPolling: boolean;
+  disabledReason: string | null;
+  processStartedAtUtc: string;
+  lastPollStartedAtUtc: string | null;
+  lastPollCompletedAtUtc: string | null;
+  nextPollAtUtc: string | null;
+  lastDecision: string | null;
+  lastError: string | null;
+}
+
+export interface RuntimeBuildIdentity {
+  applicationVersion: string;
+  commitSha: string | null;
+  apiBuildId: string;
+  workerBuildId: string;
+  apiBuiltAtUtc: string | null;
+  processStartedAtUtc: string;
+  instanceId: string;
+  hostProcess: string;
+  environment: string;
+  workerInstanceId: string;
+  frontendBuildId: string;
+  frontendBuiltAtUtc: string | null;
+}
+
+export interface QlhvAutoSyncHistoryItem {
+  runId: string;
+  triggerType: string;
+  actor: string;
+  status: string;
+  createdAtUtc: string;
+  startedAtUtc: string | null;
+  completedAtUtc: string | null;
+  oto: QlhvAutoSyncSourceResult | null;
+  moto: QlhvAutoSyncSourceResult | null;
+  errorMessage: string | null;
+  classification: string;
+  isStale: boolean;
+  lastHeartbeatUtc: string | null;
 }
 
 export interface QlhvAutoSyncRunResult {

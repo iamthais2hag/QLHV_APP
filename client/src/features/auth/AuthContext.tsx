@@ -3,7 +3,6 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -19,7 +18,6 @@ import type {
   ChangePasswordRequest,
   LoginRequest,
 } from './types';
-import { ensureQlhvFresh } from '../qlhv-import/api';
 
 interface AuthContextValue {
   user: AuthenticatedUser | null;
@@ -34,7 +32,6 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthenticatedUser | null>(null);
   const [loading, setLoading] = useState(true);
-  const ensuredFreshUserIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     const handleSessionExpired = () => setUser(null);
@@ -65,22 +62,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       controller.abort();
     };
   }, []);
-
-  useEffect(() => {
-    if (!user) {
-      ensuredFreshUserIdRef.current = null;
-      return;
-    }
-    if (user.mustChangePassword
-      || user.role === 'Viewer'
-      || ensuredFreshUserIdRef.current === user.id) {
-      return;
-    }
-
-    ensuredFreshUserIdRef.current = user.id;
-    // Best effort only: opening the app must never wait for or be blocked by Auto Sync.
-    void ensureQlhvFresh().catch(() => undefined);
-  }, [user]);
 
   const value = useMemo<AuthContextValue>(() => ({
     user,

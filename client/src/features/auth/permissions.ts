@@ -5,7 +5,19 @@ export type AppPermission =
   | 'CanEditBusinessData'
   | 'CanSynchronizeCSDT'
   | 'CanImportData'
-  | 'CanManageUsers';
+  | 'CanManageUsers'
+  | 'CanViewAssignmentCatalogs'
+  | 'CanManageDossierReceivers'
+  | 'CanManageCourseGroups'
+  | 'CanAssignStudents'
+  | 'CanBulkAssignStudents'
+  | 'CanPreviewAssignmentImport'
+  | 'CanConfirmAssignmentImport'
+  | 'CanExportAssignments'
+  | 'CanViewAssignmentHistory'
+  | 'CanViewCourseCompletionStatus'
+  | 'CanPreviewCourseCompletion'
+  | 'CanCompleteCourse';
 
 const ROLE_LABELS: Record<AppUserRole, string> = {
   Admin: 'Quản trị viên',
@@ -23,10 +35,25 @@ export function hasPermission(role: AppUserRole, permission: AppPermission): boo
   }
 
   if (role === 'Employee') {
-    return permission === 'CanViewBusinessData' || permission === 'CanEditBusinessData';
+    return [
+      'CanViewBusinessData',
+      'CanEditBusinessData',
+      'CanViewAssignmentCatalogs',
+      'CanManageDossierReceivers',
+      'CanManageCourseGroups',
+      'CanAssignStudents',
+      'CanBulkAssignStudents',
+      'CanPreviewAssignmentImport',
+      'CanExportAssignments',
+      'CanViewAssignmentHistory',
+      'CanViewCourseCompletionStatus',
+    ].includes(permission);
   }
 
-  return permission === 'CanViewBusinessData';
+  return permission === 'CanViewBusinessData'
+    || permission === 'CanViewAssignmentCatalogs'
+    || permission === 'CanViewAssignmentHistory'
+    || permission === 'CanViewCourseCompletionStatus';
 }
 
 export function canOperateBusinessData(role: AppUserRole): boolean {
