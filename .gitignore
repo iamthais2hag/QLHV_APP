@@ -3,6 +3,10 @@ bin/
 obj/
 dist/
 node_modules/
+TestResults/
+coverage/
+publish/
+*.trx
 
 # Secrets
 .env
@@ -32,5 +36,35 @@ IM_GPLX/*
 *.log
 .DS_Store
 Thumbs.db
+
+# Local Codex/rehearsal output (never project source)
+/.codex-work/
+/.runlogs/
+
+# Immutable, date-stamped deployment/evidence packs. Reusable source belongs
+# under docs/, database/, ops/, or scripts/ instead of these generated packs.
+/handoff/*_20??????/
+/handoff/*_20??????_*/
+/handoff/HOCVIEN_ASSIGNMENT_*
+/handoff/SUPERSESSION_REGISTRY.md
+
+# Loose extraction/scratch copies created during prior release rehearsals.
+/Program.cs
+/QLHV.TimeHealth.Preflight.csproj
+/RuntimeReadinessModels.cs
+/RuntimeReadinessService.cs
+/RuntimeStatusPage.tsx
+/SystemRuntimeController.cs
+/TimeAuthorityModels.cs
+/TimeAuthorityService.cs
+/TimeAuthorityWriteGuardMiddleware.cs
+/TimeHealthContractValidator.cs
+/api.ts
+/types.ts
+
+# This repository uses the tracked npm package-lock; do not retain ad-hoc pnpm
+# workspace metadata produced by local validation sessions.
+/client/pnpm-lock.yaml
+/client/pnpm-workspace.yaml
 
 *.tsbuildinfo
