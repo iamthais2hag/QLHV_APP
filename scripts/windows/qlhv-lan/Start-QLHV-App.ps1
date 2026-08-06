@@ -4,6 +4,8 @@ param(
     [switch]$SuppressErrorDialog,
     [switch]$AllowLegacyRollback,
     [switch]$DisableAutoSync,
+    [ValidateSet('ProductionService', 'DevelopmentLocalHost')]
+    [string]$StartupMode = 'ProductionService',
     [ValidateRange(10, 300)]
     [int]$HealthTimeoutSeconds = 90
 )
@@ -25,7 +27,9 @@ $ReadyUrl = 'http://localhost:8088/health/ready'
 $LegacyHealthUrl = 'http://localhost:8088/health'
 $RuntimeStatusUrl = 'http://localhost:8088/api/system/runtime-status'
 $ApplicationUrl = 'http://localhost:8088'
+$LauncherEventLog = Join-Path $LogDirectory ('launcher-' + (Get-Date -Format 'yyyyMMdd') + '.event.log')
 $script:StartedProcessId = $null
+$script:ConnectedProcessId = $null
 $script:StartedThisRun = $false
 $script:StdOutLog = $null
 $script:StdErrLog = $null
@@ -119,6 +123,12 @@ function Close-LauncherProgress {
         $script:ProgressLabel = $null
         $script:ProgressBar = $null
     }
+}
+
+function Get-UiText {
+    param([Parameter(Mandatory = $true)][string]$Base64)
+
+    return [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Base64))
 }
 
 function Get-NormalizedPath {
@@ -338,6 +348,152 @@ function Invoke-HealthProbe {
     }
 }
 
+function Get-JsonPropertyValue {
+    param(
+        [Parameter(Mandatory = $false)]$Object,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    if ($null -eq $Object) {
+        return $null
+    }
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $null
+    }
+    return $property.Value
+}
+
+function Invoke-QlhvApiIdentityProbe {
+    param([ValidateRange(2, 30)][int]$TimeoutSeconds = 4)
+
+    try {
+        $response = Invoke-WebRequest -UseBasicParsing -Uri $RuntimeStatusUrl -Method Get -TimeoutSec $TimeoutSeconds
+        if ([int]$response.StatusCode -ne 200) {
+            return [pscustomobject]@{
+                Success = $false
+                StatusCode = [int]$response.StatusCode
+                ErrorCode = 'HTTP_STATUS_MISMATCH'
+                Reason = "Expected HTTP 200 but received $([int]$response.StatusCode)."
+            }
+        }
+
+        try {
+            $payload = ([string]$response.Content) | ConvertFrom-Json
+        }
+        catch {
+            return [pscustomobject]@{
+                Success = $false
+                StatusCode = 200
+                ErrorCode = 'INVALID_RUNTIME_STATUS_JSON'
+                Reason = 'The runtime status response is not valid JSON.'
+            }
+        }
+
+        $build = Get-JsonPropertyValue -Object $payload -Name 'build'
+        $isReady = Get-JsonPropertyValue -Object $payload -Name 'isReady'
+        $version = [string](Get-JsonPropertyValue -Object $payload -Name 'version')
+        $timeContractVersion = [string](Get-JsonPropertyValue -Object $payload -Name 'timeContractVersion')
+        $hostProcess = [string](Get-JsonPropertyValue -Object $build -Name 'hostProcess')
+        $applicationVersion = [string](Get-JsonPropertyValue -Object $build -Name 'applicationVersion')
+        $frontendBuildId = [string](Get-JsonPropertyValue -Object $build -Name 'frontendBuildId')
+
+        $failures = @()
+        if ($isReady -ne $true) { $failures += 'isReady is not true' }
+        if ($version -notmatch '^1\.') { $failures += 'runtime version is incompatible' }
+        if ($timeContractVersion -ne '2.0') { $failures += 'time contract is incompatible' }
+        if ($hostProcess -ne 'QLHV.Api') { $failures += 'host process identity is not QLHV.Api' }
+        if ($applicationVersion -notmatch '^1\.') { $failures += 'application version is incompatible' }
+        if ($frontendBuildId -notmatch '^qlhv-ui-') { $failures += 'frontend build identity is invalid' }
+
+        if ($failures.Count -gt 0) {
+            return [pscustomobject]@{
+                Success = $false
+                StatusCode = 200
+                ErrorCode = 'QLHV_API_IDENTITY_MISMATCH'
+                Reason = ($failures -join '; ')
+            }
+        }
+
+        return [pscustomobject]@{
+            Success = $true
+            StatusCode = 200
+            ErrorCode = 'NONE'
+            Reason = 'HTTP 200; QLHV.Api identity and contract 2.0 verified.'
+        }
+    }
+    catch {
+        $message = Get-SafeLauncherMessage -Message ([string]$_.Exception.Message)
+        if ($message.Length -gt 300) {
+            $message = $message.Substring(0, 300) + '...'
+        }
+        return [pscustomobject]@{
+            Success = $false
+            StatusCode = 0
+            ErrorCode = 'RUNTIME_STATUS_UNAVAILABLE'
+            Reason = $message
+        }
+    }
+}
+
+function Write-LauncherEvent {
+    param(
+        [Parameter(Mandatory = $true)][string]$Code,
+        [Parameter(Mandatory = $false)][string]$Details = ''
+    )
+
+    try {
+        New-Item -ItemType Directory -Path $LogDirectory -Force -ErrorAction SilentlyContinue | Out-Null
+        $safeDetails = Get-SafeLauncherMessage -Message $Details
+        Add-Content -LiteralPath $LauncherEventLog -Encoding UTF8 -Value (
+            "$(Get-Date -Format o) code=$Code mode=$StartupMode api=$ApplicationUrl $safeDetails".Trim())
+    }
+    catch {
+        # Logging failure must not alter API ownership or launcher decisions.
+    }
+}
+
+function Wait-ForQlhvApiIdentity {
+    param(
+        [Parameter(Mandatory = $true)][int]$TimeoutSeconds,
+        [switch]$WaitForListener
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $lastProbe = $null
+    $lastOwners = @()
+    do {
+        $lastOwners = @(Get-PortOwnerIds)
+        if ($lastOwners.Count -gt 0) {
+            if ($lastOwners.Count -ne 1) {
+                throw "PORT_IN_USE_BY_UNKNOWN_PROCESS port=8088 pid=$($lastOwners -join ',') healthFailure=multiple_listeners logs=$LogDirectory"
+            }
+
+            $lastProbe = Invoke-QlhvApiIdentityProbe -TimeoutSeconds ([Math]::Min(4, $TimeoutSeconds))
+            Write-LauncherEvent -Code 'API_IDENTITY_PROBE' -Details (
+                "pid=$($lastOwners[0]) http=$($lastProbe.StatusCode) result=$($lastProbe.Success) reason=$($lastProbe.ErrorCode)")
+            if ($lastProbe.Success) {
+                return [pscustomobject]@{
+                    ProcessId = [int]$lastOwners[0]
+                    Probe = $lastProbe
+                }
+            }
+        }
+        elseif (-not $WaitForListener) {
+            break
+        }
+
+        Start-Sleep -Milliseconds 500
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    if ($lastOwners.Count -gt 0) {
+        $reason = if ($null -eq $lastProbe) { 'health_not_checked' } else { $lastProbe.ErrorCode + ':' + $lastProbe.Reason }
+        throw "PORT_IN_USE_BY_UNKNOWN_PROCESS port=8088 pid=$($lastOwners -join ',') healthFailure=$reason logs=$LogDirectory"
+    }
+
+    throw "SERVER_UNAVAILABLE port=8088 timeoutSeconds=$TimeoutSeconds logs=$LogDirectory"
+}
+
 function Wait-ForEndpoint {
     param(
         [Parameter(Mandatory = $true)][int]$ProcessId,
@@ -543,28 +699,87 @@ function Show-LauncherError {
 
     $details = "$Message`r`n`r`nLogs: $LogDirectory"
     if ($SuppressErrorDialog) {
-        return
+        return 'Exit'
     }
 
     try {
         Add-Type -AssemblyName System.Windows.Forms
-        [void][System.Windows.Forms.MessageBox]::Show(
-            $details,
-            'QLHV Thành Công',
-            [System.Windows.Forms.MessageBoxButtons]::OK,
-            [System.Windows.Forms.MessageBoxIcon]::Error)
+        Add-Type -AssemblyName System.Drawing
+
+        $form = [System.Windows.Forms.Form]::new()
+        $form.Text = 'QLHV Thanh Cong'
+        $form.ClientSize = [System.Drawing.Size]::new(620, 230)
+        $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+        $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+        $form.MaximizeBox = $false
+        $form.MinimizeBox = $false
+        $form.TopMost = $true
+        $form.Tag = 'Exit'
+
+        $label = [System.Windows.Forms.Label]::new()
+        $label.Location = [System.Drawing.Point]::new(18, 14)
+        $label.Size = [System.Drawing.Size]::new(584, 24)
+        $label.Font = [System.Drawing.Font]::new('Segoe UI', 11, [System.Drawing.FontStyle]::Bold)
+        $label.Text = Get-UiText -Base64 'S2jDtG5nIHRo4buDIGvhur90IG7hu5FpIG3DoXkgY2jhu6cgUUxIVg=='
+
+        $detailsBox = [System.Windows.Forms.TextBox]::new()
+        $detailsBox.Location = [System.Drawing.Point]::new(18, 46)
+        $detailsBox.Size = [System.Drawing.Size]::new(584, 116)
+        $detailsBox.Multiline = $true
+        $detailsBox.ReadOnly = $true
+        $detailsBox.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
+        $detailsBox.Text = $details
+
+        $retryButton = [System.Windows.Forms.Button]::new()
+        $retryButton.Location = [System.Drawing.Point]::new(296, 180)
+        $retryButton.Size = [System.Drawing.Size]::new(96, 32)
+        $retryButton.Text = Get-UiText -Base64 'VGjhu60gbOG6oWk='
+        $retryButton.Add_Click({ $form.Tag = 'Retry'; $form.Close() })
+
+        $detailsButton = [System.Windows.Forms.Button]::new()
+        $detailsButton.Location = [System.Drawing.Point]::new(398, 180)
+        $detailsButton.Size = [System.Drawing.Size]::new(100, 32)
+        $detailsButton.Text = Get-UiText -Base64 'WGVtIGNoaSB0aeG6v3Q='
+        $detailsButton.Add_Click({ Start-Process explorer.exe -ArgumentList ('"' + $LogDirectory + '"') })
+
+        $exitButton = [System.Windows.Forms.Button]::new()
+        $exitButton.Location = [System.Drawing.Point]::new(504, 180)
+        $exitButton.Size = [System.Drawing.Size]::new(98, 32)
+        $exitButton.Text = Get-UiText -Base64 'VGhvw6F0'
+        $exitButton.Add_Click({ $form.Tag = 'Exit'; $form.Close() })
+
+        [void]$form.Controls.Add($label)
+        [void]$form.Controls.Add($detailsBox)
+        [void]$form.Controls.Add($retryButton)
+        [void]$form.Controls.Add($detailsButton)
+        [void]$form.Controls.Add($exitButton)
+        [void]$form.ShowDialog()
+        return [string]$form.Tag
     }
     catch {
         Write-Error $details
+        return 'Exit'
     }
 }
 
-# Main launcher lifecycle: settle exactly one server, then open the browser.
+function Start-LauncherRetry {
+    $arguments = @(
+        '-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden',
+        '-ExecutionPolicy', 'Bypass', '-File', ('"' + $PSCommandPath + '"'),
+        '-StartupMode', $StartupMode,
+        '-HealthTimeoutSeconds', [string]$HealthTimeoutSeconds
+    )
+    if ($AllowLegacyRollback) { $arguments += '-AllowLegacyRollback' }
+    if ($DisableAutoSync) { $arguments += '-DisableAutoSync' }
+    Start-Process powershell.exe -ArgumentList $arguments -WindowStyle Hidden | Out-Null
+}
+
+# Main launcher lifecycle: connect to the one official API, then open the browser.
 # Auto Sync is an independent hosted/Admin operation. Desktop startup never
 # reads data-freshness status, creates a session operation, or waits for one.
 try {
     Initialize-LauncherProgress
-    Set-LauncherProgress -Message 'Dang ket noi may chu...'
+    Set-LauncherProgress -Message (Get-UiText -Base64 'xJBhbmcga+G6v3QgbuG7kWkgbcOheSBjaOG7pyBRTEhWLi4u')
     try {
         $mutexWait = [TimeSpan]::FromSeconds($HealthTimeoutSeconds + 30)
         $script:LauncherMutexAcquired = $script:LauncherMutex.WaitOne($mutexWait)
@@ -583,49 +798,23 @@ try {
     }
     Enter-CrossSessionLauncherLock -TimeoutSeconds ($HealthTimeoutSeconds + 30)
     Remove-ExpiredLauncherLogs
+    Write-LauncherEvent -Code 'LAUNCHER_START' -Details 'retryPolicy=bounded identityEndpoint=/api/system/runtime-status'
 
     $portOwners = @(Get-PortOwnerIds)
     if ($portOwners.Count -gt 0) {
-        $qlhvOwners = @()
-        $otherOwners = @()
-        foreach ($ownerId in $portOwners) {
-            $record = Get-ProcessRecord -ProcessId ([int]$ownerId)
-            if (Test-IsQlhvRuntimeProcess -ProcessRecord $record) {
-                $qlhvOwners += [int]$ownerId
-            }
-            else {
-                $otherOwners += [int]$ownerId
-            }
-        }
-
-        if ($otherOwners.Count -gt 0) {
-            throw "TCP port 8088 is already used by another process (PID: $($otherOwners -join ', ')). QLHV was not started."
-        }
-        if ($qlhvOwners.Count -ne 1) {
-            throw 'Unexpected QLHV listener state on TCP port 8088. QLHV was not started.'
-        }
-
-        # A daily Desktop launch must never stop or replace an existing server.
-        # If another exact QLHV process exists without owning the listener, report
-        # the ambiguous state and let an operator inspect it separately.
-        $orphanedRuntimeIds = @(Get-QlhvRuntimeProcessIds | Where-Object { $qlhvOwners -notcontains [int]$_ })
-        if ($orphanedRuntimeIds.Count -gt 0) {
-            throw "Another QLHV runtime process already exists (PID: $($orphanedRuntimeIds -join ', ')). No process was stopped or started."
-        }
-
-        $existingId = $qlhvOwners[0]
-        $script:StartedProcessId = $existingId
-        Set-Content -LiteralPath $PidFile -Value $existingId -Encoding Ascii
-        if ($script:UseLegacyRuntime) {
-            Wait-ForLegacyRollbackHealth -ProcessId $existingId -TimeoutSeconds $HealthTimeoutSeconds
-        }
-        else {
-            $liveTimeout = [Math]::Min(30, $HealthTimeoutSeconds)
-            Wait-ForEndpoint -ProcessId $existingId -Url $LiveUrl -DisplayName 'liveness' -TimeoutSeconds $liveTimeout
-            Wait-ForEndpoint -ProcessId $existingId -Url $ReadyUrl -DisplayName 'readiness' -TimeoutSeconds $HealthTimeoutSeconds
-        }
+        # Endpoint identity is authoritative. Process-path metadata may be unavailable
+        # to a standard desktop token even when the official API service is healthy.
+        $identity = Wait-ForQlhvApiIdentity -TimeoutSeconds ([Math]::Min(15, $HealthTimeoutSeconds))
+        $script:ConnectedProcessId = [int]$identity.ProcessId
+    }
+    elseif ($StartupMode -eq 'ProductionService') {
+        # ProductionService is connect-only. A Desktop launch never owns API startup.
+        $identity = Wait-ForQlhvApiIdentity -TimeoutSeconds $HealthTimeoutSeconds -WaitForListener
+        $script:ConnectedProcessId = [int]$identity.ProcessId
     }
     else {
+        # DevelopmentLocalHost is explicit opt-in and is the only mode allowed to
+        # create one local API process when port 8088 is empty.
         $runtimeIds = @(Get-QlhvRuntimeProcessIds)
         if ($runtimeIds.Count -gt 1) {
             throw "Multiple QLHV runtime processes already exist (PID: $($runtimeIds -join ', ')). No process was stopped or started."
@@ -634,7 +823,6 @@ try {
             # The existing process may still be binding the port. Join it and wait;
             # never start a second process and never use restart as a readiness fix.
             $script:StartedProcessId = [int]$runtimeIds[0]
-            Set-Content -LiteralPath $PidFile -Value $script:StartedProcessId -Encoding Ascii
             if ($script:UseLegacyRuntime) {
                 Wait-ForLegacyRollbackHealth -ProcessId $script:StartedProcessId -TimeoutSeconds $HealthTimeoutSeconds
             }
@@ -643,43 +831,46 @@ try {
                 Wait-ForEndpoint -ProcessId $script:StartedProcessId -Url $LiveUrl -DisplayName 'liveness' -TimeoutSeconds $liveTimeout
                 Wait-ForEndpoint -ProcessId $script:StartedProcessId -Url $ReadyUrl -DisplayName 'readiness' -TimeoutSeconds $HealthTimeoutSeconds
             }
-        }
-        elseif (Test-Path -LiteralPath $PidFile -PathType Leaf) {
-            # A stale PID file is metadata only; removing it does not stop a process.
-            Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
-        }
-    }
-
-    if ($null -eq $script:StartedProcessId) {
-        # Production files are required only when this launcher must create the
-        # runtime. A server that is already live keeps its PID and remains
-        # accessible even if local install/config validation later needs repair.
-        Assert-ProductionConfiguration
-        $publishedExe = Join-Path $AppDirectory 'QLHV.Api.exe'
-        $publishedDll = Join-Path $AppDirectory 'QLHV.Api.dll'
-        if (-not (Test-Path -LiteralPath $publishedExe -PathType Leaf) -and
-            -not (Test-Path -LiteralPath $publishedDll -PathType Leaf)) {
-            throw "QLHV.Api executable was not found in $AppDirectory. Run Install-QLHV-App.ps1 as Administrator."
-        }
-
-        Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
-        Start-QlhvRuntime
-        if ($script:UseLegacyRuntime) {
-            Wait-ForLegacyRollbackHealth -ProcessId $script:StartedProcessId -TimeoutSeconds $HealthTimeoutSeconds
+            $identity = Wait-ForQlhvApiIdentity -TimeoutSeconds ([Math]::Min(15, $HealthTimeoutSeconds)) -WaitForListener
+            $script:ConnectedProcessId = [int]$identity.ProcessId
         }
         else {
-            $liveTimeout = [Math]::Min(30, $HealthTimeoutSeconds)
-            Wait-ForEndpoint -ProcessId $script:StartedProcessId -Url $LiveUrl -DisplayName 'liveness' -TimeoutSeconds $liveTimeout
-            Wait-ForEndpoint -ProcessId $script:StartedProcessId -Url $ReadyUrl -DisplayName 'readiness' -TimeoutSeconds $HealthTimeoutSeconds
+            # A stale PID file is metadata only; removing it does not stop a process.
+            Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
+            Assert-ProductionConfiguration
+            $publishedExe = Join-Path $AppDirectory 'QLHV.Api.exe'
+            $publishedDll = Join-Path $AppDirectory 'QLHV.Api.dll'
+            if (-not (Test-Path -LiteralPath $publishedExe -PathType Leaf) -and
+                -not (Test-Path -LiteralPath $publishedDll -PathType Leaf)) {
+                throw "QLHV.Api executable was not found in $AppDirectory. Run Install-QLHV-App.ps1 as Administrator."
+            }
+
+            Start-QlhvRuntime
+            if ($script:UseLegacyRuntime) {
+                Wait-ForLegacyRollbackHealth -ProcessId $script:StartedProcessId -TimeoutSeconds $HealthTimeoutSeconds
+            }
+            else {
+                $liveTimeout = [Math]::Min(30, $HealthTimeoutSeconds)
+                Wait-ForEndpoint -ProcessId $script:StartedProcessId -Url $LiveUrl -DisplayName 'liveness' -TimeoutSeconds $liveTimeout
+                Wait-ForEndpoint -ProcessId $script:StartedProcessId -Url $ReadyUrl -DisplayName 'readiness' -TimeoutSeconds $HealthTimeoutSeconds
+            }
+            $identity = Wait-ForQlhvApiIdentity -TimeoutSeconds ([Math]::Min(15, $HealthTimeoutSeconds)) -WaitForListener
+            $script:ConnectedProcessId = [int]$identity.ProcessId
         }
     }
 
-    # Server identity/startup is settled. Release launcher-only locks before
+    if ($null -eq $script:ConnectedProcessId) {
+        throw 'SERVER_UNAVAILABLE: no verified QLHV API listener was selected.'
+    }
+
+    # Server identity is settled. Release launcher-only locks before
     # opening the application so another icon invocation is never held behind
     # browser or data-operation work.
     Exit-LauncherCoordinationLocks
 
-    Set-LauncherProgress -Message 'May chu da san sang. Dang mo ung dung...' -Completed
+    Write-LauncherEvent -Code 'QLHV_API_READY' -Details (
+        "pid=$script:ConnectedProcessId http=200 identity=QLHV.Api contract=2.0 startedThisRun=$script:StartedThisRun")
+    Set-LauncherProgress -Message (Get-UiText -Base64 'xJDDoyBr4bq/dCBu4buRaSBtw6F5IGNo4bunIFFMSFY=') -Completed
     $browserUrl = "$ApplicationUrl/qlhv-import"
 
     if (-not $NoBrowser) {
@@ -687,7 +878,7 @@ try {
     }
     Close-LauncherProgress
 
-    Write-Host "QLHV is ready at $ApplicationUrl (PID $script:StartedProcessId)."
+    Write-Host "QLHV is ready at $ApplicationUrl (PID $script:ConnectedProcessId; mode $StartupMode; startedThisRun=$script:StartedThisRun)."
 }
 catch {
     Close-LauncherProgress
@@ -696,22 +887,17 @@ catch {
         New-Item -ItemType Directory -Path $LogDirectory -Force -ErrorAction SilentlyContinue | Out-Null
         $launcherErrorLog = Join-Path $LogDirectory ('launcher-' + (Get-Date -Format 'yyyyMMdd') + '.error.log')
         Add-Content -LiteralPath $launcherErrorLog -Value "$(Get-Date -Format o) $message"
+        Write-LauncherEvent -Code 'LAUNCHER_FAILED' -Details ("error=" + $message)
     }
     catch {
         # Keep the original startup error.
     }
 
-    # Daily launch failures never stop an existing or newly started server.
-    # Deployment/rollback scripts retain their separate, explicit PID lifecycle.
-    if (-not $NoBrowser -and $null -ne $script:StartedProcessId) {
-        $liveAfterFailure = Invoke-HealthProbe -Url $LiveUrl -TimeoutSeconds 4
-        if ($liveAfterFailure.Success) {
-            # Readiness/configuration failures are reported, but a live server is
-            # still opened so login and read-only diagnosis remain available.
-            Start-Process "$ApplicationUrl/qlhv-import"
-        }
+    # A failed identity check never opens an unknown listener and never stops it.
+    $action = Show-LauncherError -Message $message
+    if ($action -eq 'Retry') {
+        Start-LauncherRetry
     }
-    Show-LauncherError -Message $message
     throw $message
 }
 finally {

@@ -1,0 +1,75 @@
+{
+  "schemaVersion": "RT03-ARTIFACT-MANIFEST-v1",
+  "preparedAtUtc": "2026-07-27T00:00:00Z",
+  "executionStatus": "PREPARED_NOT_EXECUTED",
+  "artifacts": [
+    {
+      "path": "database/patches/20260727_rt03_add_direct_realtime_control_plane.sql",
+      "sha256": "7CBCE88EE1A1B21D2FA37EBE0431DB83E0A1E232E776201AC2690AB90871B4E2"
+    },
+    {
+      "path": "database/patches/20260727_rt03_remove_direct_realtime_control_plane.sql",
+      "sha256": "F9F211EE02B8CEA1D4E92215C8E5A079D911F9C0BEDF47622516376A5079445C"
+    },
+    {
+      "path": "database/patches/20260727_rt03_enable_ct_snapshot_oto_production.sql",
+      "sha256": "1FBBD337C9569B977EAB0827DF6943D6A1856A55EF6DBD6ECA32EF802A6E7CD1"
+    },
+    {
+      "path": "database/patches/20260727_rt03_disable_ct_snapshot_oto_production.sql",
+      "sha256": "F481C4139E35EF3F62A5578B2302B1E7ADCA1184BEF20C32A63083EFEE81C0F1"
+    },
+    {
+      "path": "database/patches/20260727_rt03_enable_ct_snapshot_moto_production.sql",
+      "sha256": "5F2B11644CA02549ED50385EC930CE794A61A8F3F7CE5F86DFFF99EAA472D191"
+    },
+    {
+      "path": "database/patches/20260727_rt03_disable_ct_snapshot_moto_production.sql",
+      "sha256": "FB6CC85C86DBC9B221927A1E28F43D0890C2DD98F4EF7A399EED0127B802C827"
+    },
+    {
+      "path": "database/patches/20260727_rt03_feature_enable_canary.sql",
+      "sha256": "762F0238396A133C64960B795C5836DA040D15D1543AE03F39E09927084B68AF"
+    },
+    {
+      "path": "database/patches/20260727_rt03_feature_disable_all.sql",
+      "sha256": "06D610A043E90FB05D251DA9727CC2F90B3103959F197DEA237F23F312B62C35"
+    },
+    {
+      "path": "database/patches/20260727_rt03_feature_enable_controlled_cutover.sql",
+      "sha256": "B9E53B3F4317485D533405072A2BFA3F9AF6C3E5C003BDE1FA237EB38C5E9D77"
+    },
+    {
+      "path": "database/proofs/20260727_rt03_production_identity_discovery_read_only.sql",
+      "sha256": "5D2F44DBE2FD905026329A3605B9D9C7054D85721D0DCE0A3028B715B0125AF2"
+    },
+    {
+      "path": "database/proofs/20260727_rt03_production_readiness_read_only.sql",
+      "sha256": "EBFC650EF17B874F737EDF519C8B12E6008A81EE85C1225BFFB6457FB9D5C4DF"
+    },
+    {
+      "path": "database/proofs/20260727_rt03_task2_preflight_read_only.sql",
+      "sha256": "A28DA512712791FBDAE36B09601A086FECEC988BFBA9FA95FCAC108EFE62B6E1"
+    },
+    {
+      "path": "database/proofs/20260727_rt03_post_canary_read_only.sql",
+      "sha256": "E44C5009B9BF27C50E81A3FB03312E0393D455ADC4D5FB710F6824BA7785DCB9"
+    },
+    {
+      "path": "ops/rt03/rt03-production-observation-plan.json",
+      "sha256": "0EF515227A6D6854D255C5C76A22FCD62F4B89566607E91488B86E2A443D5B1E"
+    },
+    {
+      "path": "ops/rt03/Invoke-Rt03Task2.ps1",
+      "sha256": "80BB70C417AAB2282EDEA486C3B999249FBADF49443A3E9ED41833620C361D66"
+    },
+    {
+      "path": "server/QLHV.Application/Sync/Rt03/Rt03ProductionContracts.cs",
+      "sha256": "92C544CE331B0EE1D7451C67568A5FFE6B09D6D667309F0154F30498F937464D"
+    },
+    {
+      "path": "server/QLHV.Application/Sync/Rt03/Rt03ProductionSql.cs",
+      "sha256": "A0FEE7A21B2954DFA80E9F4C542E6B8F6B3C55097A1869DFEF1EC40FDEF033A8"
+    }
+  ]
+}

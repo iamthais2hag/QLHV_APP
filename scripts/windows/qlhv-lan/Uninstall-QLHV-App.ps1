@@ -9,6 +9,8 @@ $ErrorActionPreference = 'Stop'
 $RuntimeRoot = 'D:\QLHV_APP_RUNTIME'
 $FirewallDisplayName = 'QLHV App LAN - TCP 8088 (Private)'
 $StopScript = Join-Path $PSScriptRoot 'Stop-QLHV-App.ps1'
+$RealtimeWorkerServiceScript = Join-Path $PSScriptRoot 'RealtimeWorkerService.ps1'
+. $RealtimeWorkerServiceScript
 
 function Assert-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -34,6 +36,7 @@ if (-not $Force) {
 
 # This validates the saved PID and executable path; it never stops all dotnet/node processes.
 & $StopScript -Quiet
+Remove-QlhvRealtimeWorkerService -RuntimeRoot $RuntimeRoot
 
 $rulesByName = @(Get-NetFirewallRule -Name 'QLHV-App-LAN-TCP-8088-Private' -ErrorAction SilentlyContinue)
 if ($rulesByName.Count -gt 0) {

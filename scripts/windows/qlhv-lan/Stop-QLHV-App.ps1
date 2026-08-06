@@ -10,6 +10,8 @@ $RuntimeRoot = 'D:\QLHV_APP_RUNTIME'
 $AppDirectory = Join-Path $RuntimeRoot 'app'
 $RunDirectory = Join-Path $RuntimeRoot 'run'
 $PidFile = Join-Path $RunDirectory 'qlhv.pid'
+$RealtimeWorkerServiceScript = Join-Path $PSScriptRoot 'RealtimeWorkerService.ps1'
+. $RealtimeWorkerServiceScript
 
 function Get-NormalizedPath {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -86,6 +88,11 @@ function Stop-VerifiedQlhvProcess {
     }
 }
 
+# Stop the exact Windows service before replacing or removing its published
+# binaries. Identity/path validation in the helper prevents a broad service stop.
+$workerSnapshot = Get-QlhvRealtimeWorkerServiceSnapshot -RuntimeRoot $RuntimeRoot
+Stop-QlhvRealtimeWorkerService -RuntimeRoot $RuntimeRoot
+
 $runtimeIds = @(Get-QlhvRuntimeProcessIds)
 $recordedId = 0
 if (Test-Path -LiteralPath $PidFile -PathType Leaf) {
@@ -113,5 +120,8 @@ if (-not $Quiet) {
     }
     else {
         Write-Host "Stopped verified QLHV runtime PID(s): $($orderedIds -join ', ')."
+    }
+    if ([bool]$workerSnapshot.Exists -and [bool]$workerSnapshot.WasRunning) {
+        Write-Host 'Stopped Windows service QLHV_APP_RealtimeWorker.'
     }
 }

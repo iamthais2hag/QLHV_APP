@@ -22,15 +22,19 @@ $RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
 $ClientDirectory = Join-Path $RepoRoot 'client'
 $ClientDist = Join-Path $ClientDirectory 'dist'
 $ApiProject = Join-Path $RepoRoot 'server\QLHV.Api\QLHV.Api.csproj'
+$WorkerProject = Join-Path $RepoRoot 'server\QLHV.Worker\QLHV.Worker.csproj'
 $StopScript = Join-Path $PSScriptRoot 'Stop-QLHV-App.ps1'
 $SourceStartScript = Join-Path $PSScriptRoot 'Start-QLHV-App.ps1'
 $SourceLauncher = Join-Path $PSScriptRoot 'Start-QLHV-App.cmd'
+$RealtimeWorkerServiceScript = Join-Path $PSScriptRoot 'RealtimeWorkerService.ps1'
+. $RealtimeWorkerServiceScript
 $StartScript = Join-Path $LauncherDirectory 'Start-QLHV-App.ps1'
 $Launcher = Join-Path $LauncherDirectory 'Start-QLHV-App.cmd'
 $ShortcutName = 'QLHV Th' + [char]0x00E0 + 'nh C' + [char]0x00F4 + 'ng.lnk'
 $ShortcutPath = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) $ShortcutName
 $StageRoot = Join-Path $RuntimeRoot ("update-stage-" + [Guid]::NewGuid().ToString('N'))
 $StageApp = Join-Path $StageRoot 'app'
+$StageWorker = Join-Path $StageApp 'worker'
 $StageLauncher = Join-Path $StageRoot 'launcher'
 $RollbackLauncher = Join-Path $RunDirectory 'rollback-launcher'
 $ShortcutBackup = Join-Path $RunDirectory ("shortcut-backup-" + [Guid]::NewGuid().ToString('N') + '.lnk')
@@ -218,9 +222,14 @@ function Set-QlhvProductionWriteFlags {
     }
 
     $autoSyncDefaults = [ordered]@{
-        Enabled = $true
-        RunOnServerStartup = $true
+        Enabled = $false
+        RunOnServerStartup = $false
+        PollingEnabled = $false
+        IsFallbackOnly = $true
+        FallbackModeEnabled = $false
         RefreshBackupBeforeSync = $true
+        ActiveRunHeartbeatTimeoutSeconds = 120
+        HeartbeatIntervalSeconds = 15
         SourceOrder = @('OTO', 'MOTO')
         StartupDedupeWindowSeconds = 300
         SessionStartDedupeWindowSeconds = 30
@@ -231,10 +240,19 @@ function Set-QlhvProductionWriteFlags {
             $autoSyncChanged = $true
         }
     }
-    foreach ($propertyName in @('Enabled', 'RunOnServerStartup', 'RefreshBackupBeforeSync')) {
-        $property = $autoSync.PSObject.Properties[$propertyName]
-        if ($null -eq $property -or $property.Value -isnot [bool]) {
-            Add-Member -InputObject $autoSync -MemberType NoteProperty -Name $propertyName -Value $true -Force
+    $safeAutoSyncFlags = [ordered]@{
+        Enabled = $false
+        RunOnServerStartup = $false
+        PollingEnabled = $false
+        IsFallbackOnly = $true
+        FallbackModeEnabled = $false
+        RefreshBackupBeforeSync = $true
+    }
+    foreach ($entry in $safeAutoSyncFlags.GetEnumerator()) {
+        $property = $autoSync.PSObject.Properties[$entry.Key]
+        if ($null -eq $property -or $property.Value -isnot [bool] -or
+            [bool]$property.Value -ne [bool]$entry.Value) {
+            Add-Member -InputObject $autoSync -MemberType NoteProperty -Name $entry.Key -Value $entry.Value -Force
             $autoSyncChanged = $true
         }
     }
@@ -251,6 +269,93 @@ function Set-QlhvProductionWriteFlags {
         -not [string]::Equals([string]$sourceOrder[1], 'MOTO', [StringComparison]::OrdinalIgnoreCase)) {
         Add-Member -InputObject $autoSync -MemberType NoteProperty -Name 'SourceOrder' -Value @('OTO', 'MOTO') -Force
         $autoSyncChanged = $true
+    }
+
+    $realtimeProperty = $configuration.PSObject.Properties['CsdtRealtimeSync']
+    if ($null -eq $realtimeProperty) {
+        Add-Member -InputObject $configuration -MemberType NoteProperty -Name 'CsdtRealtimeSync' -Value ([pscustomobject]@{})
+        $realtime = $configuration.PSObject.Properties['CsdtRealtimeSync'].Value
+        $realtimeChanged = $true
+    }
+    elseif ($realtimeProperty.Value -isnot [pscustomobject]) {
+        throw "Production configuration section CsdtRealtimeSync must be a JSON object."
+    }
+    else {
+        $realtime = $realtimeProperty.Value
+        $realtimeChanged = $false
+    }
+
+    $realtimeDefaults = [ordered]@{
+        Enabled = $false
+        PollIntervalSeconds = 1
+        ReconcileIntervalMinutes = 5
+        ChangeRetentionDays = 7
+        UseBackupProfiles = $false
+    }
+    foreach ($entry in $realtimeDefaults.GetEnumerator()) {
+        if ($null -eq $realtime.PSObject.Properties[$entry.Key]) {
+            Add-Member -InputObject $realtime -MemberType NoteProperty -Name $entry.Key -Value $entry.Value
+            $realtimeChanged = $true
+        }
+    }
+
+    $streamsProperty = $realtime.PSObject.Properties['Streams']
+    if ($null -eq $streamsProperty) {
+        Add-Member -InputObject $realtime -MemberType NoteProperty -Name 'Streams' -Value ([pscustomobject]@{})
+        $streams = $realtime.PSObject.Properties['Streams'].Value
+        $realtimeChanged = $true
+    }
+    elseif ($streamsProperty.Value -isnot [pscustomobject]) {
+        throw "Production configuration section CsdtRealtimeSync:Streams must be a JSON object."
+    }
+    else {
+        $streams = $streamsProperty.Value
+    }
+    $useBackupProfilesProperty = $realtime.PSObject.Properties['UseBackupProfiles']
+    $useBackupProfiles = $null -ne $useBackupProfilesProperty -and
+        $useBackupProfilesProperty.Value -is [bool] -and
+        [bool]$useBackupProfilesProperty.Value
+    $otoSourceProfile = if ($useBackupProfiles) { 'OTO_V2_BAK' } else { 'OTO_V2' }
+    $otoTargetProfile = if ($useBackupProfiles) { 'OTO_V1_BAK' } else { 'OTO_V1' }
+    $motoSourceProfile = if ($useBackupProfiles) { 'MOTO_V2_BAK' } else { 'MOTO_V2' }
+    $motoTargetProfile = if ($useBackupProfiles) { 'MOTO_V1_BAK' } else { 'MOTO_V1' }
+
+    $fixedStreams = [ordered]@{
+        Oto = [ordered]@{
+            Enabled = $false
+            StreamCode = 'OTO_V2_TO_V1'
+            SourceProfile = $otoSourceProfile
+            TargetProfile = $otoTargetProfile
+            MaCSDT = '66029'
+        }
+        Moto = [ordered]@{
+            Enabled = $false
+            StreamCode = 'MOTO_V2_TO_V1'
+            SourceProfile = $motoSourceProfile
+            TargetProfile = $motoTargetProfile
+            MaCSDT = '66030'
+        }
+    }
+    foreach ($streamEntry in $fixedStreams.GetEnumerator()) {
+        $streamProperty = $streams.PSObject.Properties[$streamEntry.Key]
+        if ($null -eq $streamProperty) {
+            Add-Member -InputObject $streams -MemberType NoteProperty -Name $streamEntry.Key -Value ([pscustomobject]@{})
+            $stream = $streams.PSObject.Properties[$streamEntry.Key].Value
+            $realtimeChanged = $true
+        }
+        elseif ($streamProperty.Value -isnot [pscustomobject]) {
+            throw "Production configuration stream $($streamEntry.Key) must be a JSON object."
+        }
+        else {
+            $stream = $streamProperty.Value
+        }
+        foreach ($streamDefault in $streamEntry.Value.GetEnumerator()) {
+            $streamValue = $stream.PSObject.Properties[$streamDefault.Key]
+            if ($null -eq $streamValue) {
+                Add-Member -InputObject $stream -MemberType NoteProperty -Name $streamDefault.Key -Value $streamDefault.Value
+                $realtimeChanged = $true
+            }
+        }
     }
 
     $photoProperty = $configuration.PSObject.Properties['PhotoProcessing']
@@ -400,7 +505,7 @@ function Set-QlhvProductionWriteFlags {
     $enableWritesChanged = $null -eq $enableWritesProperty -or
         $enableWritesProperty.Value -isnot [bool] -or
         -not [bool]$enableWritesProperty.Value
-    $changed = $dryRunChanged -or $enableWritesChanged -or $autoSyncChanged -or $photoChanged
+    $changed = $dryRunChanged -or $enableWritesChanged -or $autoSyncChanged -or $realtimeChanged -or $photoChanged
     if (-not $changed) {
         return $false
     }
@@ -739,7 +844,7 @@ function Grant-RuntimeAppReadAccess {
 }
 
 function Build-PublishPackage {
-    New-Item -ItemType Directory -Path $StageApp, $StageLauncher -Force | Out-Null
+    New-Item -ItemType Directory -Path $StageApp, $StageWorker, $StageLauncher -Force | Out-Null
 
     foreach ($sourcePath in @($SourceStartScript, $SourceLauncher)) {
         if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
@@ -791,6 +896,12 @@ function Build-PublishPackage {
         }
     }
 
+    Invoke-CheckedCommand -Command 'dotnet' -Arguments @(
+        'publish', $WorkerProject,
+        '--configuration', 'Release',
+        '--output', $StageWorker
+    ) -FailureMessage 'QLHV.Worker publish failed'
+
     $wwwroot = Join-Path $StageApp 'wwwroot'
     if (Test-Path -LiteralPath $wwwroot) {
         Remove-Item -LiteralPath $wwwroot -Recurse -Force
@@ -810,6 +921,9 @@ function Build-PublishPackage {
     }
     if (-not (Test-Path -LiteralPath (Join-Path $wwwroot 'index.html') -PathType Leaf)) {
         throw 'The update package does not contain wwwroot\index.html.'
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $StageWorker 'QLHV.Worker.exe') -PathType Leaf)) {
+        throw 'The update package does not contain worker\QLHV.Worker.exe.'
     }
 
     $webFiles = @(Get-ChildItem -LiteralPath $wwwroot -Recurse -File | Where-Object {
@@ -896,9 +1010,14 @@ function Invoke-ReadOnlySmokeTest {
 
 Assert-Administrator
 Assert-SafePaths
+if (-not (Test-Path -LiteralPath $WorkerProject -PathType Leaf)) {
+    throw "QLHV.Worker project was not found: $WorkerProject"
+}
 New-Item -ItemType Directory -Path $RunDirectory, $ModelDirectory, $PhotoSourceDirectory, $PhotoOutputDirectory -Force | Out-Null
 Assert-ProductionConfiguration
 
+$workerServiceBefore = Get-QlhvRealtimeWorkerServiceSnapshot -RuntimeRoot $RuntimeRoot
+$workerServiceInstalledThisRun = $false
 $shortcutExistedBefore = Test-Path -LiteralPath $ShortcutPath -PathType Leaf
 if ($shortcutExistedBefore) {
     Copy-Item -LiteralPath $ShortcutPath -Destination $ShortcutBackup
@@ -953,6 +1072,9 @@ try {
         $script:UpdateStage = 'runtime-permissions'
         Grant-RuntimeAppReadAccess
         Remove-Item -LiteralPath $LegacyRuntimeMarker -Force -ErrorAction SilentlyContinue
+        $script:UpdateStage = 'realtime-worker-service'
+        Install-QlhvRealtimeWorkerService -RuntimeRoot $RuntimeRoot
+        $workerServiceInstalledThisRun = -not [bool]$workerServiceBefore.Exists
         $script:UpdateStage = 'launcher-readiness'
         Invoke-StartRuntime
         $script:UpdateStage = 'read-only-smoke'
@@ -963,12 +1085,15 @@ try {
         # LAN API running with that token; the operator starts it from the shortcut.
         $script:UpdateStage = 'stop-elevated-smoke-runtime'
         & $StopScript -Quiet
+        $script:UpdateStage = 'start-realtime-worker-service'
+        Start-QlhvRealtimeWorkerService -RuntimeRoot $RuntimeRoot
         $script:UpdateStage = 'desktop-shortcut'
         Install-DesktopShortcut
         Remove-Item -LiteralPath $ShortcutBackup -Force -ErrorAction SilentlyContinue
         $script:UpdateStage = 'complete'
         Write-Host 'QLHV was updated and passed liveness/readiness checks.'
-        Write-Host 'Runtime is stopped. Start it normally with the QLHV Thanh Cong shortcut.'
+        Write-Host 'The API is stopped; start it normally with the QLHV Thanh Cong shortcut.'
+        Write-Host 'Windows service QLHV_APP_RealtimeWorker is installed, automatic, and running.'
         Write-Host "Previous runtime backup: $RollbackApp"
     }
     catch {
@@ -1004,6 +1129,9 @@ try {
             $rollbackAvailable = $false
             $script:RollbackPathEntered = $true
             Grant-RuntimeAppReadAccess
+            if ([bool]$workerServiceBefore.Exists) {
+                Install-QlhvRealtimeWorkerService -RuntimeRoot $RuntimeRoot
+            }
             Set-Content -LiteralPath $LegacyRuntimeMarker -Value 'legacy-health-compatible' -Encoding Ascii
         }
 
@@ -1014,6 +1142,10 @@ try {
         catch {
             $safeVerificationError = Protect-DeploymentLogMessage -Message ([string]$_.Exception.Message)
             throw "Update failed and the previous runtime was restored, but health verification also failed: $safeVerificationError. Original update error: $safeUpdateError"
+        }
+        if ($workerServiceInstalledThisRun -and -not [bool]$workerServiceBefore.Exists) {
+            Remove-QlhvRealtimeWorkerService -RuntimeRoot $RuntimeRoot
+            $workerServiceInstalledThisRun = $false
         }
         Assert-ConfigurationUnchanged -ExpectedHash $productionConfigHash
         Write-Warning 'No SQL patch was run. If readiness reports missing schema, apply the documented patch separately before updating.'
@@ -1035,6 +1167,16 @@ catch {
         Remove-Item -LiteralPath $ShortcutPath -Force -ErrorAction SilentlyContinue
     }
     Restore-QlhvProductionConfigurationBackup
+    if ($workerServiceInstalledThisRun -and -not [bool]$workerServiceBefore.Exists) {
+        try {
+            Remove-QlhvRealtimeWorkerService -RuntimeRoot $RuntimeRoot
+            $workerServiceInstalledThisRun = $false
+        }
+        catch {
+            $safeWorkerRemoveError = Protect-DeploymentLogMessage -Message ([string]$_.Exception.Message)
+            Write-Warning "Could not remove the failed realtime worker service: $safeWorkerRemoveError"
+        }
+    }
 
     # If transition failed after Stop but before app->rollback completed, the prior
     # app is still installed. Health-check it with legacy compatibility, then stop
@@ -1051,7 +1193,15 @@ catch {
             $safeRecoveryError = Protect-DeploymentLogMessage -Message ([string]$_.Exception.Message)
             throw "Update transition failed and the previous runtime could not be health-verified: $safeRecoveryError. Original error: $safeOuterError"
         }
+        if ([bool]$workerServiceBefore.Exists -and [bool]$workerServiceBefore.WasRunning) {
+            Start-QlhvRealtimeWorkerService -RuntimeRoot $RuntimeRoot
+        }
         throw "Update transition failed. The previous runtime remains installed, was health-checked, and is stopped. Start it from the shortcut. Original error: $safeOuterError"
+    }
+    if ([bool]$workerServiceBefore.Exists -and
+        [bool]$workerServiceBefore.WasRunning -and
+        (Test-Path -LiteralPath (Get-QlhvRealtimeWorkerExecutable -RuntimeRoot $RuntimeRoot) -PathType Leaf)) {
+        Start-QlhvRealtimeWorkerService -RuntimeRoot $RuntimeRoot
     }
     throw
 }

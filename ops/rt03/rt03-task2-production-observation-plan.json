@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "RT03-PRODUCTION-PLAN-v1",
+  "planId": "RT03-20260727-PROD-TASK2-OBSERVATION-001",
+  "mode": "OBSERVATION_ONLY",
+  "environmentId": "PRODUCTION",
+  "serverIdentity": "CSDLTTTC",
+  "routeOrder": [
+    "CSDT_OTO",
+    "CSDT_MOTO"
+  ],
+  "mappingFingerprint": "7bb2c2fc99cd06a222af2e36c0c61f259a4488ceecad7064c6e308fc223e4ee9",
+  "otoSourceSchemaFingerprint": "b406355371fc6ecda51156cf0c10f525288d5fd0a083fc97a6b1c175cc859bb8",
+  "motoSourceSchemaFingerprint": "b406355371fc6ecda51156cf0c10f525288d5fd0a083fc97a6b1c175cc859bb8",
+  "targetSchemaFingerprint": "21075486fa8c34a59feada9bc82b1b2a8278240e980f97eaadc963aec6c51380",
+  "otoStageHash": "RT01A-HMAC-SHA256-v1:eb19aca554de73a81cdfa14363aa8a86aab39c985050d96fc7f25b72da5a3850",
+  "motoStageHash": "RT01A-HMAC-SHA256-v1:e81e46e7dc101ceb703ffbcfe18e6040e34d42f7b8827b742325107dcd02b24d",
+  "otoTargetComparisonHash": "RT01A-HMAC-SHA256-v1:8cbb39de4a4979729234566b68ad7c2272991915572c120d08980d18d4c21c12",
+  "motoTargetComparisonHash": "RT01A-HMAC-SHA256-v1:92084f80a3e32caf9ebb55a91d79a07b0e150ff00a6b783a190c46ff6f6d7de7",
+  "otoInitialChangeTrackingVersion": null,
+  "motoInitialChangeTrackingVersion": null,
+  "otoCanaryResult": "NOT_RUN",
+  "decisionReason": "Task 2 fresh three-sample audit found no production mutation candidate for either profile.",
+  "evidenceRoot": "D:\\QLHV_RT03_EVIDENCE\\RT03_TASK2_20260727_2005",
+  "hmacKeyPersisted": false,
+  "candidates": [],
+  "planHash": "4881222ED8FEDBE69A06C533A9C0915AB35C588E08BD2751BF256A839CCC2A81",
+  "businessDataWrites": 0,
+  "checkpointPublished": false,
+  "existingAutoSyncTouched": false
+}

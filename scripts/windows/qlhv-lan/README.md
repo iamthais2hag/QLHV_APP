@@ -58,27 +58,32 @@ Nếu file Production local đã tồn tại và JSON hợp lệ, installer/upda
 
 Bấm shortcut Desktop **QLHV Thành Công**. Launcher:
 
-1. kiểm tra runtime, JSON Production local và `ConnectionStrings:QLHV_APP` mà không in giá trị;
-2. lấy mutex cùng file lock cross-session, rồi kiểm tra process/PID và port 8088;
-3. nếu server chưa chạy, khởi động đúng một process; nếu server đã chạy thì giữ nguyên PID, không restart và không dừng `dotnet.exe`;
-4. chờ `GET /health/live`, sau đó `GET /health/ready`;
-5. mở ngay `/qlhv-import` sau khi server sẵn sàng.
+1. chạy mặc định ở mode `ProductionService` (connect-only, không start API);
+2. lấy mutex cùng file lock cross-session dành riêng cho desktop launcher;
+3. nếu port 8088 có listener, gọi `GET /api/system/runtime-status` và chỉ chấp nhận HTTP 200, `QLHV.Api`, version tương thích, contract 2.0 và frontend identity hợp lệ;
+4. nếu port trống, chờ API service trong timeout hữu hạn rồi báo `SERVER_UNAVAILABLE`, không tự tạo process;
+5. mở ngay `/qlhv-import` sau khi danh tính API được xác minh.
+
+Mode `DevelopmentLocalHost` chỉ được bật rõ ràng bằng tham số PowerShell trong môi
+trường phát triển. Chỉ mode này mới được start đúng một API khi port trống, sau đó
+vẫn phải health/identity-check trước khi mở UI. Shortcut production khóa cứng
+`-StartupMode ProductionService`, nên không thể vô tình dùng hành vi development.
 
 Launcher không đọc `NeedSync`, không yêu cầu `runId`, không gọi POST
 `session-start-sync` và không chờ Auto Sync. Vì vậy endpoint trạng thái operation
-không hoạt động cũng không thể giữ cửa sổ ở vòng lặp thử lại. Nếu readiness hết thời
-gian nhưng process vẫn live, launcher ghi/báo cảnh báo và vẫn mở ứng dụng để đăng
-nhập, xem trạng thái và chẩn đoán. Hành vi tương đương là: ứng dụng được mở ngay khi
-có thể; bấm lại icon để thử lại; đóng cửa sổ ứng dụng/thông báo để kết thúc.
+không hoạt động cũng không thể giữ cửa sổ ở vòng lặp thử lại. Mọi health retry đều
+có timeout. Khi thất bại, hộp thoại cho phép **Thử lại**, **Xem chi tiết** hoặc
+**Thoát**; launcher không mở một listener chưa xác minh.
 
 Auto Sync startup và nút Auto Sync của Admin là các luồng backend độc lập. Lỗi Auto
 Sync không làm server dừng, không chặn đăng nhập hoặc mở ứng dụng. Trang Đồng bộ dữ
 liệu CSĐT hiển thị operation đang chạy, nguồn lỗi và thời điểm sync thành công gần
 nhất.
 
-Nếu port 8088 thuộc process khác, launcher báo rõ PID và không khởi động QLHV.
-Nếu đã có process QLHV nhưng readiness chưa đạt, launcher không restart hoặc dừng
-process đó; nó báo lỗi để người vận hành kiểm tra. Thông báo chỉ ra file cần kiểm tra:
+Nếu port 8088 không trả đúng QLHV identity/contract, launcher báo
+`PORT_IN_USE_BY_UNKNOWN_PROCESS` cùng port, PID (nếu đọc được), health failure và
+đường dẫn log. Launcher không kill listener. Nếu API QLHV chưa ready, launcher không
+restart/dừng API; nó báo lỗi để người vận hành kiểm tra. Thông báo chỉ ra file cần kiểm tra:
 
 ```text
 D:\QLHV_APP_RUNTIME\config\appsettings.Production.Local.json
@@ -131,6 +136,48 @@ Gỡ cài đặt (có xác nhận `UNINSTALL`) sẽ xóa runtime, config local, 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\QLHV_APP\scripts\windows\qlhv-lan\Uninstall-QLHV-App.ps1
 ```
+
+## Realtime CSDT Worker service
+
+Near-realtime V2-to-V1 synchronization runs outside the web server in one
+non-web Windows service:
+
+```text
+Service name: QLHV_APP_RealtimeWorker
+Startup:      Automatic
+Executable:   D:\QLHV_APP_RUNTIME\app\worker\QLHV.Worker.exe
+Config:       D:\QLHV_APP_RUNTIME\config\appsettings.Production.Local.json
+```
+
+The Worker is pinned to the Production environment. Its publish output excludes
+`appsettings.Development.json`; it loads the protected Production Local file
+outside Git and never opens a web listener. The production API service owns the
+only HTTP listener on port 8088; the Desktop launcher is a connect-only client.
+
+The installer and updater publish the API and Worker into one staging tree. They
+stop the exact service (after validating its fixed name, LocalSystem account and
+exact executable path) before replacing `runtime\app`. The service stays stopped
+during API readiness/smoke checks so deployment cannot start synchronization
+early. It is configured with delayed recovery actions and started only after
+activation succeeds. A failed activation restores the previous application tree
+and the previous running/stopped service state. `Stop-QLHV-App.ps1` stops both the
+exact Worker service and the verified API PID; it never kills arbitrary
+`dotnet.exe` processes. Uninstall removes the exact service before deleting the
+runtime directory.
+
+Production Local normalization preserves connection strings and unrelated local
+values, while adding the fixed realtime defaults:
+
+- enabled with a 1-second poll interval and 5-minute reconciliation;
+- `OTO_V2` to `OTO_V1`, center `66029`;
+- `MOTO_V2` to `MOTO_V1`, center `66030`;
+- live profiles only (`UseBackupProfiles=false`).
+
+These scripts do not run SQL patches, create baselines, or invoke synchronization
+POST endpoints. Apply the approved Change Tracking/state/schema patches and
+baseline separately before starting the service. Service recovery is for
+transient runtime failures; persistent schema/configuration errors must be fixed
+from the documented deployment procedure rather than bypassed.
 
 ## Runtime launcher and local configuration hardening
 
