@@ -1,0 +1,128 @@
+SET NOCOUNT ON;
+
+DECLARE @Worker sysname=N'NT SERVICE\QLHV_APP_RealtimeWorker';
+DECLARE @Api sysname=N'NT SERVICE\QLHV_APP_Api';
+
+USE [QLHV_APP];
+EXECUTE AS USER=@Worker;
+SELECT DB_NAME() DatabaseName,USER_NAME() PrincipalName,
+  HAS_PERMS_BY_NAME(N'dbo.App_GiaoVien',N'OBJECT',N'SELECT') TeacherSelect,
+  HAS_PERMS_BY_NAME(N'dbo.App_GiaoVien',N'OBJECT',N'UPDATE') TeacherUpdate,
+  HAS_PERMS_BY_NAME(N'dbo.App_XeTap',N'OBJECT',N'UPDATE') VehicleUpdate,
+  HAS_PERMS_BY_NAME(N'dbo.App_KhoaHoc_GiaoVien',N'OBJECT',N'UPDATE') CourseTeacherUpdate,
+  HAS_PERMS_BY_NAME(N'dbo.App_KhoaHoc_XeTap',N'OBJECT',N'UPDATE') CourseVehicleUpdate,
+  HAS_PERMS_BY_NAME(N'dbo.App_TeacherVehicleProjectionCheckpoint',N'OBJECT',N'UPDATE') CheckpointUpdate,
+  HAS_PERMS_BY_NAME(N'dbo.App_TeacherVehicleProjectionCycle',N'OBJECT',N'INSERT') CycleInsert,
+  HAS_PERMS_BY_NAME(N'dbo.App_TeacherVehicleProjectionCycle',N'OBJECT',N'DELETE') CycleDelete,
+  IS_ROLEMEMBER(N'db_owner') DbOwner,IS_ROLEMEMBER(N'db_datawriter') DbDataWriter;
+IF HAS_PERMS_BY_NAME(N'dbo.App_GiaoVien',N'OBJECT',N'SELECT')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.App_GiaoVien',N'OBJECT',N'UPDATE')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.App_XeTap',N'OBJECT',N'UPDATE')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.App_KhoaHoc_GiaoVien',N'OBJECT',N'UPDATE')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.App_KhoaHoc_XeTap',N'OBJECT',N'UPDATE')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.App_TeacherVehicleProjectionCheckpoint',N'OBJECT',N'UPDATE')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.App_TeacherVehicleProjectionCycle',N'OBJECT',N'INSERT')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.App_TeacherVehicleProjectionCycle',N'OBJECT',N'DELETE')<>0 OR
+   IS_ROLEMEMBER(N'db_owner')<>0 OR IS_ROLEMEMBER(N'db_datawriter')<>0
+    THROW 532734,'TVP_TARGET_WORKER_EFFECTIVE_PERMISSION_REJECTED',1;
+REVERT;
+EXECUTE AS USER=@Api;
+SELECT DB_NAME() DatabaseName,USER_NAME() PrincipalName,
+  HAS_PERMS_BY_NAME(N'dbo.App_GiaoVien',N'OBJECT',N'SELECT') TeacherSelect,
+  HAS_PERMS_BY_NAME(N'dbo.App_XeTap',N'OBJECT',N'SELECT') VehicleSelect,
+  HAS_PERMS_BY_NAME(N'dbo.App_KhoaHoc_GiaoVien',N'OBJECT',N'SELECT') CourseTeacherSelect,
+  HAS_PERMS_BY_NAME(N'dbo.App_KhoaHoc_XeTap',N'OBJECT',N'SELECT') CourseVehicleSelect,
+  IS_ROLEMEMBER(N'db_owner') DbOwner,IS_ROLEMEMBER(N'db_datawriter') DbDataWriter;
+IF HAS_PERMS_BY_NAME(N'dbo.App_GiaoVien',N'OBJECT',N'SELECT')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.App_XeTap',N'OBJECT',N'SELECT')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.App_KhoaHoc_GiaoVien',N'OBJECT',N'SELECT')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.App_KhoaHoc_XeTap',N'OBJECT',N'SELECT')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.App_GiaoVien',N'OBJECT',N'INSERT')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.App_GiaoVien',N'OBJECT',N'UPDATE')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.App_GiaoVien',N'OBJECT',N'DELETE')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.App_XeTap',N'OBJECT',N'INSERT')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.App_XeTap',N'OBJECT',N'UPDATE')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.App_XeTap',N'OBJECT',N'DELETE')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.App_KhoaHoc_GiaoVien',N'OBJECT',N'INSERT')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.App_KhoaHoc_GiaoVien',N'OBJECT',N'UPDATE')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.App_KhoaHoc_GiaoVien',N'OBJECT',N'DELETE')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.App_KhoaHoc_XeTap',N'OBJECT',N'INSERT')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.App_KhoaHoc_XeTap',N'OBJECT',N'UPDATE')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.App_KhoaHoc_XeTap',N'OBJECT',N'DELETE')<>0 OR
+   IS_ROLEMEMBER(N'db_owner')<>0 OR IS_ROLEMEMBER(N'db_datawriter')<>0
+    THROW 532735,'TVP_TARGET_API_READONLY_REJECTED',1;
+REVERT;
+
+USE [CSDL_OTO];
+EXECUTE AS USER=@Worker;
+SELECT DB_NAME() DatabaseName,USER_NAME() PrincipalName,
+  HAS_PERMS_BY_NAME(N'dbo.GiaoVien',N'OBJECT',N'SELECT') TeacherSelect,
+  HAS_PERMS_BY_NAME(N'dbo.GiaoVien',N'OBJECT',N'VIEW CHANGE TRACKING') TeacherCt,
+  HAS_PERMS_BY_NAME(N'dbo.XeTap',N'OBJECT',N'SELECT') VehicleSelect,
+  HAS_PERMS_BY_NAME(N'dbo.XeTap',N'OBJECT',N'VIEW CHANGE TRACKING') VehicleCt,
+  HAS_PERMS_BY_NAME(N'dbo.KhoaHoc_GiaoVien',N'OBJECT',N'VIEW CHANGE TRACKING') CourseTeacherCt,
+  HAS_PERMS_BY_NAME(N'dbo.KhoaHoc_XeTap',N'OBJECT',N'VIEW CHANGE TRACKING') CourseVehicleCt,
+  HAS_PERMS_BY_NAME(N'dbo.GiaoVien',N'OBJECT',N'INSERT') SourceInsert,
+  HAS_PERMS_BY_NAME(N'dbo.GiaoVien',N'OBJECT',N'UPDATE') SourceUpdate,
+  HAS_PERMS_BY_NAME(N'dbo.GiaoVien',N'OBJECT',N'DELETE') SourceDelete;
+IF HAS_PERMS_BY_NAME(N'dbo.GiaoVien',N'OBJECT',N'SELECT')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.GiaoVien',N'OBJECT',N'VIEW CHANGE TRACKING')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.XeTap',N'OBJECT',N'SELECT')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.XeTap',N'OBJECT',N'VIEW CHANGE TRACKING')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.KhoaHoc_GiaoVien',N'OBJECT',N'SELECT')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.KhoaHoc_GiaoVien',N'OBJECT',N'VIEW CHANGE TRACKING')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.KhoaHoc_XeTap',N'OBJECT',N'SELECT')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.KhoaHoc_XeTap',N'OBJECT',N'VIEW CHANGE TRACKING')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.GiaoVien',N'OBJECT',N'INSERT')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.GiaoVien',N'OBJECT',N'UPDATE')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.GiaoVien',N'OBJECT',N'DELETE')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.XeTap',N'OBJECT',N'INSERT')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.XeTap',N'OBJECT',N'UPDATE')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.XeTap',N'OBJECT',N'DELETE')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.KhoaHoc_GiaoVien',N'OBJECT',N'INSERT')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.KhoaHoc_GiaoVien',N'OBJECT',N'UPDATE')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.KhoaHoc_GiaoVien',N'OBJECT',N'DELETE')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.KhoaHoc_XeTap',N'OBJECT',N'INSERT')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.KhoaHoc_XeTap',N'OBJECT',N'UPDATE')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.KhoaHoc_XeTap',N'OBJECT',N'DELETE')<>0 OR
+   IS_ROLEMEMBER(N'db_owner')<>0 OR IS_ROLEMEMBER(N'db_datawriter')<>0
+    THROW 532736,'TVP_OTO_WORKER_SOURCE_PERMISSION_REJECTED',1;
+REVERT;
+
+USE [CSDL_MOTO];
+EXECUTE AS USER=@Worker;
+SELECT DB_NAME() DatabaseName,USER_NAME() PrincipalName,
+  HAS_PERMS_BY_NAME(N'dbo.GiaoVien',N'OBJECT',N'SELECT') TeacherSelect,
+  HAS_PERMS_BY_NAME(N'dbo.GiaoVien',N'OBJECT',N'VIEW CHANGE TRACKING') TeacherCt,
+  HAS_PERMS_BY_NAME(N'dbo.XeTap',N'OBJECT',N'SELECT') VehicleSelect,
+  HAS_PERMS_BY_NAME(N'dbo.XeTap',N'OBJECT',N'VIEW CHANGE TRACKING') VehicleCt,
+  HAS_PERMS_BY_NAME(N'dbo.KhoaHoc_GiaoVien',N'OBJECT',N'VIEW CHANGE TRACKING') CourseTeacherCt,
+  HAS_PERMS_BY_NAME(N'dbo.KhoaHoc_XeTap',N'OBJECT',N'VIEW CHANGE TRACKING') CourseVehicleCt,
+  HAS_PERMS_BY_NAME(N'dbo.GiaoVien',N'OBJECT',N'INSERT') SourceInsert,
+  HAS_PERMS_BY_NAME(N'dbo.GiaoVien',N'OBJECT',N'UPDATE') SourceUpdate,
+  HAS_PERMS_BY_NAME(N'dbo.GiaoVien',N'OBJECT',N'DELETE') SourceDelete;
+IF HAS_PERMS_BY_NAME(N'dbo.GiaoVien',N'OBJECT',N'SELECT')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.GiaoVien',N'OBJECT',N'VIEW CHANGE TRACKING')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.XeTap',N'OBJECT',N'SELECT')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.XeTap',N'OBJECT',N'VIEW CHANGE TRACKING')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.KhoaHoc_GiaoVien',N'OBJECT',N'SELECT')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.KhoaHoc_GiaoVien',N'OBJECT',N'VIEW CHANGE TRACKING')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.KhoaHoc_XeTap',N'OBJECT',N'SELECT')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.KhoaHoc_XeTap',N'OBJECT',N'VIEW CHANGE TRACKING')<>1 OR
+   HAS_PERMS_BY_NAME(N'dbo.GiaoVien',N'OBJECT',N'INSERT')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.GiaoVien',N'OBJECT',N'UPDATE')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.GiaoVien',N'OBJECT',N'DELETE')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.XeTap',N'OBJECT',N'INSERT')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.XeTap',N'OBJECT',N'UPDATE')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.XeTap',N'OBJECT',N'DELETE')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.KhoaHoc_GiaoVien',N'OBJECT',N'INSERT')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.KhoaHoc_GiaoVien',N'OBJECT',N'UPDATE')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.KhoaHoc_GiaoVien',N'OBJECT',N'DELETE')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.KhoaHoc_XeTap',N'OBJECT',N'INSERT')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.KhoaHoc_XeTap',N'OBJECT',N'UPDATE')<>0 OR
+   HAS_PERMS_BY_NAME(N'dbo.KhoaHoc_XeTap',N'OBJECT',N'DELETE')<>0 OR
+   IS_ROLEMEMBER(N'db_owner')<>0 OR IS_ROLEMEMBER(N'db_datawriter')<>0
+    THROW 532737,'TVP_MOTO_WORKER_SOURCE_PERMISSION_REJECTED',1;
+REVERT;
+
+SELECT N'TEACHER_VEHICLE_PROJECTION_SECURITY_VERIFY_COMPLETE' Marker;

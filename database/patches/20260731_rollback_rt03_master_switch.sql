@@ -1,0 +1,35 @@
+USE [$(Rt03TargetDatabase)];
+GO
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+IF DB_NAME()<>N'QLHV_APP'
+   AND ISNULL(TRY_CONVERT(bit,SESSION_CONTEXT(N'RT03_MASTER_DISPOSABLE_REHEARSAL')),0)<>1
+    THROW 527820, 'RT03_MASTER_ROLLBACK_WRONG_DATABASE', 1;
+
+IF OBJECT_ID(N'dbo.App_Rt03RealtimeControl',N'U') IS NOT NULL
+   AND EXISTS(SELECT 1 FROM dbo.App_Rt03RealtimeControl WHERE State<>N'OFF')
+    THROW 527821, 'RT03_MASTER_ROLLBACK_REQUIRES_OFF', 1;
+
+IF OBJECT_ID(N'dbo.App_Rt03RealtimeRunRequest',N'U') IS NOT NULL
+   AND EXISTS(SELECT 1 FROM dbo.App_Rt03RealtimeRunRequest WHERE ActiveSlot=1)
+    THROW 527822, 'RT03_MASTER_ROLLBACK_RUN_ACTIVE', 1;
+
+IF EXISTS
+(
+    SELECT 1 FROM dbo.App_QlhvDirectRealtimeWorkerState
+    WHERE WorkerStateId=1 AND CycleActive=1
+)
+    THROW 527823, 'RT03_MASTER_ROLLBACK_WORKER_ACTIVE', 1;
+
+BEGIN TRANSACTION;
+IF OBJECT_ID(N'dbo.App_Rt03RealtimeRunRequest',N'U') IS NOT NULL
+    DROP TABLE dbo.App_Rt03RealtimeRunRequest;
+IF OBJECT_ID(N'dbo.App_Rt03RealtimeControlAudit',N'U') IS NOT NULL
+    DROP TABLE dbo.App_Rt03RealtimeControlAudit;
+IF OBJECT_ID(N'dbo.App_Rt03RealtimeControl',N'U') IS NOT NULL
+    DROP TABLE dbo.App_Rt03RealtimeControl;
+COMMIT TRANSACTION;
+
+SELECT N'PASS' AS RollbackStatus;
+GO
